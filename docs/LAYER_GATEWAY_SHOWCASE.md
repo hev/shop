@@ -3,7 +3,7 @@
 `hev-shop` exists to exercise the Layer gateway as an application developer
 would use it. The app keeps source-specific logic in workers and leaves vector
 storage, cache-aware retrieval, query freshness, and pipeline state management
-to `apps/layer-gateway`.
+to Layer. See [hevlayer.com](https://hevlayer.com) for the gateway overview.
 
 ## Namespace API
 

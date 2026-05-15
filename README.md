@@ -1,104 +1,81 @@
 # hev-shop
 
-`hev-shop` is a developer example app for the Layer gateway in
-`apps/layer-gateway`. It indexes Amazon product images and reviews, writes
-vectors through the gateway into Turbopuffer, and exposes a storefront that
-shows what the gateway APIs make possible.
+`hev-shop` is a live semantic shopping demo built on the Layer gateway. It takes
+real product and review data from Amazon Reviews 2023, turns product images and
+review text into vectors, writes them through Layer into Turbopuffer, and serves
+a storefront where search, filtering, product pages, and review-derived tags are
+backed by those vectors.
 
-This repository is private while under construction. No public license is
-granted yet. The intended public license is MIT before the repo is opened.
+Links:
 
-## What It Shows
+- [hev-shop](https://hev-shop.com) - the live running shop
+- [hevlayer.com](https://hevlayer.com) - more detail on the Layer gateway
+- [hevmesh.com](https://hevmesh.com) - more detail on the mesh substrate
 
-- Turbopuffer namespace writes, fetches, scans, and vector queries through
-  `apps/layer-gateway`.
-- Gateway-managed consistency watermarks with `stable_as_of` on search
-  responses.
-- Pipeline staging, claiming, heartbeats, and stage transitions backed by
-  PostgreSQL.
-- CPU and GPU worker split: CPU workers prepare product/review work; GPU
-  workers embed images and review text; CPU review workers classify and roll up
-  tags.
-- KEDA/Karpenter scaling driven by gateway pipeline state instead of custom
-  queue glue.
+## What This Is
 
-The app is intentionally not a generic ecommerce template. Its job is to be a
-concrete, inspectable workload for the gateway's Turbopuffer and pipeline
-surface.
+The app is a complete workload for developers who want to see how Layer behaves
+under an application-shaped indexing and search flow:
 
-## Architecture
+- Product image search uses [CLIP ViT-L/14](https://huggingface.co/openai/clip-vit-large-patch14).
+- Review search uses [Qwen3 Embedding 8B](https://huggingface.co/Qwen/Qwen3-Embedding-8B).
+- Source data comes from [McAuley-Lab/Amazon-Reviews-2023](https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023).
+- Vectors land in Turbopuffer through Layer namespace APIs.
+- Indexing work is coordinated through Layer pipeline APIs backed by PostgreSQL.
+- KEDA scales workers from Layer PostgreSQL state instead of a separate queue.
+
+The point is not to be a generic ecommerce starter. The point is to make Layer's
+developer contract concrete: stage work, claim work, embed it, write vectors,
+query with freshness signals, and let the gateway own the Turbopuffer edge.
+
+## How It Works
 
 ```
 Amazon Reviews 2023
         |
         v
-  indexer API  ---- queue rows ----> CPU workers
+  indexer API  ---- job rows ----> CPU product/review workers
         |                              |
         |                              v
-        |                    /v2/pipelines/.../documents
+        |                    Layer pipeline document staging
         |                              |
         v                              v
-   Next.js web <---- search ---- indexer API ---- layer-gateway
+   Next.js web <---- search ---- indexer API ---- Layer gateway
                                              |         |
-                                             |         +--> PostgreSQL pipeline state
+                                             |         +--> Layer PostgreSQL pipeline state
                                              |         +--> Aerospike chunk/cache data
-                                             |         +--> Turbopuffer vectors
+                                             |         +--> Turbopuffer vector namespaces
                                              |
                                              +--> GPU workers claim/embed/complete
 ```
 
-Product images land in the `amazon-products` Turbopuffer namespace. Review text
-is sharded across `amazon-reviews-*` namespaces, and review classifier tags are
-rolled back onto the product vectors as filterable attributes.
+Product images land in the `amazon-products` namespace. Review text is sharded
+across `amazon-reviews-*` namespaces, and classifier output is rolled back onto
+product vectors as filterable tags.
+
+## What To Inspect
+
+- `indexer/app/layer_client.py` shows the app-facing Layer pipeline and namespace calls.
+- `indexer/app/extraction.py` stages product images and review work.
+- `indexer/app/embedding.py` claims product work and writes CLIP vectors.
+- `indexer/app/review_workers.py` embeds reviews, classifies reviews, and rolls tags up.
+- `web/app/api/search/route.ts` passes search through the backend and preserves `stable_as_of`.
+- `helm/hev-shop` deploys the full app with PostgreSQL-driven KEDA autoscaling.
 
 ## Repo Layout
 
 ```
 cmd/                  Go CLI for health, indexing, status, scans, and direct gateway calls
-client/               Small Go client for the layer-gateway namespace API
+client/               Small Go client for the Layer namespace API
 indexer/              FastAPI service plus CPU/GPU/review worker code
-kubernetes/           App deployments, services, KEDA ScaledObjects, PVC, config
-scripts/              Private construction deploy and scale-run helpers
+kubernetes/           Raw Kubernetes manifests kept for low-level inspection
+helm/hev-shop/        Standalone Helm chart for deploys
+scripts/              Operational helper scripts
 web/                  Next.js storefront and server-side API adapters
 DESIGN.md             Pipeline and data model design
 SEARCH_API.md         Search API contract used by the web app
 REVIEWS_PIPELINE.md   Review indexing/classification fan-out plan
-SCALING.md            Current scale-test notes
-```
-
-## Prerequisites
-
-- A running `apps/layer-gateway` with `TURBOPUFFER_API_KEY`, Aerospike, and
-  PostgreSQL configured.
-- Turbopuffer access for the target namespaces.
-- Python 3.12 for the indexer and workers.
-- Node 22 for the web app.
-- Go 1.25 for the CLI.
-- Optional: Hugging Face token for private/rate-limited dataset access.
-- Optional: OpenRouter key for review classification.
-
-During private construction, `scripts/deploy.sh` can read Terraform outputs
-from the sibling mesh repo:
-
-```sh
-MESH_REPO=../mesh scripts/deploy.sh --build-web
-```
-
-The private EKS helper that installs Karpenter and the `hev-shop` CPU/GPU
-NodePools follows the same convention:
-
-```sh
-MESH_REPO=../mesh scripts/deploy-karpenter.sh
-```
-
-For a standalone deployment, provide the values directly:
-
-```sh
-ECR_REPOSITORY_URL=... \
-ECR_WEB_URL=... \
-CLUSTER_NAME=... \
-HEV_SHOP_EFS_FILE_SYSTEM_ID=... \
-scripts/deploy.sh --build-web
+SCALING.md            Scale-test notes
 ```
 
 ## Local Development
@@ -117,7 +94,7 @@ cd indexer
 python -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
-DATA_DIR=../data uvicorn app.main:app --host 0.0.0.0 --port 8090
+DATA_DIR=/tmp/hev-shop-data uvicorn app.main:app --host 0.0.0.0 --port 8090
 ```
 
 Run the storefront in mock mode:
@@ -128,51 +105,47 @@ npm install
 npm run dev
 ```
 
-Point the storefront at the API:
+Point the storefront at a running API:
 
 ```sh
 cd web
 HEV_SHOP_API_BASE=http://127.0.0.1:8090 npm run dev
 ```
 
-Queue a small indexing job against a running API:
+Queue a small indexing job:
 
 ```sh
 go run . index --count 1000 --category Electronics
 go run . status --pipeline-id amazon-products-images
 ```
 
-## Gateway Flow
+## Helm Deploy
 
-1. `POST /index` creates product extraction jobs in the app database.
-2. CPU workers stream Amazon metadata, download images, and stage product chunks
-   through `PUT /v2/pipelines/{pipeline}/documents/{asin}`.
-3. GPU workers claim staged documents with `POST /v2/pipelines/{pipeline}/claim`,
-   embed images, upsert vectors through the gateway, heartbeat long claims, and
-   mark documents `indexed`.
-4. Search requests encode query text and call
-   `POST /v2/namespaces/{namespace}/query` through the gateway. Responses carry
-   `stable_as_of` when the gateway has a safe Turbopuffer watermark.
-5. Review workers use the same pipeline primitives for fan-out: embed review
-   chunks, classify review text, and roll product tags back into the product
-   namespace.
+The Helm chart assumes Layer is already installed and exposes:
 
-The gateway contract is documented in the mesh repo:
+- `layer-gateway.layer.svc.cluster.local:8080`
+- `layer-postgres.layer.svc.cluster.local:5432`
+- KEDA in the cluster
+- an RWX storage class for the shared image/model cache
 
-- `apps/layer-gateway/docs/guides/namespaces.md`
-- `apps/layer-gateway/docs/guides/pipelines.md`
+Install:
 
-## Kubernetes
+```sh
+helm upgrade --install hev-shop ./helm/hev-shop \
+  --namespace hev-shop \
+  --create-namespace \
+  --set indexerImage.repository=ghcr.io/hev/hev-shop-indexer \
+  --set webImage.repository=ghcr.io/hev/hev-shop-web
+```
 
-The manifests assume:
+Override the Layer PostgreSQL URL when Layer uses a managed database:
 
-- `layer-gateway` is reachable at
-  `http://layer-gateway.layer.svc.cluster.local:8080`.
-- KEDA is installed.
-- An RWX storage class named `hev-shop-efs` exists for the shared `/data` PVC.
-- CPU workers can schedule on `mesh-role=app` nodes.
-- GPU workers can schedule on `mesh-role=gpu` nodes with the NVIDIA device
-  plugin installed.
+```sh
+helm upgrade --install hev-shop ./helm/hev-shop \
+  --namespace hev-shop \
+  --create-namespace \
+  --set-string layer.databaseUrl='postgres://user:pass@host:5432/hevlayer'
+```
 
-See [kubernetes/README.md](./kubernetes/README.md) for deploy and scale-run
-commands.
+The KEDA ScaledObjects use `connectionFromEnv: LAYER_DATABASE_URL`, so every
+worker reads the same Layer PostgreSQL URL that the scaler uses for queue depth.

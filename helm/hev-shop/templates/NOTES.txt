@@ -1,0 +1,10 @@
+hev-shop has been installed.
+
+Web service:
+  kubectl get svc {{ include "hev-shop.fullname" . }}-web -n {{ .Release.Namespace }}
+
+Indexer API:
+  kubectl port-forward svc/{{ include "hev-shop.fullname" . }}-api 8090:8080 -n {{ .Release.Namespace }}
+
+Autoscaling:
+  kubectl get scaledobject -n {{ .Release.Namespace }}

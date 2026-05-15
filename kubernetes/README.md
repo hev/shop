@@ -1,5 +1,8 @@
 # hev-shop Kubernetes
 
+The standalone deploy path is the Helm chart in `helm/hev-shop`. These raw
+manifests are kept for low-level inspection and kustomize-based operations.
+
 These manifests run the hev-shop indexer in its own `hev-shop` namespace. It
 talks to platform services in the `layer` namespace by fully qualified service
 DNS names:
@@ -24,7 +27,7 @@ DNS names:
 
 Prerequisites:
 
-- layer-gateway deployed in `layer` with PostgreSQL enabled and
+- Layer gateway deployed in `layer` with PostgreSQL enabled and
   `TURBOPUFFER_API_KEY`
 - KEDA installed in the cluster
 - AWS EFS CSI driver installed, plus a `hev-shop-efs` StorageClass pointing at

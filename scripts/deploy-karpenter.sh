@@ -3,8 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-MESH_REPO="${MESH_REPO:-../mesh}"
-TF_DIR="${TF_DIR:-${MESH_REPO}/infra/terraform}"
+TF_DIR="${TF_DIR:-}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 SKIP_TERRAFORM="${SKIP_TERRAFORM:-0}"
 INSTALL_NVIDIA_PLUGIN="${INSTALL_NVIDIA_PLUGIN:-1}"
@@ -19,6 +18,8 @@ done
 
 log() { echo "==> $*"; }
 err() { echo "ERROR: $*" >&2; exit 1; }
+
+[[ -n "$TF_DIR" ]] || err "Set TF_DIR to the Terraform directory that owns the EKS cluster."
 
 if [[ "$SKIP_TERRAFORM" == "1" ]]; then
   log "Skipping terraform."

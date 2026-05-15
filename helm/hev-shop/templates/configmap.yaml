@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hev-shop.configName" . }}
+  labels:
+    {{- include "hev-shop.labels" . | nindent 4 }}
+data:
+  LAYER_GATEWAY_URL: {{ .Values.layer.gatewayUrl | quote }}
+  TURBOPUFFER_NAMESPACE: {{ .Values.pipeline.product.namespace | quote }}
+  PIPELINE_ID: {{ .Values.pipeline.product.id | quote }}
+  REVIEWS_PIPELINE_ID: {{ .Values.pipeline.reviews.id | quote }}
+  REVIEWS_AGGREGATE_PIPELINE_ID: {{ .Values.pipeline.reviewAggregate.id | quote }}
+  REVIEWS_NAMESPACE_BASE: {{ .Values.pipeline.reviews.namespaceBase | quote }}
+  REVIEWS_NAMESPACE_SHARD_COUNT: {{ .Values.pipeline.reviews.shardCount | quote }}
+  {{- range $key, $value := .Values.config }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}

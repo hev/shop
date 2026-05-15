@@ -1,0 +1,77 @@
+{{- $root := . -}}
+{{- range $key, $worker := .Values.workers }}
+{{- if $worker.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hev-shop.fullname" $root }}-{{ $worker.nameSuffix }}
+  labels:
+    {{- include "hev-shop.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $worker.component }}
+spec:
+  replicas: {{ ternary 0 $worker.replicaCount $root.Values.autoscaling.enabled }}
+  {{- with $worker.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "hev-shop.selectorLabels" $root | nindent 6 }}
+      app.kubernetes.io/component: {{ $worker.component }}
+  template:
+    metadata:
+      labels:
+        {{- include "hev-shop.selectorLabels" $root | nindent 8 }}
+        app.kubernetes.io/component: {{ $worker.component }}
+    spec:
+      terminationGracePeriodSeconds: 60
+      {{- with $root.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $worker.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $worker.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $worker.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: worker
+          image: {{ include "hev-shop.indexerImage" $root | quote }}
+          imagePullPolicy: {{ $root.Values.indexerImage.pullPolicy }}
+          command:
+            {{- toYaml $worker.command | nindent 12 }}
+          env:
+            - name: WORKER_TYPE
+              value: {{ $worker.workerType | quote }}
+            - name: WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          envFrom:
+            - configMapRef:
+                name: {{ include "hev-shop.configName" $root }}
+            - secretRef:
+                name: {{ include "hev-shop.secretName" $root }}
+          resources:
+            {{- toYaml $worker.resources | nindent 12 }}
+          {{- if $root.Values.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ $root.Values.persistence.mountPath }}
+          {{- end }}
+      {{- if $root.Values.persistence.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "hev-shop.pvcName" $root }}
+      {{- end }}
+{{- end }}
+{{- end }}

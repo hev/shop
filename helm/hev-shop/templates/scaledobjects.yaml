@@ -1,0 +1,29 @@
+{{- if .Values.autoscaling.enabled }}
+{{- $root := . -}}
+{{- range $key, $worker := .Values.workers }}
+{{- if and $worker.enabled $worker.autoscaling.enabled }}
+---
+apiVersion: {{ $root.Values.autoscaling.apiVersion }}
+kind: ScaledObject
+metadata:
+  name: {{ include "hev-shop.fullname" $root }}-{{ $worker.nameSuffix }}
+  labels:
+    {{- include "hev-shop.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $worker.component }}
+spec:
+  scaleTargetRef:
+    name: {{ include "hev-shop.fullname" $root }}-{{ $worker.nameSuffix }}
+  pollingInterval: {{ $worker.autoscaling.pollingInterval }}
+  cooldownPeriod: {{ $worker.autoscaling.cooldownPeriod }}
+  minReplicaCount: {{ $worker.autoscaling.minReplicaCount }}
+  maxReplicaCount: {{ $worker.autoscaling.maxReplicaCount }}
+  triggers:
+    - type: postgresql
+      metadata:
+        connectionFromEnv: LAYER_DATABASE_URL
+        query: {{ tpl $worker.autoscaling.query $root | quote }}
+        targetQueryValue: {{ $worker.autoscaling.targetQueryValue | quote }}
+        activationTargetQueryValue: {{ $worker.autoscaling.activationTargetQueryValue | quote }}
+{{- end }}
+{{- end }}
+{{- end }}

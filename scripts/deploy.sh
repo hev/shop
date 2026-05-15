@@ -9,8 +9,7 @@ BUILD_IMAGE="${BUILD_IMAGE:-1}"
 BUILD_WEB="${BUILD_WEB:-0}"
 BUILDER="${BUILDER:-depot}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
-MESH_REPO="${MESH_REPO:-../mesh}"
-TF_DIR="${TF_DIR:-${MESH_REPO}/infra/terraform}"
+TF_DIR="${TF_DIR:-}"
 KEDA_NAMESPACE="${KEDA_NAMESPACE:-keda}"
 KEDA_NODE_ROLE="${KEDA_NODE_ROLE:-infra}"
 OPENROUTER_OP_VAULT="${OPENROUTER_OP_VAULT:-mesh-staging}"
@@ -35,7 +34,7 @@ done
 require_tool kubectl
 require_tool aws
 
-if [[ -d "$TF_DIR" ]]; then
+if [[ -n "$TF_DIR" && -d "$TF_DIR" ]]; then
   pushd "$TF_DIR" >/dev/null
   ECR_REPOSITORY_URL="${ECR_REPOSITORY_URL:-$(terraform output -raw ecr_amazon_reviews_url 2>/dev/null || true)}"
   ECR_WEB_URL="${ECR_WEB_URL:-$(terraform output -raw ecr_hev_shop_web_url 2>/dev/null || true)}"

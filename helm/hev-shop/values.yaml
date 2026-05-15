@@ -1,0 +1,317 @@
+namespace:
+  create: false
+
+indexerImage:
+  repository: ghcr.io/hev/hev-shop-indexer
+  tag: latest
+  pullPolicy: Always
+
+webImage:
+  repository: ghcr.io/hev/hev-shop-web
+  tag: latest
+  pullPolicy: Always
+
+imagePullSecrets: []
+
+layer:
+  gatewayUrl: http://layer-gateway.layer.svc.cluster.local:8080
+  databaseUrl: postgres://hevlayer:hevlayer@layer-postgres.layer.svc.cluster.local:5432/hevlayer
+
+secrets:
+  create: true
+  existingSecret: ""
+  hfToken: ""
+  openrouterApiKey: ""
+
+persistence:
+  enabled: true
+  existingClaim: ""
+  storageClassName: hev-shop-efs
+  accessModes:
+    - ReadWriteMany
+  size: 100Gi
+  mountPath: /data
+
+pipeline:
+  product:
+    id: amazon-products-images
+    namespace: amazon-products
+  reviews:
+    id: hev-shop-reviews
+    namespaceBase: amazon-reviews
+    shardCount: 16
+  reviewAggregate:
+    id: amazon-products-review-tags
+
+config:
+  DEFAULT_CATEGORY: Electronics
+  DISTANCE_METRIC: cosine_distance
+  HF_DATASET: McAuley-Lab/Amazon-Reviews-2023
+  DATA_DIR: /data
+  DATASET_DIR: /data/dataset
+  IMAGE_DIR: /data/images
+  MODEL_CACHE_DIR: /data/models
+  CLIP_MODEL_NAME: openai/clip-vit-large-patch14
+  CLIP_DEVICE: auto
+  REVIEW_EMBEDDING_MODEL_NAME: Qwen/Qwen3-Embedding-8B
+  REVIEW_EMBEDDING_DEVICE: auto
+  REVIEW_CHUNK_TOKENS: "256"
+  REVIEW_CHUNK_OVERLAP: "32"
+  HTTP_TIMEOUT_SECONDS: "300"
+  EXTRACTION_JOB_SIZE: "10000"
+  IMAGE_DOWNLOAD_CONCURRENCY: "8"
+  EXTRACTION_CONCURRENCY: "16"
+  REVIEW_STAGE_CONCURRENCY: "16"
+  EMBEDDING_BATCH_SIZE: "16"
+  REVIEW_EMBEDDING_BATCH_SIZE: "4"
+  EMBEDDING_CLAIM_SIZE: "2000"
+  VECTOR_UPSERT_BATCH_SIZE: "10000"
+  CHUNK_FETCH_CONCURRENCY: "32"
+  CLEANUP_EMBEDDED_IMAGES: "true"
+  WORKER_POLL_SECONDS: "5"
+  CLAIM_LEASE_SECONDS: "900"
+  CLAIM_HEARTBEAT_SECONDS: "60"
+  REVIEW_CLASSIFICATION_BATCH_SIZE: "8"
+  REVIEW_CLASSIFICATION_DAILY_REVIEW_LIMIT: "100000"
+  REVIEW_RECENT_CAP_PER_PRODUCT: "200"
+  REVIEW_HELPFUL_CAP_PER_PRODUCT: "200"
+  REVIEW_TAG_MIN_COUNT: "3"
+  REVIEW_TAG_MIN_FRACTION: "0.05"
+  REVIEW_TAG_SAMPLE_COUNT: "3"
+  OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
+  OPENROUTER_MODEL: google/gemini-2.0-flash-lite-001
+  OPENROUTER_APP_TITLE: hev-shop
+
+autoscaling:
+  enabled: true
+  apiVersion: keda.sh/v1alpha1
+
+api:
+  replicaCount: 1
+  nodeSelector:
+    mesh-role: infra
+  tolerations:
+    - key: mesh-role
+      operator: Equal
+      value: infra
+      effect: NoSchedule
+  resources:
+    requests:
+      cpu: 250m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+
+web:
+  replicaCount: 1
+  apiBaseUrl: ""
+  service:
+    type: LoadBalancer
+    port: 80
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: nlb
+  nodeSelector:
+    mesh-role: infra
+  tolerations:
+    - key: mesh-role
+      operator: Equal
+      value: infra
+      effect: NoSchedule
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+workers:
+  cpu:
+    enabled: true
+    nameSuffix: cpu-worker
+    component: cpu-worker
+    workerType: cpu
+    replicaCount: 0
+    command: ["python", "-m", "app.worker"]
+    nodeSelector:
+      mesh-role: app
+    tolerations:
+      - key: mesh-role
+        operator: Equal
+        value: app
+        effect: NoSchedule
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: "2"
+        memory: 2Gi
+    autoscaling:
+      enabled: true
+      pollingInterval: 10
+      cooldownPeriod: 60
+      minReplicaCount: 0
+      maxReplicaCount: 8
+      query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM hev_shop_index_jobs WHERE status IN ('queued', 'retry', 'running') LIMIT 1) THEN 16 ELSE 0 END"
+      targetQueryValue: "2"
+      activationTargetQueryValue: "0"
+
+  gpu:
+    enabled: true
+    nameSuffix: gpu-worker
+    component: gpu-worker
+    workerType: gpu
+    replicaCount: 0
+    command: ["python", "-m", "app.worker"]
+    strategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxSurge: 0
+        maxUnavailable: 1
+    nodeSelector:
+      mesh-role: gpu
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: karpenter.k8s.aws/instance-family
+                  operator: In
+                  values: ["g4dn", "g5"]
+                - key: karpenter.sh/capacity-type
+                  operator: In
+                  values: ["spot"]
+    tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+    resources:
+      requests:
+        cpu: 250m
+        memory: 4Gi
+        nvidia.com/gpu: "1"
+      limits:
+        cpu: "2"
+        memory: 10Gi
+        nvidia.com/gpu: "1"
+    autoscaling:
+      enabled: true
+      pollingInterval: 15
+      cooldownPeriod: 300
+      minReplicaCount: 0
+      maxReplicaCount: 1
+      query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM pipeline_documents WHERE pipeline_id = '{{ .Values.pipeline.product.id }}' AND stage IN ('pending', 'embedding') LIMIT 1) THEN 10000 ELSE 0 END"
+      targetQueryValue: "10000"
+      activationTargetQueryValue: "0"
+
+  reviewEmbed:
+    enabled: true
+    nameSuffix: review-embed-worker
+    component: review-embed-worker
+    workerType: review-embed
+    replicaCount: 0
+    command: ["python", "-m", "app.worker"]
+    strategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxSurge: 0
+        maxUnavailable: 1
+    nodeSelector:
+      mesh-role: gpu
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: karpenter.k8s.aws/instance-family
+                  operator: In
+                  values: ["g5"]
+                - key: karpenter.sh/capacity-type
+                  operator: In
+                  values: ["on-demand"]
+    tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+    resources:
+      requests:
+        cpu: "1"
+        memory: 13Gi
+        nvidia.com/gpu: "1"
+      limits:
+        cpu: "4"
+        memory: 15Gi
+        nvidia.com/gpu: "1"
+    autoscaling:
+      enabled: true
+      pollingInterval: 15
+      cooldownPeriod: 300
+      minReplicaCount: 0
+      maxReplicaCount: 1
+      query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM pipeline_documents WHERE pipeline_id = '{{ .Values.pipeline.reviews.id }}' AND document_id LIKE 'review-embed:%' AND stage IN ('pending', 'embedding') LIMIT 1) THEN 1000 ELSE 0 END"
+      targetQueryValue: "1000"
+      activationTargetQueryValue: "0"
+
+  reviewClassify:
+    enabled: true
+    nameSuffix: review-classify-worker
+    component: review-classify-worker
+    workerType: review-classify
+    replicaCount: 0
+    command: ["python", "-m", "app.worker"]
+    nodeSelector:
+      mesh-role: app
+    tolerations:
+      - key: mesh-role
+        operator: Equal
+        value: app
+        effect: NoSchedule
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+    autoscaling:
+      enabled: true
+      pollingInterval: 30
+      cooldownPeriod: 120
+      minReplicaCount: 0
+      maxReplicaCount: 4
+      query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM pipeline_documents WHERE pipeline_id = '{{ .Values.pipeline.reviews.id }}' AND document_id LIKE 'review-classify:%' AND stage IN ('pending', 'classifying') LIMIT 1) THEN 400 ELSE 0 END"
+      targetQueryValue: "100"
+      activationTargetQueryValue: "0"
+
+  reviewAggregate:
+    enabled: true
+    nameSuffix: review-aggregate-worker
+    component: review-aggregate-worker
+    workerType: review-aggregate
+    replicaCount: 0
+    command: ["python", "-m", "app.worker"]
+    nodeSelector:
+      mesh-role: app
+    tolerations:
+      - key: mesh-role
+        operator: Equal
+        value: app
+        effect: NoSchedule
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+    autoscaling:
+      enabled: true
+      pollingInterval: 15
+      cooldownPeriod: 60
+      minReplicaCount: 0
+      maxReplicaCount: 4
+      query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM pipeline_documents WHERE pipeline_id = '{{ .Values.pipeline.reviewAggregate.id }}' AND stage IN ('pending', 'aggregating') LIMIT 1) THEN 4 ELSE 0 END"
+      targetQueryValue: "1"
+      activationTargetQueryValue: "0"
