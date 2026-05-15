@@ -237,6 +237,22 @@ class LayerClient:
         )
         response.raise_for_status()
 
+    async def patch_attributes(
+        self, namespace: str, patches: list[dict[str, Any]]
+    ) -> None:
+        """PATCH /v2/namespaces/{namespace} — merge attributes on existing rows.
+
+        Only the keys present in each patch's `attributes` are written; the
+        rest of the row is preserved. Vectors cannot be patched (turbopuffer
+        constraint). Use for attribute-only updates like the review-tag
+        rollup, where the image pipeline already owns title/image_url/etc.
+        and a full-record upsert would clobber them."""
+        response = await self._client.patch(
+            f"{self.base_url}/v2/namespaces/{namespace}",
+            json={"patches": patches},
+        )
+        response.raise_for_status()
+
     async def fetch_document(
         self,
         namespace: str,

@@ -323,13 +323,7 @@ async def meta(request: Request, namespace: str | None = None) -> MetaResponse:
 
     metadata, category_scan = await asyncio.gather(
         layer.fetch_namespace_metadata(resolved_namespace),
-        # source="origin": auto-mode applies the `cache_warmed_through`
-        # watermark cut to cache scans, which silently returns zero buckets
-        # until the cache has been warmed. The category list is small and
-        # rarely queried, so go straight to turbopuffer for correctness.
-        layer.scan(
-            resolved_namespace, "field_values", field="category", source="origin"
-        ),
+        layer.scan(resolved_namespace, "field_values", field="category"),
     )
 
     category_results = await layer.get_scan_results(

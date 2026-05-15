@@ -300,7 +300,7 @@ class ReviewAggregateWorker:
         try:
             processed = 0
             for asin_batch in batches(asins, self.settings.vector_upsert_batch_size):
-                upserts: list[dict[str, Any]] = []
+                patches: list[dict[str, Any]] = []
                 for asin in asin_batch:
                     attrs = await self.database.aggregate_review_tag_attrs(
                         asin,
@@ -308,9 +308,9 @@ class ReviewAggregateWorker:
                         min_fraction=self.settings.review_tag_min_fraction,
                         sample_count=self.settings.review_tag_sample_count,
                     )
-                    upserts.append({"id": asin, "attributes": attrs})
+                    patches.append({"id": asin, "attributes": attrs})
                 try:
-                    await self.layer.upsert_vectors(self.settings.namespace, upserts)
+                    await self.layer.patch_attributes(self.settings.namespace, patches)
                     await self.complete_documents(asin_batch)
                     active_asins.difference_update(asin_batch)
                     processed += len(asin_batch)
