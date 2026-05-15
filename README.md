@@ -17,8 +17,6 @@ Links:
 The app is a complete workload for developers who want to see how Layer behaves
 under an application-shaped indexing and search flow:
 
-- Product image search uses [CLIP ViT-L/14](https://huggingface.co/openai/clip-vit-large-patch14).
-- Review search uses [Qwen3 Embedding 8B](https://huggingface.co/Qwen/Qwen3-Embedding-8B).
 - Source data comes from [McAuley-Lab/Amazon-Reviews-2023](https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023).
 - Vectors land in Turbopuffer through Layer namespace APIs.
 - Indexing work is coordinated through Layer pipeline APIs backed by PostgreSQL.
@@ -29,6 +27,27 @@ under an application-shaped indexing and search flow:
 The point is not to be a generic ecommerce starter. The point is to make Layer's
 developer contract concrete: stage work, claim work, embed it, write vectors,
 query with freshness signals, and let the gateway own the Turbopuffer edge.
+
+## Feature Highlights
+
+- **Semantic image-based product search with CLIP.** The app embeds product
+  images with [CLIP ViT-L/14](https://huggingface.co/openai/clip-vit-large-patch14)
+  and stores one product vector per ASIN. This is an app-level retrieval feature
+  that gives the Layer/Turbopuffer path a real visual-search workload.
+- **Facet scans through Layer.** Category and attribute exploration can be
+  driven through Layer's namespace scan API, so the app can inspect indexed
+  product state without building a separate warehouse path for every facet.
+- **Multi-stage autoscaling Kubernetes pipeline.** CPU extraction, GPU image
+  embedding, GPU review embedding, LLM classification, and tag aggregation run
+  as separate workers. KEDA reads Layer PostgreSQL pipeline state to scale pods,
+  while optional Karpenter NodePools add the CPU/GPU node capacity those pods
+  require.
+- **Review-based LLM classifier to improve product search.** Review text is
+  embedded with [Qwen3 Embedding 8B](https://huggingface.co/Qwen/Qwen3-Embedding-8B)
+  and classified with an LLM. The app rolls supported review tags back onto
+  product vectors, improving product search and filtering with customer-language
+  signals. Like CLIP image search, this is app logic that helps frame why the
+  Layer gateway surface matters.
 
 ## How It Works
 
