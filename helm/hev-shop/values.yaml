@@ -99,6 +99,11 @@ karpenter:
     enabled: true
     name: ""
     amiFamily: AL2023
+    metadataOptions:
+      httpEndpoint: enabled
+      httpProtocolIPv6: disabled
+      httpPutResponseHopLimit: 1
+      httpTokens: required
     labels:
       mesh-role: app
       workload: hev-shop
@@ -126,6 +131,8 @@ karpenter:
       cpu: "32"
       memory: 128Gi
     disruption:
+      budgets:
+        - nodes: 10%
       consolidationPolicy: WhenEmpty
       consolidateAfter: 10m
 
@@ -133,6 +140,11 @@ karpenter:
     enabled: true
     name: ""
     amiFamily: AL2023
+    metadataOptions:
+      httpEndpoint: enabled
+      httpProtocolIPv6: disabled
+      httpPutResponseHopLimit: 1
+      httpTokens: required
     labels:
       mesh-role: gpu
       workload: hev-shop
@@ -163,6 +175,8 @@ karpenter:
       cpu: "32"
       memory: 128Gi
     disruption:
+      budgets:
+        - nodes: 10%
       consolidationPolicy: WhenEmpty
       consolidateAfter: 10m
 

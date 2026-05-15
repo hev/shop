@@ -29,7 +29,6 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 
 {{- define "hev-shop.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "hev-shop.name" . }}
-app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "hev-shop.configName" -}}

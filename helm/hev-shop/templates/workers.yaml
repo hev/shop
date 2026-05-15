@@ -10,7 +10,9 @@ metadata:
     {{- include "hev-shop.labels" $root | nindent 4 }}
     app.kubernetes.io/component: {{ $worker.component }}
 spec:
-  replicas: {{ ternary 0 $worker.replicaCount $root.Values.autoscaling.enabled }}
+  {{- if not (and $root.Values.autoscaling.enabled $worker.autoscaling.enabled) }}
+  replicas: {{ $worker.replicaCount }}
+  {{- end }}
   {{- with $worker.strategy }}
   strategy:
     {{- toYaml . | nindent 4 }}
