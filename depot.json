@@ -1,0 +1,13 @@
+{
+  "id": "t4vlld595v",
+  "build": {
+    "indexer": {
+      "context": ".",
+      "dockerfile": "indexer/Dockerfile"
+    },
+    "web": {
+      "context": "web",
+      "dockerfile": "web/Dockerfile"
+    }
+  }
+}
