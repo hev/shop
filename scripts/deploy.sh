@@ -155,7 +155,7 @@ if [[ -z "$OPENROUTER_API_KEY" ]] && command -v op >/dev/null 2>&1; then
   if [[ -n "$OP_ACCOUNT" ]]; then
     OP_ARGS=(--account "$OP_ACCOUNT")
   fi
-  OPENROUTER_API_KEY="$(op read "op://${OPENROUTER_OP_VAULT}/${OPENROUTER_OP_ITEM}/${OPENROUTER_OP_FIELD}" "${OP_ARGS[@]}" 2>/dev/null || true)"
+  OPENROUTER_API_KEY="$(op read "op://${OPENROUTER_OP_VAULT}/${OPENROUTER_OP_ITEM}/${OPENROUTER_OP_FIELD}" ${OP_ARGS[@]+"${OP_ARGS[@]}"} 2>/dev/null || true)"
 fi
 if [[ -n "$OPENROUTER_API_KEY" ]]; then
   log "Restoring OpenRouter API key into ${NAMESPACE}/hev-shop-secrets..."
