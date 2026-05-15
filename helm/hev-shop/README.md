@@ -10,6 +10,7 @@ This chart deploys the full hev-shop app:
 - CPU review classification worker
 - CPU review aggregation worker
 - KEDA ScaledObjects backed by Layer PostgreSQL
+- optional Karpenter EC2NodeClasses and NodePools for CPU/GPU workers
 - shared RWX PVC for dataset, image, and model caches
 
 The chart assumes Layer already provides the gateway and PostgreSQL services.
@@ -49,3 +50,30 @@ helm upgrade --install hev-shop ./helm/hev-shop \
 
 The secret must provide `LAYER_DATABASE_URL`; KEDA reads it through
 `connectionFromEnv`.
+
+## Karpenter NodePools
+
+The chart can also own the app's Karpenter capacity. This keeps node scaling
+with the workload whose KEDA ScaledObjects create pod demand from Layer
+PostgreSQL state.
+
+Karpenter and its CRDs must already be installed. Enable the app NodePools with:
+
+```sh
+helm upgrade --install hev-shop ./helm/hev-shop \
+  --namespace hev-shop \
+  --create-namespace \
+  --set karpenter.enabled=true \
+  --set karpenter.clusterName=<eks-cluster-name> \
+  --set karpenter.kubernetesVersion=<eks-version> \
+  --set karpenter.nodeInstanceProfile=<karpenter-node-instance-profile>
+```
+
+Defaults:
+
+- CPU NodePool: `mesh-role=app`, on-demand `c`/`m` instances, `32` CPU limit.
+- GPU NodePool: `mesh-role=gpu`, `g4dn`/`g5` spot or on-demand instances,
+  `32` CPU limit.
+
+Override `karpenter.cpu` or `karpenter.gpu` in `values.yaml` to change labels,
+taints, requirements, limits, or disruption policy.

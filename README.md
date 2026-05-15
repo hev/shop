@@ -23,6 +23,8 @@ under an application-shaped indexing and search flow:
 - Vectors land in Turbopuffer through Layer namespace APIs.
 - Indexing work is coordinated through Layer pipeline APIs backed by PostgreSQL.
 - KEDA scales workers from Layer PostgreSQL state instead of a separate queue.
+- Karpenter NodePools can be deployed with the app, so pod scaling and node
+  scaling live next to the workload that creates the demand.
 
 The point is not to be a generic ecommerce starter. The point is to make Layer's
 developer contract concrete: stage work, claim work, embed it, write vectors,
@@ -60,7 +62,8 @@ product vectors as filterable tags.
 - `indexer/app/embedding.py` claims product work and writes CLIP vectors.
 - `indexer/app/review_workers.py` embeds reviews, classifies reviews, and rolls tags up.
 - `web/app/api/search/route.ts` passes search through the backend and preserves `stable_as_of`.
-- `helm/hev-shop` deploys the full app with PostgreSQL-driven KEDA autoscaling.
+- `helm/hev-shop` deploys the full app with PostgreSQL-driven KEDA autoscaling
+  and optional Karpenter CPU/GPU NodePools.
 
 ## Repo Layout
 
@@ -126,6 +129,7 @@ The Helm chart assumes Layer is already installed and exposes:
 - `layer-gateway.layer.svc.cluster.local:8080`
 - `layer-postgres.layer.svc.cluster.local:5432`
 - KEDA in the cluster
+- Karpenter in the cluster when `karpenter.enabled=true`
 - an RWX storage class for the shared image/model cache
 
 Install:
@@ -149,3 +153,18 @@ helm upgrade --install hev-shop ./helm/hev-shop \
 
 The KEDA ScaledObjects use `connectionFromEnv: LAYER_DATABASE_URL`, so every
 worker reads the same Layer PostgreSQL URL that the scaler uses for queue depth.
+
+Enable app-owned Karpenter NodePools:
+
+```sh
+helm upgrade --install hev-shop ./helm/hev-shop \
+  --namespace hev-shop \
+  --create-namespace \
+  --set karpenter.enabled=true \
+  --set karpenter.clusterName=<eks-cluster-name> \
+  --set karpenter.kubernetesVersion=<eks-version> \
+  --set karpenter.nodeInstanceProfile=<karpenter-node-instance-profile>
+```
+
+The default NodePools provide `mesh-role=app` CPU nodes and `mesh-role=gpu` GPU
+nodes, matching the worker selectors in the chart.

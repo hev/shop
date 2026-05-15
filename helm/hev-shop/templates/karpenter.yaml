@@ -1,0 +1,113 @@
+{{- if .Values.karpenter.enabled }}
+{{- $clusterName := required "karpenter.clusterName is required when karpenter.enabled=true" .Values.karpenter.clusterName -}}
+{{- $kubernetesVersion := required "karpenter.kubernetesVersion is required when karpenter.enabled=true" .Values.karpenter.kubernetesVersion -}}
+{{- $instanceProfile := required "karpenter.nodeInstanceProfile is required when karpenter.enabled=true" .Values.karpenter.nodeInstanceProfile -}}
+{{- if .Values.karpenter.cpu.enabled }}
+{{- $cpuName := default (printf "%s-cpu" (include "hev-shop.fullname" .)) .Values.karpenter.cpu.name -}}
+---
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: {{ $cpuName }}
+  labels:
+    {{- include "hev-shop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cpu-nodepool
+spec:
+  amiFamily: {{ .Values.karpenter.cpu.amiFamily }}
+  instanceProfile: {{ $instanceProfile }}
+  amiSelectorTerms:
+    - ssmParameter: /aws/service/eks/optimized-ami/{{ $kubernetesVersion }}/amazon-linux-2023/x86_64/standard/recommended/image_id
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: {{ $clusterName }}
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: {{ $clusterName }}
+  tags:
+    karpenter.sh/discovery: {{ $clusterName }}
+    {{- with .Values.karpenter.tags }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: {{ $cpuName }}
+  labels:
+    {{- include "hev-shop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cpu-nodepool
+spec:
+  template:
+    metadata:
+      labels:
+        {{- toYaml .Values.karpenter.cpu.labels | nindent 8 }}
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: {{ $cpuName }}
+      expireAfter: 24h
+      taints:
+        {{- toYaml .Values.karpenter.cpu.taints | nindent 8 }}
+      requirements:
+        {{- toYaml .Values.karpenter.cpu.requirements | nindent 8 }}
+  limits:
+    {{- toYaml .Values.karpenter.cpu.limits | nindent 4 }}
+  disruption:
+    {{- toYaml .Values.karpenter.cpu.disruption | nindent 4 }}
+{{ end }}
+{{- if .Values.karpenter.gpu.enabled }}
+{{- $gpuName := default (printf "%s-gpu" (include "hev-shop.fullname" .)) .Values.karpenter.gpu.name -}}
+---
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: {{ $gpuName }}
+  labels:
+    {{- include "hev-shop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gpu-nodepool
+spec:
+  amiFamily: {{ .Values.karpenter.gpu.amiFamily }}
+  instanceProfile: {{ $instanceProfile }}
+  amiSelectorTerms:
+    - ssmParameter: /aws/service/eks/optimized-ami/{{ $kubernetesVersion }}/amazon-linux-2023/x86_64/nvidia/recommended/image_id
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: {{ $clusterName }}
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: {{ $clusterName }}
+  tags:
+    karpenter.sh/discovery: {{ $clusterName }}
+    {{- with .Values.karpenter.tags }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: {{ $gpuName }}
+  labels:
+    {{- include "hev-shop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gpu-nodepool
+spec:
+  template:
+    metadata:
+      labels:
+        {{- toYaml .Values.karpenter.gpu.labels | nindent 8 }}
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: {{ $gpuName }}
+      expireAfter: 24h
+      taints:
+        {{- toYaml .Values.karpenter.gpu.taints | nindent 8 }}
+      requirements:
+        {{- toYaml .Values.karpenter.gpu.requirements | nindent 8 }}
+  limits:
+    {{- toYaml .Values.karpenter.gpu.limits | nindent 4 }}
+  disruption:
+    {{- toYaml .Values.karpenter.gpu.disruption | nindent 4 }}
+{{ end }}
+{{ end }}

@@ -1,7 +1,8 @@
 # hev-shop Kubernetes
 
-The standalone deploy path is the Helm chart in `helm/hev-shop`. These raw
-manifests are kept for low-level inspection and kustomize-based operations.
+The standalone deploy path is the Helm chart in `helm/hev-shop`. The chart also
+owns optional Karpenter CPU/GPU NodePools. These raw manifests are kept for
+low-level inspection and kustomize-based operations.
 
 These manifests run the hev-shop indexer in its own `hev-shop` namespace. It
 talks to platform services in the `layer` namespace by fully qualified service
