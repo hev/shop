@@ -257,7 +257,7 @@ class ReviewAggregateWorker:
     async def claim_documents(self) -> list[str]:
         return await self.layer.claim_pipeline_documents(
             self.settings.review_aggregate_pipeline_id,
-            limit=self.settings.vector_upsert_batch_size,
+            limit=self.settings.review_aggregate_batch_size,
             worker_id=self.settings.resolved_worker_id,
             lease_seconds=self.settings.claim_lease_seconds,
             claim_stage="aggregating",
@@ -299,7 +299,7 @@ class ReviewAggregateWorker:
 
         try:
             processed = 0
-            for asin_batch in batches(asins, self.settings.vector_upsert_batch_size):
+            for asin_batch in batches(asins, self.settings.review_aggregate_batch_size):
                 patches: list[dict[str, Any]] = []
                 for asin in asin_batch:
                     attrs = await self.database.aggregate_review_tag_attrs(

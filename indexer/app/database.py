@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import date
 from math import ceil
@@ -469,8 +470,12 @@ class Database:
             "classified_review_count": total,
             "tag_threshold": threshold,
         }
+        # Turbopuffer attribute types are scalars or arrays of scalars — nested
+        # objects fail strict validation on patch_rows. JSON-stringify the
+        # dict-shaped fields here; the /search and /product handlers decode them
+        # back into dicts so consumers see a stable shape.
         if tag_counts:
-            attrs["tag_counts"] = tag_counts
+            attrs["tag_counts"] = json.dumps(tag_counts, separators=(",", ":"))
         if tag_samples:
-            attrs["tag_samples"] = tag_samples
+            attrs["tag_samples"] = json.dumps(tag_samples, separators=(",", ":"))
         return attrs

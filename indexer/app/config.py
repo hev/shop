@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     )
     embedding_claim_size: int = Field(default=2_000, alias="EMBEDDING_CLAIM_SIZE")
     vector_upsert_batch_size: int = Field(default=10_000, alias="VECTOR_UPSERT_BATCH_SIZE")
+    # Aggregate-worker batches expand into hundreds of Postgres queries per
+    # ASIN plus one PATCH call, so they need a smaller cap than the embed-side
+    # vector upserts. Sized to fit comfortably under the 60s ALB request limit.
+    review_aggregate_batch_size: int = Field(default=200, alias="REVIEW_AGGREGATE_BATCH_SIZE")
     chunk_fetch_concurrency: int = Field(default=32, alias="CHUNK_FETCH_CONCURRENCY")
     cleanup_embedded_images: bool = Field(default=True, alias="CLEANUP_EMBEDDED_IMAGES")
     worker_poll_seconds: float = Field(default=5.0, alias="WORKER_POLL_SECONDS")

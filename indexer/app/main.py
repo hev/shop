@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request
 
@@ -80,6 +81,29 @@ def combine_filters(filters: list[list[object]]) -> list[object] | None:
     if len(filters) == 1:
         return filters[0]
     return ["And", filters]
+
+
+# Product vectors store `tag_counts` (dict[str, int]) and `tag_samples`
+# (dict[str, list[str]]) as JSON strings because turbopuffer rejects nested
+# objects on patch_rows. Decode them on the way out so API consumers see the
+# original dict shape.
+_JSON_DICT_ATTRS = ("tag_counts", "tag_samples")
+
+
+def decode_dict_attrs(attrs: dict[str, Any] | None) -> dict[str, Any]:
+    if not attrs:
+        return {}
+    out = dict(attrs)
+    for key in _JSON_DICT_ATTRS:
+        value = out.get(key)
+        if isinstance(value, str):
+            try:
+                out[key] = json.loads(value)
+            except (TypeError, ValueError):
+                # Leave malformed values in place rather than 500ing — the
+                # storefront's coercers will fall back to {} on bad shapes.
+                pass
+    return out
 
 
 app = FastAPI(title="hev-shop indexer", lifespan=lifespan)
@@ -165,7 +189,7 @@ async def search(request: Request, body: SearchRequest) -> SearchResponse:
         SearchHit(
             id=result["id"],
             dist=result.get("dist"),
-            attributes=result.get("attributes") or {},
+            attributes=decode_dict_attrs(result.get("attributes")),
         )
         for result in layer_response.get("results", [])
     ]
@@ -203,7 +227,7 @@ async def product(request: Request, asin: str) -> ProductResponse:
     return ProductResponse(
         asin=asin,
         namespace=settings.namespace,
-        attributes=document.get("attributes") or {},
+        attributes=decode_dict_attrs(document.get("attributes")),
     )
 
 
