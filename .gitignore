@@ -1,0 +1,28 @@
+.DS_Store
+
+# Local env
+.env
+.env.*
+!.env.example
+
+# Go
+hev-shop
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Runtime data
+data/
+
+# Next.js
+web/.next/
+web/node_modules/
+web/tsconfig.tsbuildinfo
+
+# Build output
+dist/
+build/

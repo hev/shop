@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hev-shop-cpu-worker
+  labels:
+    app.kubernetes.io/name: hev-shop
+    app.kubernetes.io/component: cpu-worker
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hev-shop
+      app.kubernetes.io/component: cpu-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hev-shop
+        app.kubernetes.io/component: cpu-worker
+    spec:
+      terminationGracePeriodSeconds: 60
+      nodeSelector:
+        mesh-role: app
+      tolerations:
+        - key: mesh-role
+          operator: Equal
+          value: app
+          effect: NoSchedule
+      containers:
+        - name: worker
+          image: hev-shop-indexer:latest
+          imagePullPolicy: Always
+          command: ["python", "-m", "app.worker"]
+          env:
+            - name: WORKER_TYPE
+              value: cpu
+            - name: WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          envFrom:
+            - configMapRef:
+                name: hev-shop-config
+            - secretRef:
+                name: hev-shop-secrets
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: hev-shop-data

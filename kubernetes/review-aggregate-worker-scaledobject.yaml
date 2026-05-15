@@ -1,0 +1,18 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: hev-shop-review-aggregate-worker
+spec:
+  scaleTargetRef:
+    name: hev-shop-review-aggregate-worker
+  pollingInterval: 15
+  cooldownPeriod: 60
+  minReplicaCount: 0
+  maxReplicaCount: 4
+  triggers:
+    - type: postgresql
+      metadata:
+        connectionFromEnv: LAYER_DATABASE_URL
+        query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM pipeline_documents WHERE pipeline_id = 'amazon-products-review-tags' AND stage IN ('pending', 'aggregating') LIMIT 1) THEN 4 ELSE 0 END"
+        targetQueryValue: "1"
+        activationTargetQueryValue: "0"

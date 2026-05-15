@@ -1,0 +1,268 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+from pathlib import Path
+from contextlib import suppress
+from uuid import uuid4
+
+import httpx
+
+from .config import Settings
+from .database import Database, ExtractionJob
+from .dataset import AmazonProductDataset
+from .layer_client import LayerClient
+from .models import ProductRecord, ReviewRecord
+
+logger = logging.getLogger(__name__)
+
+
+class ExtractionWorker:
+    def __init__(
+        self,
+        *,
+        settings: Settings,
+        database: Database,
+        layer: LayerClient,
+        dataset: AmazonProductDataset,
+    ) -> None:
+        self.settings = settings
+        self.database = database
+        self.layer = layer
+        self.dataset = dataset
+        self._http = httpx.AsyncClient(
+            timeout=settings.http_timeout_seconds,
+            follow_redirects=True,
+            limits=httpx.Limits(max_connections=settings.image_download_concurrency),
+        )
+
+    async def close(self) -> None:
+        await self._http.aclose()
+
+    async def run_forever(self, stop_event: asyncio.Event | None = None) -> None:
+        stop_event = stop_event or asyncio.Event()
+        while not stop_event.is_set():
+            task = asyncio.create_task(self.process_once())
+            stop_task = asyncio.create_task(stop_event.wait())
+            done, _pending = await asyncio.wait(
+                {task, stop_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if stop_task in done and not task.done():
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+                break
+
+            stop_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await stop_task
+
+            processed = task.result()
+            if processed == 0:
+                with suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(
+                        stop_event.wait(),
+                        timeout=self.settings.worker_poll_seconds,
+                    )
+
+    async def process_once(self) -> int:
+        job = await self.database.claim_extraction_job(
+            self.settings.resolved_worker_id, self.settings.claim_lease_seconds
+        )
+        if job is None:
+            return 0
+
+        heartbeat = asyncio.create_task(self.heartbeat_job(job))
+        try:
+            processed = await self.process_job(job)
+        except asyncio.CancelledError:
+            await self.database.release_extraction_job(
+                job.id,
+                self.settings.resolved_worker_id,
+                "worker interrupted before extraction job completed",
+            )
+            raise
+        except Exception as exc:
+            logger.exception("extraction job failed", extra={"job_id": job.id})
+            await self.database.fail_extraction_job(job.id, str(exc))
+            return 0
+        finally:
+            heartbeat.cancel()
+            with suppress(asyncio.CancelledError):
+                await heartbeat
+
+        await self.database.complete_extraction_job(job.id, processed)
+        return processed
+
+    async def heartbeat_job(self, job: ExtractionJob) -> None:
+        while True:
+            await asyncio.sleep(self.settings.claim_heartbeat_seconds)
+            await self.database.heartbeat_extraction_job(
+                job.id, self.settings.resolved_worker_id
+            )
+
+    async def process_job(self, job: ExtractionJob) -> int:
+        await self.layer.create_pipeline(
+            job.pipeline_id, job.namespace, self.settings.distance_metric
+        )
+        await self.layer.create_pipeline(
+            self.settings.reviews_pipeline_id,
+            self.settings.reviews_namespace_base,
+            self.settings.distance_metric,
+        )
+        self.settings.image_dir.mkdir(parents=True, exist_ok=True)
+
+        products = list(
+            self.dataset.iter_products(
+                category=job.category, offset=job.row_offset, limit=job.row_limit
+            )
+        )
+        processed, staged_asins = await self.stage_products(job, products)
+        review_count = await self.stage_reviews_for_asins(job, staged_asins)
+        logger.info(
+            "completed extraction job",
+            extra={
+                "job_id": job.id,
+                "processed_count": processed,
+                "reviews_staged": review_count,
+            },
+        )
+        if processed == 0:
+            raise RuntimeError("extraction job did not stage any products")
+        return processed
+
+    async def stage_products(
+        self, job: ExtractionJob, products: list[ProductRecord]
+    ) -> tuple[int, set[str]]:
+        if not products:
+            return 0, set()
+
+        queue: asyncio.Queue[ProductRecord] = asyncio.Queue()
+        for product in products:
+            queue.put_nowait(product)
+
+        async def worker() -> tuple[int, set[str]]:
+            processed = 0
+            staged_asins: set[str] = set()
+            while True:
+                try:
+                    product = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                try:
+                    image_path = await self.download_image(product.asin, product.image_url)
+                    await self.layer.stage_product(
+                        job.pipeline_id, product.with_image_path(image_path)
+                    )
+                    processed += 1
+                    staged_asins.add(product.asin)
+                except Exception:
+                    logger.exception(
+                        "failed to stage product",
+                        extra={"asin": product.asin, "pipeline_id": job.pipeline_id},
+                    )
+                finally:
+                    queue.task_done()
+            return processed, staged_asins
+
+        concurrency = max(
+            1, min(self.settings.extraction_concurrency, len(products))
+        )
+        logger.info(
+            "staging %s products with concurrency %s",
+            len(products),
+            concurrency,
+            extra={"job_id": job.id, "category": job.category},
+        )
+        results = await asyncio.gather(*(worker() for _ in range(concurrency)))
+        processed = sum(result[0] for result in results)
+        staged_asins = set().union(*(result[1] for result in results))
+        return processed, staged_asins
+
+    async def stage_reviews_for_asins(
+        self, job: ExtractionJob, staged_asins: set[str]
+    ) -> int:
+        if not staged_asins:
+            return 0
+
+        concurrency = max(1, self.settings.review_stage_concurrency)
+        queue: asyncio.Queue[ReviewRecord | None] = asyncio.Queue(
+            maxsize=concurrency * 2
+        )
+
+        async def producer() -> None:
+            try:
+                for review in self.dataset.iter_reviews_for_asins(
+                    category=job.category,
+                    asins=staged_asins,
+                    recent_limit=self.settings.review_recent_cap_per_product,
+                    helpful_limit=self.settings.review_helpful_cap_per_product,
+                ):
+                    await queue.put(review)
+            finally:
+                for _ in range(concurrency):
+                    await queue.put(None)
+
+        async def consumer() -> int:
+            staged = 0
+            while True:
+                review = await queue.get()
+                try:
+                    if review is None:
+                        return staged
+                    try:
+                        await asyncio.gather(
+                            self.layer.stage_review(
+                                self.settings.reviews_pipeline_id,
+                                review,
+                                work_item="embed",
+                            ),
+                            self.layer.stage_review(
+                                self.settings.reviews_pipeline_id,
+                                review,
+                                work_item="classify",
+                            ),
+                        )
+                        staged += 1
+                    except Exception:
+                        logger.exception(
+                            "failed to stage review",
+                            extra={
+                                "asin": review.asin,
+                                "review_id": review.review_id,
+                                "pipeline_id": self.settings.reviews_pipeline_id,
+                            },
+                        )
+                finally:
+                    queue.task_done()
+
+        logger.info(
+            "staging reviews for %s asins with concurrency %s",
+            len(staged_asins),
+            concurrency,
+            extra={"job_id": job.id, "category": job.category},
+        )
+        producer_task = asyncio.create_task(producer())
+        consumer_tasks = [asyncio.create_task(consumer()) for _ in range(concurrency)]
+        results = await asyncio.gather(*consumer_tasks)
+        await producer_task
+        return sum(results)
+
+    async def download_image(self, asin: str, image_url: str) -> Path:
+        suffix = Path(image_url.split("?", 1)[0]).suffix.lower()
+        if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
+            suffix = ".jpg"
+        target = self.settings.image_dir / f"{asin}{suffix}"
+        if target.exists() and target.stat().st_size > 0:
+            return target
+
+        tmp = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
+        response = await self._http.get(image_url)
+        response.raise_for_status()
+        try:
+            await asyncio.to_thread(tmp.write_bytes, response.content)
+            tmp.replace(target)
+        finally:
+            with suppress(FileNotFoundError):
+                tmp.unlink()
+        return target

@@ -1,0 +1,18 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: hev-shop-cpu-worker
+spec:
+  scaleTargetRef:
+    name: hev-shop-cpu-worker
+  pollingInterval: 10
+  cooldownPeriod: 60
+  minReplicaCount: 0
+  maxReplicaCount: 8
+  triggers:
+    - type: postgresql
+      metadata:
+        connectionFromEnv: LAYER_DATABASE_URL
+        query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM hev_shop_index_jobs WHERE status IN ('queued', 'retry', 'running') LIMIT 1) THEN 16 ELSE 0 END"
+        targetQueryValue: "2"
+        activationTargetQueryValue: "0"

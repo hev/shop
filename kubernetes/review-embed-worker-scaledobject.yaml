@@ -1,0 +1,18 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: hev-shop-review-embed-worker
+spec:
+  scaleTargetRef:
+    name: hev-shop-review-embed-worker
+  pollingInterval: 15
+  cooldownPeriod: 300
+  minReplicaCount: 0
+  maxReplicaCount: 1
+  triggers:
+    - type: postgresql
+      metadata:
+        connectionFromEnv: LAYER_DATABASE_URL
+        query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM pipeline_documents WHERE pipeline_id = 'hev-shop-reviews' AND document_id LIKE 'review-embed:%' AND stage IN ('pending', 'embedding') LIMIT 1) THEN 1000 ELSE 0 END"
+        targetQueryValue: "1000"
+        activationTargetQueryValue: "0"

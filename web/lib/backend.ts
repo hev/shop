@@ -1,0 +1,258 @@
+import type { Product, ReviewHit, ReviewSample } from "./types";
+
+export const API_BASE = process.env.HEV_SHOP_API_BASE ?? "";
+
+export function backendEnabled(): boolean {
+  return API_BASE.length > 0;
+}
+
+const DEFAULT_BACKEND_TIMEOUT_MS = 8_000;
+const META_TIMEOUT_MS = 4_000;
+
+type BackendHit = {
+  id: string;
+  dist: number | null;
+  attributes: Record<string, unknown>;
+};
+
+type BackendSearchResponse = {
+  query: string;
+  namespace: string;
+  hits: BackendHit[];
+};
+
+type BackendProductResponse = {
+  asin: string;
+  namespace: string;
+  attributes: Record<string, unknown>;
+};
+
+const productCache = new Map<string, Product>();
+
+export function cacheProduct(p: Product): void {
+  productCache.set(p.asin, p);
+}
+
+export function getCachedProduct(asin: string): Product | undefined {
+  return productCache.get(asin);
+}
+
+function asStr(v: unknown): string {
+  return typeof v === "string" ? v : "";
+}
+
+function parseNum(v: unknown): number {
+  if (typeof v === "number") return v;
+  if (typeof v === "string") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
+
+function asStringArray(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((item): item is string => typeof item === "string") : [];
+}
+
+function asNumberRecord(v: unknown): Record<string, number> {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+  return Object.fromEntries(
+    Object.entries(v as Record<string, unknown>)
+      .map(([key, value]) => [key, parseNum(value)] as const)
+      .filter(([, value]) => value > 0),
+  );
+}
+
+function asStringArrayRecord(v: unknown): Record<string, string[]> {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+  return Object.fromEntries(
+    Object.entries(v as Record<string, unknown>).map(([key, value]) => [
+      key,
+      asStringArray(value),
+    ]),
+  );
+}
+
+async function fetchWithTimeout(
+  input: Parameters<typeof fetch>[0],
+  init: Parameters<typeof fetch>[1] = {},
+  timeoutMs = DEFAULT_BACKEND_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw new Error(`backend request timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export function hitToProduct(hit: BackendHit): Product {
+  const a = hit.attributes ?? {};
+  return {
+    asin: asStr(a.asin) || hit.id,
+    title: asStr(a.title),
+    description: asStr(a.description),
+    category: asStr(a.category),
+    image_url: asStr(a.image_url),
+    price: null,
+    rating: parseNum(a.avg_rating_txt),
+    rating_count: parseNum(a.rating_cnt_txt),
+    tags: asStringArray(a.tags),
+    tag_counts: asNumberRecord(a.tag_counts),
+    tag_samples: asStringArrayRecord(a.tag_samples),
+  };
+}
+
+export function attributesToProduct(asin: string, a: Record<string, unknown>): Product {
+  return {
+    asin: asStr(a.asin) || asin,
+    title: asStr(a.title),
+    description: asStr(a.description),
+    category: asStr(a.category),
+    image_url: asStr(a.image_url),
+    price: null,
+    rating: parseNum(a.avg_rating_txt),
+    rating_count: parseNum(a.rating_cnt_txt),
+    tags: asStringArray(a.tags),
+    tag_counts: asNumberRecord(a.tag_counts),
+    tag_samples: asStringArrayRecord(a.tag_samples),
+  };
+}
+
+export async function backendSearch(
+  query: string,
+  topK = 24,
+  tags: string[] = [],
+): Promise<Product[]> {
+  if (!API_BASE) throw new Error("HEV_SHOP_API_BASE not set");
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  const res = await fetchWithTimeout(
+    `${API_BASE}/search`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        query: trimmed,
+        top_k: Math.min(topK, 200),
+        tags,
+      }),
+      cache: "no-store",
+    },
+  );
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`search upstream ${res.status}: ${body.slice(0, 200)}`);
+  }
+  const json = (await res.json()) as BackendSearchResponse;
+  const products = json.hits.map(hitToProduct);
+  for (const p of products) cacheProduct(p);
+  return products;
+}
+
+export async function backendProduct(asin: string): Promise<Product | null> {
+  if (!API_BASE) throw new Error("HEV_SHOP_API_BASE not set");
+  const res = await fetchWithTimeout(
+    `${API_BASE}/product/${encodeURIComponent(asin)}`,
+    { cache: "no-store" },
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`product upstream ${res.status}: ${body.slice(0, 200)}`);
+  }
+  const json = (await res.json()) as BackendProductResponse;
+  const product = attributesToProduct(json.asin, json.attributes ?? {});
+  cacheProduct(product);
+  return product;
+}
+
+export type CategoryBucket = {
+  value: string;
+  doc_count: number;
+};
+
+export type BackendMeta = {
+  namespace: string;
+  vectors: number;
+  categories: CategoryBucket[];
+  stable_as_of: number | null;
+  is_stable: boolean;
+};
+
+export async function backendMeta(): Promise<BackendMeta> {
+  if (!API_BASE) throw new Error("HEV_SHOP_API_BASE not set");
+  const res = await fetchWithTimeout(
+    `${API_BASE}/meta`,
+    { cache: "no-store" },
+    META_TIMEOUT_MS,
+  );
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`meta upstream ${res.status}: ${body.slice(0, 200)}`);
+  }
+  return (await res.json()) as BackendMeta;
+}
+
+export async function backendSimilar(
+  asin: string,
+  topK = 8,
+): Promise<Product[]> {
+  const seed = getCachedProduct(asin);
+  if (!seed || !seed.title) return [];
+  const neighbors = await backendSearch(seed.title, topK + 1);
+  return neighbors.filter((p) => p.asin !== asin).slice(0, topK);
+}
+
+export async function backendReviewSearch(
+  asin: string,
+  query: string,
+  topK = 8,
+): Promise<ReviewHit[]> {
+  if (!API_BASE) throw new Error("HEV_SHOP_API_BASE not set");
+  const url = new URL(`${API_BASE}/search/reviews`);
+  url.searchParams.set("asin", asin);
+  url.searchParams.set("q", query.trim() || "quality");
+  url.searchParams.set("top_k", String(Math.min(topK, 200)));
+  const res = await fetchWithTimeout(url, { cache: "no-store" });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`review search upstream ${res.status}: ${body.slice(0, 200)}`);
+  }
+  const json = (await res.json()) as BackendSearchResponse;
+  return json.hits.map((hit) => {
+    const a = hit.attributes ?? {};
+    return {
+      id: hit.id,
+      dist: hit.dist,
+      review_id: asStr(a.review_id),
+      asin: asStr(a.asin),
+      chunk_idx: parseNum(a.chunk_idx),
+      text_chunk: asStr(a.text_chunk),
+      rating: a.rating == null ? null : parseNum(a.rating),
+      title: asStr(a.title),
+      helpful_vote: parseNum(a.helpful_vote),
+    };
+  });
+}
+
+export async function backendReviewSamples(
+  asin: string,
+  reviewIds: string[],
+): Promise<ReviewSample[]> {
+  if (!API_BASE || reviewIds.length === 0) return [];
+  const url = new URL(`${API_BASE}/reviews/samples`);
+  url.searchParams.set("asin", asin);
+  url.searchParams.set("ids", reviewIds.join(","));
+  const res = await fetchWithTimeout(url, { cache: "no-store" });
+  if (!res.ok) return [];
+  const json = (await res.json()) as { samples: ReviewSample[] };
+  return json.samples ?? [];
+}
