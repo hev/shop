@@ -11,6 +11,8 @@ from .config import get_settings
 from .database import Database
 from .layer_client import LayerClient
 from .models import (
+    BackfillRequest,
+    BackfillResponse,
     CategoryBucket,
     IndexCategoryResponse,
     IndexRequest,
@@ -24,6 +26,8 @@ from .models import (
     SearchRequest,
     SearchResponse,
     StatusResponse,
+    normalize_asin_list,
+    normalize_backfill_stages,
     normalize_review_tags,
 )
 from .reviews import review_namespace_for, review_work_document_id
@@ -157,6 +161,72 @@ async def index_products(request: Request, body: IndexRequest) -> IndexResponse:
         count=body.count,
         jobs_created=sum(result.jobs_created for result in category_results),
         categories=category_results,
+    )
+
+
+@app.post("/backfill", response_model=BackfillResponse)
+async def backfill(request: Request, body: BackfillRequest) -> BackfillResponse:
+    """Enqueue a backfill job that re-stages reviews (and optionally re-runs
+    aggregation) for products already in the namespace. The CPU extraction
+    worker picks the job up and uses the layer-gateway pipelines that the
+    review-embed / review-classify / review-aggregate workers already consume."""
+    settings = request.app.state.settings
+    database: Database = request.app.state.database
+
+    category = body.category.strip()
+    if not category:
+        raise HTTPException(status_code=422, detail="category is required")
+
+    asins = normalize_asin_list(body.asins)
+    if body.product_limit < -1:
+        raise HTTPException(
+            status_code=422, detail="product_limit must be -1 or non-negative"
+        )
+    if asins is not None and not asins:
+        raise HTTPException(
+            status_code=422, detail="asins must contain at least one entry when provided"
+        )
+    if body.reviews_per_product is not None and body.reviews_per_product < 0:
+        raise HTTPException(
+            status_code=422, detail="reviews_per_product must be >= 0"
+        )
+    if body.max_total_reviews is not None and body.max_total_reviews < 0:
+        raise HTTPException(
+            status_code=422, detail="max_total_reviews must be >= 0"
+        )
+
+    stages = normalize_backfill_stages(body.stages)
+    if not stages:
+        raise HTTPException(
+            status_code=422,
+            detail="stages must include at least one of embed/classify/aggregate",
+        )
+
+    pipeline_id = body.pipeline_id or settings.default_pipeline_id
+    namespace = body.namespace or settings.namespace
+
+    job_id = await database.enqueue_backfill_job(
+        pipeline_id=pipeline_id,
+        namespace=namespace,
+        category=category,
+        product_limit=body.product_limit,
+        target_asins=asins,
+        reviews_per_product=body.reviews_per_product,
+        max_total_reviews=body.max_total_reviews,
+        stages=stages,
+        max_retries=settings.max_job_retries,
+    )
+
+    return BackfillResponse(
+        job_id=job_id,
+        pipeline_id=pipeline_id,
+        namespace=namespace,
+        category=category,
+        asin_count=len(asins) if asins is not None else None,
+        product_limit=body.product_limit,
+        reviews_per_product=body.reviews_per_product,
+        max_total_reviews=body.max_total_reviews,
+        stages=stages,
     )
 
 

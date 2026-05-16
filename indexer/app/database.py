@@ -29,6 +29,17 @@ CREATE TABLE IF NOT EXISTS hev_shop_index_jobs (
     completed_at    TIMESTAMPTZ
 );
 
+ALTER TABLE hev_shop_index_jobs
+    ADD COLUMN IF NOT EXISTS job_kind            TEXT NOT NULL DEFAULT 'index';
+ALTER TABLE hev_shop_index_jobs
+    ADD COLUMN IF NOT EXISTS target_asins        TEXT[];
+ALTER TABLE hev_shop_index_jobs
+    ADD COLUMN IF NOT EXISTS reviews_per_product INT;
+ALTER TABLE hev_shop_index_jobs
+    ADD COLUMN IF NOT EXISTS max_total_reviews   INT;
+ALTER TABLE hev_shop_index_jobs
+    ADD COLUMN IF NOT EXISTS review_stages       TEXT[];
+
 CREATE INDEX IF NOT EXISTS idx_hev_shop_jobs_status
     ON hev_shop_index_jobs (status, created_at);
 
@@ -74,6 +85,11 @@ class ExtractionJob:
     category: str
     row_offset: int
     row_limit: int
+    job_kind: str = "index"
+    target_asins: tuple[str, ...] | None = None
+    reviews_per_product: int | None = None
+    max_total_reviews: int | None = None
+    review_stages: tuple[str, ...] | None = None
 
 
 class Database:
@@ -129,6 +145,52 @@ class Database:
                 jobs,
             )
         return len(jobs)
+
+    async def enqueue_backfill_job(
+        self,
+        *,
+        pipeline_id: str,
+        namespace: str,
+        category: str,
+        product_limit: int,
+        target_asins: list[str] | None,
+        reviews_per_product: int | None,
+        max_total_reviews: int | None,
+        stages: list[str],
+        max_retries: int,
+    ) -> int:
+        """Insert a single backfill job. Returns the new job id.
+
+        `product_limit` is stored in `row_limit` and is used only when
+        `target_asins` is None — it caps how many products are read from the
+        HF dataset for the category. When `target_asins` is set, `row_limit`
+        is ignored at process time but kept for visibility.
+        """
+        if product_limit < -1:
+            raise ValueError("product_limit must be -1 or non-negative")
+        if not stages:
+            raise ValueError("stages must contain at least one entry")
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO hev_shop_index_jobs
+                    (pipeline_id, namespace, category, row_offset, row_limit,
+                     max_retries, job_kind, target_asins, reviews_per_product,
+                     max_total_reviews, review_stages)
+                VALUES ($1, $2, $3, 0, $4, $5, 'backfill', $6, $7, $8, $9)
+                RETURNING id
+                """,
+                pipeline_id,
+                namespace,
+                category,
+                product_limit,
+                max_retries,
+                target_asins,
+                reviews_per_product,
+                max_total_reviews,
+                stages,
+            )
+        return int(row["id"])
 
     async def index_job_counts(self, pipeline_id: str) -> dict[str, int]:
         async with self.pool.acquire() as conn:
@@ -194,12 +256,16 @@ class Database:
                     FROM picked
                     WHERE j.id = picked.id
                     RETURNING j.id, j.pipeline_id, j.namespace, j.category,
-                              j.row_offset, j.row_limit
+                              j.row_offset, j.row_limit, j.job_kind,
+                              j.target_asins, j.reviews_per_product,
+                              j.max_total_reviews, j.review_stages
                     """,
                     worker_id,
                 )
         if row is None:
             return None
+        target_asins = row["target_asins"]
+        review_stages = row["review_stages"]
         return ExtractionJob(
             id=row["id"],
             pipeline_id=row["pipeline_id"],
@@ -207,6 +273,11 @@ class Database:
             category=row["category"],
             row_offset=row["row_offset"],
             row_limit=row["row_limit"],
+            job_kind=row["job_kind"] or "index",
+            target_asins=tuple(target_asins) if target_asins else None,
+            reviews_per_product=row["reviews_per_product"],
+            max_total_reviews=row["max_total_reviews"],
+            review_stages=tuple(review_stages) if review_stages else None,
         )
 
     async def complete_extraction_job(self, job_id: int, processed_count: int) -> None:

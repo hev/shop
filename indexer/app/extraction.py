@@ -112,13 +112,25 @@ class ExtractionWorker:
         )
         self.settings.image_dir.mkdir(parents=True, exist_ok=True)
 
+        if job.job_kind == "backfill":
+            return await self.process_backfill_job(job)
+        return await self.process_index_job(job)
+
+    async def process_index_job(self, job: ExtractionJob) -> int:
         products = list(
             self.dataset.iter_products(
                 category=job.category, offset=job.row_offset, limit=job.row_limit
             )
         )
         processed, staged_asins = await self.stage_products(job, products)
-        review_count = await self.stage_reviews_for_asins(job, staged_asins)
+        review_count = await self.stage_reviews_for_asins(
+            job,
+            staged_asins,
+            recent_limit=self.settings.review_recent_cap_per_product,
+            helpful_limit=self.settings.review_helpful_cap_per_product,
+            max_total_reviews=None,
+            work_items=("embed", "classify"),
+        )
         logger.info(
             "completed extraction job",
             extra={
@@ -130,6 +142,72 @@ class ExtractionWorker:
         if processed == 0:
             raise RuntimeError("extraction job did not stage any products")
         return processed
+
+    async def process_backfill_job(self, job: ExtractionJob) -> int:
+        if job.target_asins:
+            staged_asins = set(job.target_asins)
+        else:
+            # row_limit carries product_limit for dataset-driven backfill.
+            # -1 means "all products in the category".
+            limit = job.row_limit
+            staged_asins = {
+                product.asin
+                for product in self.dataset.iter_products(
+                    category=job.category, offset=0, limit=limit
+                )
+            }
+
+        stages = job.review_stages or ("embed", "classify", "aggregate")
+        review_work_items = tuple(s for s in stages if s in ("embed", "classify"))
+
+        review_count = 0
+        if review_work_items:
+            per_product = (
+                job.reviews_per_product
+                if job.reviews_per_product is not None
+                else self.settings.review_recent_cap_per_product
+            )
+            # Split per-product cap between recent and helpful heaps. The two
+            # selections dedupe by review_id, so the effective per-product
+            # count lands in [per_product, 2*per_product] before global cap.
+            recent_limit = max(0, per_product // 2)
+            helpful_limit = max(0, per_product - recent_limit)
+            review_count = await self.stage_reviews_for_asins(
+                job,
+                staged_asins,
+                recent_limit=recent_limit,
+                helpful_limit=helpful_limit,
+                max_total_reviews=job.max_total_reviews,
+                work_items=review_work_items,
+            )
+
+        aggregate_count = 0
+        if "aggregate" in stages and staged_asins:
+            await self.layer.create_pipeline(
+                self.settings.review_aggregate_pipeline_id,
+                self.settings.namespace,
+                self.settings.distance_metric,
+            )
+            aggregate_count = await self.layer.set_pipeline_documents_stage(
+                self.settings.review_aggregate_pipeline_id,
+                sorted(staged_asins),
+                stage="pending",
+                create_missing=True,
+            )
+
+        logger.info(
+            "completed backfill job",
+            extra={
+                "job_id": job.id,
+                "asin_count": len(staged_asins),
+                "reviews_staged": review_count,
+                "aggregate_enqueued": aggregate_count,
+                "stages": list(stages),
+            },
+        )
+        # processed_count is set to the asin count so /status numbers remain
+        # comparable across job kinds.
+        return len(staged_asins)
 
     async def stage_products(
         self, job: ExtractionJob, products: list[ProductRecord]
@@ -180,9 +258,18 @@ class ExtractionWorker:
         return processed, staged_asins
 
     async def stage_reviews_for_asins(
-        self, job: ExtractionJob, staged_asins: set[str]
+        self,
+        job: ExtractionJob,
+        staged_asins: set[str],
+        *,
+        recent_limit: int,
+        helpful_limit: int,
+        max_total_reviews: int | None,
+        work_items: tuple[str, ...],
     ) -> int:
-        if not staged_asins:
+        if not staged_asins or not work_items:
+            return 0
+        if recent_limit <= 0 and helpful_limit <= 0:
             return 0
 
         concurrency = max(1, self.settings.review_stage_concurrency)
@@ -192,13 +279,17 @@ class ExtractionWorker:
 
         async def producer() -> None:
             try:
+                emitted = 0
                 for review in self.dataset.iter_reviews_for_asins(
                     category=job.category,
                     asins=staged_asins,
-                    recent_limit=self.settings.review_recent_cap_per_product,
-                    helpful_limit=self.settings.review_helpful_cap_per_product,
+                    recent_limit=recent_limit,
+                    helpful_limit=helpful_limit,
                 ):
+                    if max_total_reviews is not None and emitted >= max_total_reviews:
+                        break
                     await queue.put(review)
+                    emitted += 1
             finally:
                 for _ in range(concurrency):
                     await queue.put(None)
@@ -212,16 +303,14 @@ class ExtractionWorker:
                         return staged
                     try:
                         await asyncio.gather(
-                            self.layer.stage_review(
-                                self.settings.reviews_pipeline_id,
-                                review,
-                                work_item="embed",
-                            ),
-                            self.layer.stage_review(
-                                self.settings.reviews_pipeline_id,
-                                review,
-                                work_item="classify",
-                            ),
+                            *(
+                                self.layer.stage_review(
+                                    self.settings.reviews_pipeline_id,
+                                    review,
+                                    work_item=item,
+                                )
+                                for item in work_items
+                            )
                         )
                         staged += 1
                     except Exception:
@@ -240,7 +329,12 @@ class ExtractionWorker:
             "staging reviews for %s asins with concurrency %s",
             len(staged_asins),
             concurrency,
-            extra={"job_id": job.id, "category": job.category},
+            extra={
+                "job_id": job.id,
+                "category": job.category,
+                "work_items": list(work_items),
+                "max_total_reviews": max_total_reviews,
+            },
         )
         producer_task = asyncio.create_task(producer())
         consumer_tasks = [asyncio.create_task(consumer()) for _ in range(concurrency)]
