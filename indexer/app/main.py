@@ -58,7 +58,7 @@ async def get_text_embedder(app: FastAPI):
         return app.state.text_embedder
     async with app.state.text_embedder_lock:
         if app.state.text_embedder is None:
-            from .embedding import CLIPTextEmbedder
+            from .embedders import CLIPTextEmbedder
 
             app.state.text_embedder = await asyncio.to_thread(
                 CLIPTextEmbedder, app.state.settings
@@ -71,7 +71,7 @@ async def get_review_text_embedder(app: FastAPI):
         return app.state.review_text_embedder
     async with app.state.review_text_embedder_lock:
         if app.state.review_text_embedder is None:
-            from .embedding import QwenTextEmbedder
+            from .embedders import QwenTextEmbedder
 
             app.state.review_text_embedder = await asyncio.to_thread(
                 QwenTextEmbedder, app.state.settings

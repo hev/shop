@@ -501,14 +501,14 @@ STAGES: dict[str, Stage] = {
 
 def _clip_image(ctx: StageContext):
     if ctx._clip_image is None:
-        from .embedding import CLIPImageEmbedder
+        from .embedders import CLIPImageEmbedder
         ctx._clip_image = CLIPImageEmbedder(ctx.settings)
     return ctx._clip_image
 
 
 def _qwen(ctx: StageContext):
     if ctx._qwen is None:
-        from .embedding import QwenTextEmbedder
+        from .embedders import QwenTextEmbedder
         ctx._qwen = QwenTextEmbedder(ctx.settings)
     return ctx._qwen
 
