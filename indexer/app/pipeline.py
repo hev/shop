@@ -34,12 +34,13 @@ from .layer_client import LayerClient
 from datetime import datetime, timezone
 
 from .classifier import ReviewClassificationInput
-from .reviews import (
+from .records import (
     REVIEW_CLASSIFY_PREFIX,
     REVIEW_EMBED_PREFIX,
+    product_vector_attributes,
     review_namespace_for,
+    review_vector_attributes,
 )
-from .vector_attrs import review_vector_attributes
 
 logger = logging.getLogger(__name__)
 
@@ -164,8 +165,6 @@ async def setup_embed_products(ctx: StageContext) -> None:
 
 
 async def process_embed_products(ctx: StageContext, doc_ids: list[str]) -> StageOutcome:
-    from .vector_attrs import product_vector_attributes
-
     fail: list[str] = []
     prepared: list[tuple[str, Path, dict[str, Any]]] = []  # (doc_id, image, attrs)
 

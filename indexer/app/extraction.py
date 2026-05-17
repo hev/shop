@@ -12,7 +12,7 @@ from .config import Settings
 from .database import Database, ExtractionJob
 from .dataset import AmazonProductDataset
 from .layer_client import LayerClient
-from .models import ProductRecord, ReviewRecord
+from .records import ProductRecord, ReviewRecord
 
 logger = logging.getLogger(__name__)
 

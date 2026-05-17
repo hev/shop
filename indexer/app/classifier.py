@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 
 from .config import Settings
-from .reviews import REVIEW_TAGS
+from .records import REVIEW_TAGS
 
 logger = logging.getLogger(__name__)
 

@@ -1,6 +1,7 @@
 import unittest
 
-from app.reviews import (
+from app.records import (
+    product_vector_attributes,
     review_id_from_work_document,
     review_namespace_for,
     review_work_document_id,
@@ -8,7 +9,7 @@ from app.reviews import (
 )
 
 
-class ReviewPipelineTests(unittest.TestCase):
+class StableShardTests(unittest.TestCase):
     def test_stable_shard_is_bounded_and_repeatable(self):
         first = stable_shard("B0123", 16)
         second = stable_shard("B0123", 16)
@@ -29,6 +30,29 @@ class ReviewPipelineTests(unittest.TestCase):
 
         self.assertEqual(doc_id, "review-classify:r123")
         self.assertEqual(review_id_from_work_document(doc_id), "r123")
+
+
+class ProductVectorAttributeTests(unittest.TestCase):
+    def test_avoids_numeric_schema_conflicts(self):
+        attrs = product_vector_attributes(
+            {
+                "asin": "B0123",
+                "title": "Camera",
+                "category": "Electronics",
+                "description": "Small camera",
+                "image_url": "https://example.test/camera.jpg",
+                "image_path": "/data/images/B0123.jpg",
+                "avg_rating": 3.5,
+                "rating_count": 6,
+            },
+            "fallback",
+        )
+
+        self.assertEqual(attrs["asin"], "B0123")
+        self.assertEqual(attrs["avg_rating_txt"], "3.5")
+        self.assertEqual(attrs["rating_cnt_txt"], "6")
+        self.assertNotIn("avg_rating", attrs)
+        self.assertNotIn("rating_count", attrs)
 
 
 if __name__ == "__main__":

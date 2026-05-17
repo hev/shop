@@ -8,7 +8,7 @@ from collections.abc import Iterable, Iterator
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from .models import ProductRecord, ReviewRecord
+from .records import ProductRecord, ReviewRecord
 
 if TYPE_CHECKING:
     from .config import Settings

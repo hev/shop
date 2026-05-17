@@ -26,11 +26,14 @@ from .models import (
     SearchRequest,
     SearchResponse,
     StatusResponse,
+)
+from .records import (
     normalize_asin_list,
     normalize_backfill_stages,
     normalize_review_tags,
+    review_namespace_for,
+    review_work_document_id,
 )
-from .reviews import review_namespace_for, review_work_document_id
 
 
 @asynccontextmanager

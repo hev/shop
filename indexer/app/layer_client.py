@@ -5,8 +5,12 @@ from typing import Any
 
 import httpx
 
-from .models import ProductRecord, ReviewRecord
-from .reviews import review_raw_chunk_id, review_work_document_id
+from .records import (
+    ProductRecord,
+    ReviewRecord,
+    review_raw_chunk_id,
+    review_work_document_id,
+)
 
 
 class LayerClient:

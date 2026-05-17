@@ -309,7 +309,7 @@ class EmbedReviewsStageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call["prefix"], "review-embed:")
 
     async def test_happy_path_upserts_to_sharded_namespace(self) -> None:
-        from app.reviews import REVIEW_EMBED_PREFIX, review_namespace_for
+        from app.records import REVIEW_EMBED_PREFIX, review_namespace_for
 
         doc_id = f"{REVIEW_EMBED_PREFIX}r-1"
         self.layer.next_claim = [doc_id]
