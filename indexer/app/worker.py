@@ -7,16 +7,19 @@ import signal
 from .config import get_settings
 from .database import Database
 from .dataset import AmazonProductDataset
-from .embedding import (
-    CLIPImageEmbedder,
-    EmbeddingWorker,
-    QwenTextEmbedder,
-    ReviewEmbeddingWorker,
-)
 from .extraction import ExtractionWorker
 from .layer_client import LayerClient
-from .classifier import OpenRouterReviewClassifier
-from .review_workers import ReviewAggregateWorker, ReviewClassifierWorker
+from .pipeline import STAGES, StageContext, run_stage
+
+
+# WORKER_TYPE env values map directly to STAGES keys, except "cpu" which
+# runs the extraction worker (postgres job queue, not a layer pipeline).
+STAGE_FOR_WORKER_TYPE = {
+    "gpu": "embed-products",
+    "review-embed": "embed-reviews",
+    "review-classify": "classify-reviews",
+    "review-aggregate": "aggregate-tags",
+}
 
 
 def install_signal_handlers(stop_event: asyncio.Event) -> None:
@@ -49,47 +52,21 @@ async def amain() -> None:
                 await worker.run_forever(stop_event)
             finally:
                 await worker.close()
-        elif settings.worker_type == "gpu":
-            worker = EmbeddingWorker(
-                settings=settings,
-                database=database,
-                layer=layer,
-                embedder=CLIPImageEmbedder(settings),
-                pipeline_id=settings.default_pipeline_id,
-                namespace_resolver=lambda _metadata, _doc_id: settings.namespace,
-                include_review_tag_attrs=True,
-            )
-            await worker.run_forever(stop_event)
-        elif settings.worker_type == "review-embed":
-            worker = ReviewEmbeddingWorker(
-                settings=settings,
-                database=database,
-                layer=layer,
-                embedder=QwenTextEmbedder(settings),
-            )
-            await worker.run_forever(stop_event)
-        elif settings.worker_type == "review-classify":
-            worker = ReviewClassifierWorker(
-                settings=settings,
-                database=database,
-                layer=layer,
-                classifier=OpenRouterReviewClassifier(settings),
-            )
+        elif settings.worker_type in STAGE_FOR_WORKER_TYPE:
+            stage = STAGES[STAGE_FOR_WORKER_TYPE[settings.worker_type]]
+            ctx = StageContext(settings=settings, database=database, layer=layer)
             try:
-                await worker.run_forever(stop_event)
+                await run_stage(stage, ctx, stop_event)
             finally:
-                await worker.close()
-        elif settings.worker_type == "review-aggregate":
-            worker = ReviewAggregateWorker(
-                settings=settings,
-                database=database,
-                layer=layer,
-            )
-            await worker.run_forever(stop_event)
+                # OpenRouterReviewClassifier holds an httpx client; close
+                # it if classify-reviews lazily instantiated one.
+                classifier = ctx._classifier
+                if classifier is not None and hasattr(classifier, "close"):
+                    await classifier.close()
         else:
             raise ValueError(
-                "WORKER_TYPE must be one of 'cpu', 'gpu', 'review-embed', "
-                "'review-classify', or 'review-aggregate'"
+                "WORKER_TYPE must be one of 'cpu', "
+                + ", ".join(repr(name) for name in STAGE_FOR_WORKER_TYPE)
             )
     finally:
         await layer.close()
