@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-TF_DIR="${TF_DIR:-}"
+TF_DIR="${TF_DIR:-../layer/infra/terraform}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 SKIP_TERRAFORM="${SKIP_TERRAFORM:-0}"
 INSTALL_NVIDIA_PLUGIN="${INSTALL_NVIDIA_PLUGIN:-1}"
