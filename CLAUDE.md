@@ -5,11 +5,12 @@
 The app runs on EKS in namespace `hev-shop`, fronted by a shared ALB
 (IngressGroup `hev-public`). Public DNS comes from `../mesh/infra/ingress/hev-shop/`.
 
-| Surface          | URL                                  | Backed by Service                                     |
-| ---------------- | ------------------------------------ | ----------------------------------------------------- |
-| Storefront       | https://hev-shop.com                 | `hev-shop-web` (port 80 → pod 3000)                   |
-| Storefront (www) | https://www.hev-shop.com → 301 apex  | LBC `redirect-to-apex` action                         |
-| Indexer API      | https://api.hev-shop.com             | `hev-shop-api` (port 8080)                            |
+| Surface          | URL                                       | Backed by Service                                     |
+| ---------------- | ----------------------------------------- | ----------------------------------------------------- |
+| Storefront       | https://hev-shop.com                      | `hev-shop-web` (port 80 → pod 3000)                   |
+| Storefront (www) | https://www.hev-shop.com → 301 apex       | LBC `redirect-to-apex` action                         |
+| Indexer API      | https://api.hev-shop.com                  | `hev-shop-api` (port 8080)                            |
+| Layer gateway    | https://aws-us-east-1.hevlayer.com        | `layer-gateway` in namespace `layer` (port 8080)      |
 
 The web pod talks to the API in-cluster via
 `HEV_SHOP_API_BASE=http://hev-shop-api.hev-shop.svc.cluster.local:8080`
@@ -31,9 +32,18 @@ curl -s "https://api.hev-shop.com/search/reviews?asin=B00FI7TCGI&q=battery&top_k
 The full request/response contract for these endpoints is in
 `indexer/app/main.py` and mirrored on the web side in `web/lib/backend.ts`.
 
+### Curl the layer gateway directly
+
+```sh
+curl -s https://aws-us-east-1.hevlayer.com/v2/pipelines | jq .
+curl -s https://aws-us-east-1.hevlayer.com/v2/namespaces/amazon-products/metadata | jq .
+```
+
 ### Reach in-cluster from your laptop
 
-If you need to bypass the ALB (e.g. layer-gateway has no public ingress):
+Use port-forward only when bypassing the ALB is necessary (e.g. testing
+a service that doesn't have public DNS — both `hev-shop-api` and
+`layer-gateway` *do* have public DNS, see the table above):
 
 ```sh
 kubectl port-forward -n hev-shop  svc/hev-shop-api  18080:8080
@@ -52,13 +62,11 @@ kubectl exec -it    -n hev-shop deploy/hev-shop-api -- sh
 ```
 
 The Go CLI takes two URL flags: `--gateway-url` points at layer-gateway,
-`--indexer-url` points at the hev-shop indexer API. The public ALB only
-exposes the indexer, so for layer-gateway use `kubectl port-forward`.
+`--indexer-url` points at the hev-shop indexer API. Both have public DNS:
 
 ```sh
 go run . status --indexer-url https://api.hev-shop.com --pipeline-id amazon-products-images
-kubectl port-forward -n layer svc/layer-gateway 18180:8080 &
-go run . health --gateway-url http://127.0.0.1:18180
+go run . health --gateway-url https://aws-us-east-1.hevlayer.com
 ```
 
 ## Indexer module layout (`indexer/app/`)
