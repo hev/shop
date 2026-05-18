@@ -53,6 +53,12 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            - name: MODEL_CACHE_DIR
+              value: /model-cache
+            - name: HF_HOME
+              value: /model-cache
+            - name: TRANSFORMERS_CACHE
+              value: /model-cache
           envFrom:
             - configMapRef:
                 name: hev-shop-config
@@ -62,15 +68,22 @@ spec:
             requests:
               cpu: "1"
               memory: 13Gi
+              ephemeral-storage: 10Gi
               nvidia.com/gpu: "1"
             limits:
               cpu: "4"
               memory: 15Gi
+              ephemeral-storage: 200Gi
               nvidia.com/gpu: "1"
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: model-cache
+              mountPath: /model-cache
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: hev-shop-data
+        - name: model-cache
+          emptyDir:
+            sizeLimit: 200Gi

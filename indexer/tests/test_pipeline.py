@@ -14,6 +14,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from app.classifier import ReviewTag
 from app.pipeline import (
@@ -69,6 +70,7 @@ class StageManifestTests(unittest.TestCase):
         self.assertEqual(stage.from_stage, "embedding")
         self.assertEqual(stage.claim_size_attr, "embedding_claim_size")
         self.assertEqual(stage.prefix, "review-embed:")
+        self.assertIsNotNone(stage.setup)
 
     def test_classify_reviews(self) -> None:
         stage = STAGES["classify-reviews"]
@@ -126,8 +128,8 @@ class DriverTests(unittest.IsolatedAsyncioTestCase):
         async def process(_ctx, doc_ids):
             self.assertEqual(doc_ids, ["a", "b", "c", "d"])
             return StageOutcome(complete=["a"], fail=["b"], release=["c"])
-            # 'd' intentionally left out — driver should NOT auto-release;
-            # process is responsible for accounting for every claimed doc.
+            # 'd' intentionally left out; the driver should release it so a
+            # stage bug cannot strand a claimed document forever.
 
         result = await _run_once(synthetic_stage(process), ctx)
 
@@ -136,7 +138,7 @@ class DriverTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(layer.complete_calls[0]["from_stage"], "embedding")
         self.assertEqual(layer.fail_calls[0]["doc_ids"], ["b"])
         self.assertEqual(layer.fail_calls[0]["from_stage"], "embedding")
-        self.assertEqual(layer.release_calls[0]["doc_ids"], ["c"])
+        self.assertEqual(layer.release_calls[0]["doc_ids"], ["c", "d"])
         self.assertEqual(layer.release_calls[0]["from_stage"], "embedding")
 
     async def test_process_raising_releases_all_claimed_and_propagates(self) -> None:
@@ -212,6 +214,21 @@ class EmbedProductsStageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.layer.claim_calls[0]["pipeline_id"], "amazon-products-images")
         self.assertIsNone(self.layer.claim_calls[0]["prefix"])
         self.assertEqual(self.layer.upsert_calls, [])
+
+    async def test_setup_creates_pipeline_and_warms_clip_before_claim(self) -> None:
+        layer = FakeLayerClient()
+        ctx = make_ctx(layer=layer, database=self.database)
+
+        with patch("app.embedders.CLIPImageEmbedder", return_value=self.embedder) as ctor:
+            await self.stage.setup(ctx)
+
+        self.assertEqual(
+            layer.create_pipeline_calls,
+            [("amazon-products-images", "amazon-products", "cosine_distance")],
+        )
+        ctor.assert_called_once_with(ctx.settings)
+        self.assertIs(ctx._clip_image, self.embedder)
+        self.assertEqual(layer.claim_calls, [])
 
     async def test_happy_path_merges_tag_rollup_and_completes(self) -> None:
         self.layer.next_claim = ["A1"]
@@ -307,6 +324,21 @@ class EmbedReviewsStageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call["pipeline_id"], "hev-shop-reviews")
         self.assertEqual(call["claim_stage"], "embedding")
         self.assertEqual(call["prefix"], "review-embed:")
+
+    async def test_setup_creates_pipeline_and_warms_qwen_before_claim(self) -> None:
+        layer = FakeLayerClient()
+        ctx = make_ctx(layer=layer, database=self.database)
+
+        with patch("app.embedders.QwenTextEmbedder", return_value=self.embedder) as ctor:
+            await self.stage.setup(ctx)
+
+        self.assertEqual(
+            layer.create_pipeline_calls,
+            [("hev-shop-reviews", "amazon-reviews", "cosine_distance")],
+        )
+        ctor.assert_called_once_with(ctx.settings)
+        self.assertIs(ctx._qwen, self.embedder)
+        self.assertEqual(layer.claim_calls, [])
 
     async def test_happy_path_upserts_to_sharded_namespace(self) -> None:
         from app.records import REVIEW_EMBED_PREFIX, review_namespace_for

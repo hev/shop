@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import time
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 
@@ -35,6 +37,8 @@ from .records import (
     review_work_document_id,
 )
 
+logger = logging.getLogger("hev_shop.indexer")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -42,16 +46,32 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     database = await Database.connect(settings.layer_database_url)
     await database.ensure_schema()
     layer = LayerClient(settings.layer_gateway_url, settings.http_timeout_seconds)
+    text_settings = (
+        settings.model_copy(update={"model_cache_dir": settings.api_model_cache_dir})
+        if settings.api_model_cache_dir is not None
+        else settings
+    )
     app.state.settings = settings
+    app.state.text_embedder_settings = text_settings
     app.state.database = database
     app.state.layer = layer
     app.state.text_embedder = None
     app.state.text_embedder_lock = asyncio.Lock()
+    app.state.text_embedder_warm_task = None
     app.state.review_text_embedder = None
     app.state.review_text_embedder_lock = asyncio.Lock()
+    app.state.meta_cache = {}
+    app.state.meta_cache_lock = asyncio.Lock()
+    if settings.prewarm_text_embedder:
+        app.state.text_embedder_warm_task = asyncio.create_task(
+            warm_text_embedder(app)
+        )
     try:
         yield
     finally:
+        warm_task = app.state.text_embedder_warm_task
+        if warm_task is not None and not warm_task.done():
+            warm_task.cancel()
         await layer.close()
         await database.close()
 
@@ -63,10 +83,22 @@ async def get_text_embedder(app: FastAPI):
         if app.state.text_embedder is None:
             from .embedders import CLIPTextEmbedder
 
+            settings = getattr(app.state, "text_embedder_settings", app.state.settings)
             app.state.text_embedder = await asyncio.to_thread(
-                CLIPTextEmbedder, app.state.settings
+                CLIPTextEmbedder, settings
             )
         return app.state.text_embedder
+
+
+async def warm_text_embedder(app: FastAPI) -> None:
+    start = time.monotonic()
+    try:
+        await get_text_embedder(app)
+        logger.info("text embedder warmed in %.3fs", time.monotonic() - start)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("text embedder warm failed")
 
 
 async def get_review_text_embedder(app: FastAPI):
@@ -417,28 +449,48 @@ async def meta(request: Request, namespace: str | None = None) -> MetaResponse:
     settings = request.app.state.settings
     layer: LayerClient = request.app.state.layer
     resolved_namespace = namespace or settings.namespace
+    cache_ttl = max(settings.meta_cache_ttl_seconds, 0.0)
+    cache_key = resolved_namespace
 
-    metadata, category_scan = await asyncio.gather(
-        layer.fetch_namespace_metadata(resolved_namespace),
-        layer.scan(resolved_namespace, "field_values", field="category"),
-    )
+    if cache_ttl > 0:
+        cached = request.app.state.meta_cache.get(cache_key)
+        if cached is not None:
+            cached_at, cached_response = cached
+            if time.monotonic() - cached_at < cache_ttl:
+                return cached_response
 
-    category_results = await layer.get_scan_results(
-        resolved_namespace, category_scan["id"]
-    )
-    categories = [
-        CategoryBucket(value=row["value"], doc_count=row["doc_count"])
-        for row in category_results.get("results", [])
-    ]
+    async with request.app.state.meta_cache_lock:
+        if cache_ttl > 0:
+            cached = request.app.state.meta_cache.get(cache_key)
+            if cached is not None:
+                cached_at, cached_response = cached
+                if time.monotonic() - cached_at < cache_ttl:
+                    return cached_response
 
-    layer_block = metadata.get("layer") or {}
-    return MetaResponse(
-        namespace=resolved_namespace,
-        vectors=int(metadata.get("approx_row_count") or 0),
-        categories=categories,
-        stable_as_of=layer_block.get("stable_as_of"),
-        is_stable=bool(layer_block.get("is_stable", False)),
-    )
+        metadata, category_scan = await asyncio.gather(
+            layer.fetch_namespace_metadata(resolved_namespace),
+            layer.scan(resolved_namespace, "field_values", field="category"),
+        )
+
+        category_results = await layer.get_scan_results(
+            resolved_namespace, category_scan["id"]
+        )
+        categories = [
+            CategoryBucket(value=row["value"], doc_count=row["doc_count"])
+            for row in category_results.get("results", [])
+        ]
+
+        layer_block = metadata.get("layer") or {}
+        response = MetaResponse(
+            namespace=resolved_namespace,
+            vectors=int(metadata.get("approx_row_count") or 0),
+            categories=categories,
+            stable_as_of=layer_block.get("stable_as_of"),
+            is_stable=bool(layer_block.get("is_stable", False)),
+        )
+        if cache_ttl > 0:
+            request.app.state.meta_cache[cache_key] = (time.monotonic(), response)
+        return response
 
 
 @app.get("/status", response_model=StatusResponse)

@@ -53,6 +53,8 @@ config:
   MODEL_CACHE_DIR: /data/models
   CLIP_MODEL_NAME: openai/clip-vit-large-patch14
   CLIP_DEVICE: auto
+  PREWARM_TEXT_EMBEDDER: "true"
+  META_CACHE_TTL_SECONDS: "30"
   REVIEW_EMBEDDING_MODEL_NAME: Qwen/Qwen3-Embedding-8B
   REVIEW_EMBEDDING_DEVICE: auto
   REVIEW_CHUNK_TOKENS: "256"
@@ -140,6 +142,7 @@ karpenter:
     enabled: true
     name: ""
     amiFamily: AL2023
+    instanceStorePolicy: RAID0
     metadataOptions:
       httpEndpoint: enabled
       httpProtocolIPv6: disabled
@@ -191,11 +194,27 @@ api:
       effect: NoSchedule
   resources:
     requests:
-      cpu: 250m
-      memory: 1Gi
+      cpu: "1"
+      memory: 2Gi
+      ephemeral-storage: 5Gi
     limits:
-      cpu: "2"
-      memory: 4Gi
+      cpu: "4"
+      memory: 8Gi
+      ephemeral-storage: 30Gi
+  env:
+    - name: API_MODEL_CACHE_DIR
+      value: /model-cache
+    - name: HF_HOME
+      value: /model-cache
+    - name: TRANSFORMERS_CACHE
+      value: /model-cache
+  volumeMounts:
+    - name: model-cache
+      mountPath: /model-cache
+  volumes:
+    - name: model-cache
+      emptyDir:
+        sizeLimit: 30Gi
 
 web:
   replicaCount: 1
@@ -333,11 +352,27 @@ workers:
       requests:
         cpu: "1"
         memory: 13Gi
+        ephemeral-storage: 10Gi
         nvidia.com/gpu: "1"
       limits:
         cpu: "4"
         memory: 15Gi
+        ephemeral-storage: 200Gi
         nvidia.com/gpu: "1"
+    env:
+      - name: MODEL_CACHE_DIR
+        value: /model-cache
+      - name: HF_HOME
+        value: /model-cache
+      - name: TRANSFORMERS_CACHE
+        value: /model-cache
+    volumeMounts:
+      - name: model-cache
+        mountPath: /model-cache
+    volumes:
+      - name: model-cache
+        emptyDir:
+          sizeLimit: 200Gi
     autoscaling:
       enabled: true
       pollingInterval: 15

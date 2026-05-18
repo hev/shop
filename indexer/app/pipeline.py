@@ -123,6 +123,23 @@ async def _run_once(stage: Stage, ctx: StageContext) -> int:
         with suppress(asyncio.CancelledError):
             await hb
 
+    accounted = set(outcome.complete) | set(outcome.fail) | set(outcome.release)
+    unaccounted = sorted(active - accounted)
+    if unaccounted:
+        logger.warning(
+            "stage returned without a disposition for claimed documents; releasing",
+            extra={
+                "stage": stage.name,
+                "pipeline_id": pipeline_id,
+                "unaccounted_count": len(unaccounted),
+            },
+        )
+        outcome = StageOutcome(
+            complete=outcome.complete,
+            fail=outcome.fail,
+            release=[*outcome.release, *unaccounted],
+        )
+
     if outcome.complete:
         await ctx.layer.complete_pipeline_documents(
             pipeline_id, outcome.complete, from_stage=stage.from_stage, worker_id=worker_id,
@@ -162,6 +179,7 @@ async def setup_embed_products(ctx: StageContext) -> None:
         ctx.settings.namespace,
         ctx.settings.distance_metric,
     )
+    _clip_image(ctx)
 
 
 async def process_embed_products(ctx: StageContext, doc_ids: list[str]) -> StageOutcome:
@@ -217,6 +235,15 @@ async def process_embed_products(ctx: StageContext, doc_ids: list[str]) -> Stage
 # ---------------------------------------------------------------------------
 # Stage: embed-reviews  (Qwen chunked text → review namespace)
 # ---------------------------------------------------------------------------
+
+async def setup_embed_reviews(ctx: StageContext) -> None:
+    await ctx.layer.create_pipeline(
+        ctx.settings.reviews_pipeline_id,
+        ctx.settings.reviews_namespace_base,
+        ctx.settings.distance_metric,
+    )
+    _qwen(ctx)
+
 
 async def process_embed_reviews(ctx: StageContext, doc_ids: list[str]) -> StageOutcome:
     embedder = _qwen(ctx)
@@ -468,6 +495,7 @@ STAGES: dict[str, Stage] = {
         from_stage="embedding",
         claim_size_attr="embedding_claim_size",
         prefix=REVIEW_EMBED_PREFIX,
+        setup=setup_embed_reviews,
         process=process_embed_reviews,
     ),
     "classify-reviews": Stage(

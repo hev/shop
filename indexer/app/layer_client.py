@@ -374,10 +374,15 @@ class LayerClient:
         poll_interval: float = 1.0,
         timeout: float | None = None,
     ) -> dict[str, Any]:
-        """Poll get_scan until status != 'running'. Raises TimeoutError if
-        `timeout` (seconds) elapses first, or RuntimeError if the scan fails."""
+        """Poll get_scan until status != 'running'. Polling starts at 50ms
+        and backs off exponentially, capped at `poll_interval` seconds, so a
+        fast snapshot scan (~100-300ms) is observed quickly while a long
+        origin scan still tops out at the configured cadence. Raises
+        TimeoutError if `timeout` (seconds) elapses first, or RuntimeError
+        if the scan fails."""
         loop = asyncio.get_event_loop()
         deadline = loop.time() + timeout if timeout is not None else None
+        delay = min(0.05, poll_interval)
         while True:
             scan = await self.get_scan(namespace, scan_id)
             status = scan.get("status")
@@ -389,7 +394,8 @@ class LayerClient:
                 )
             if deadline is not None and loop.time() >= deadline:
                 raise TimeoutError(f"scan {scan_id} did not complete in {timeout}s")
-            await asyncio.sleep(poll_interval)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, poll_interval)
 
     async def scan(
         self,

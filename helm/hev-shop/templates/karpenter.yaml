@@ -73,6 +73,9 @@ metadata:
 spec:
   amiFamily: {{ .Values.karpenter.gpu.amiFamily }}
   instanceProfile: {{ $instanceProfile }}
+  {{- with .Values.karpenter.gpu.instanceStorePolicy }}
+  instanceStorePolicy: {{ . | quote }}
+  {{- end }}
   amiSelectorTerms:
     - ssmParameter: /aws/service/eks/optimized-ami/{{ $kubernetesVersion }}/amazon-linux-2023/x86_64/nvidia/recommended/image_id
   {{- with .Values.karpenter.gpu.metadataOptions }}

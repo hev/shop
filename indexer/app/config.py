@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     dataset_cache_dir: Path = Field(default=Path("/data/dataset"), alias="DATASET_DIR")
     image_dir: Path = Field(default=Path("/data/images"), alias="IMAGE_DIR")
     model_cache_dir: Path = Field(default=Path("/data/models"), alias="MODEL_CACHE_DIR")
+    api_model_cache_dir: Path | None = Field(
+        default=None, alias="API_MODEL_CACHE_DIR"
+    )
+    prewarm_text_embedder: bool = Field(
+        default=True, alias="PREWARM_TEXT_EMBEDDER"
+    )
+    meta_cache_ttl_seconds: float = Field(default=30.0, alias="META_CACHE_TTL_SECONDS")
 
     # CLIP ViT-L/14 has 768-dimensional image features, matching the current
     # hev-shop design doc. The model name is configurable for smaller local runs.

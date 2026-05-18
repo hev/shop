@@ -57,6 +57,9 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            {{- with $worker.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           envFrom:
             - configMapRef:
                 name: {{ include "hev-shop.configName" $root }}
@@ -64,16 +67,26 @@ spec:
                 name: {{ include "hev-shop.secretName" $root }}
           resources:
             {{- toYaml $worker.resources | nindent 12 }}
-          {{- if $root.Values.persistence.enabled }}
+          {{- if or $root.Values.persistence.enabled $worker.volumeMounts }}
           volumeMounts:
+            {{- if $root.Values.persistence.enabled }}
             - name: data
               mountPath: {{ $root.Values.persistence.mountPath }}
+            {{- end }}
+            {{- with $worker.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
-      {{- if $root.Values.persistence.enabled }}
+      {{- if or $root.Values.persistence.enabled $worker.volumes }}
       volumes:
+        {{- if $root.Values.persistence.enabled }}
         - name: data
           persistentVolumeClaim:
             claimName: {{ include "hev-shop.pvcName" $root }}
+        {{- end }}
+        {{- with $worker.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- end }}
 {{- end }}
 {{- end }}
