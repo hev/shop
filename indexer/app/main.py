@@ -19,6 +19,7 @@ from .models import (
     IndexCategoryResponse,
     IndexRequest,
     IndexResponse,
+    LayerPerf,
     MetaResponse,
     ProductResponse,
     ReviewSample,
@@ -281,7 +282,7 @@ async def search(request: Request, body: SearchRequest) -> SearchResponse:
     embedder = await get_text_embedder(request.app)
     vector = await asyncio.to_thread(embedder.encode_text, body.query)
     try:
-        layer_response = await layer.query_namespace(
+        layer_response, perf = await layer.query_namespace_with_perf(
             namespace=namespace,
             vector=vector,
             top_k=body.top_k,
@@ -303,6 +304,10 @@ async def search(request: Request, body: SearchRequest) -> SearchResponse:
         namespace=namespace,
         hits=hits,
         stable_as_of=layer_response.get("stable_as_of"),
+        layer_perf=LayerPerf(
+            latency_ms=perf.latency_ms,
+            cache_status=perf.cache_status,
+        ),
     )
 
 
@@ -311,7 +316,7 @@ async def product(request: Request, asin: str) -> ProductResponse:
     settings = request.app.state.settings
     layer: LayerClient = request.app.state.layer
     try:
-        document = await layer.fetch_document(
+        document, perf = await layer.fetch_document_with_perf(
             settings.namespace,
             asin,
             include_attributes=[
@@ -333,6 +338,10 @@ async def product(request: Request, asin: str) -> ProductResponse:
         asin=asin,
         namespace=settings.namespace,
         attributes=decode_dict_attrs(document.get("attributes")),
+        layer_perf=LayerPerf(
+            latency_ms=perf.latency_ms,
+            cache_status=perf.cache_status,
+        ),
     )
 
 
@@ -364,7 +373,7 @@ async def search_reviews(
 
     embedder = await get_review_text_embedder(request.app)
     vector = await asyncio.to_thread(embedder.encode_texts, [q])
-    layer_response = await layer.query_namespace(
+    layer_response, perf = await layer.query_namespace_with_perf(
         namespace=namespace,
         vector=vector[0],
         top_k=top_k,
@@ -395,6 +404,10 @@ async def search_reviews(
         category=category,
         hits=hits,
         stable_as_of=layer_response.get("stable_as_of"),
+        layer_perf=LayerPerf(
+            latency_ms=perf.latency_ms,
+            cache_status=perf.cache_status,
+        ),
     )
 
 
@@ -467,8 +480,8 @@ async def meta(request: Request, namespace: str | None = None) -> MetaResponse:
                 if time.monotonic() - cached_at < cache_ttl:
                     return cached_response
 
-        metadata, category_scan = await asyncio.gather(
-            layer.fetch_namespace_metadata(resolved_namespace),
+        (metadata, metadata_perf), category_scan = await asyncio.gather(
+            layer.fetch_namespace_metadata_with_perf(resolved_namespace),
             layer.scan(resolved_namespace, "field_values", field="category"),
         )
 
@@ -487,6 +500,10 @@ async def meta(request: Request, namespace: str | None = None) -> MetaResponse:
             categories=categories,
             stable_as_of=layer_block.get("stable_as_of"),
             is_stable=bool(layer_block.get("is_stable", False)),
+            layer_perf=LayerPerf(
+                latency_ms=metadata_perf.latency_ms,
+                cache_status=metadata_perf.cache_status,
+            ),
         )
         if cache_ttl > 0:
             request.app.state.meta_cache[cache_key] = (time.monotonic(), response)

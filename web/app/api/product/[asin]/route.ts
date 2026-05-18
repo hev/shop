@@ -11,9 +11,13 @@ export async function GET(
   const { asin } = await params;
 
   if (backendEnabled()) {
-    const product = await backendProduct(asin).catch(() => null);
-    if (product) {
-      return NextResponse.json({ product, source: "backend" });
+    const fetched = await backendProduct(asin).catch(() => null);
+    if (fetched) {
+      return NextResponse.json({
+        product: fetched.product,
+        layer_perf: fetched.layer_perf,
+        source: "backend",
+      });
     }
     return NextResponse.json(
       { product: null, source: "backend" },

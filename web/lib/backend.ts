@@ -15,17 +15,57 @@ type BackendHit = {
   attributes: Record<string, unknown>;
 };
 
+export type LayerPerf = {
+  // Gateway round-trip in ms (HTTP only — no handler-side work).
+  latency_ms: number;
+  // `x-layer-cache` header from the gateway. "hit"/"miss"/"miss-on-error"
+  // for cache-eligible endpoints (fetch_document, namespace metadata).
+  // null for query endpoints — they don't go through the document cache.
+  cache_status: string | null;
+};
+
 type BackendSearchResponse = {
   query: string;
   namespace: string;
   hits: BackendHit[];
+  stable_as_of?: number | null;
+  layer_perf?: LayerPerf | null;
 };
 
 type BackendProductResponse = {
   asin: string;
   namespace: string;
   attributes: Record<string, unknown>;
+  layer_perf?: LayerPerf | null;
 };
+
+export type ProductWithPerf = {
+  product: Product;
+  layer_perf: LayerPerf | null;
+};
+
+export type SearchResult = {
+  products: Product[];
+  layer_perf: LayerPerf | null;
+  stable_as_of: number | null;
+};
+
+export type ReviewSearchResult = {
+  reviews: ReviewHit[];
+  layer_perf: LayerPerf | null;
+  stable_as_of: number | null;
+};
+
+function parsePerf(p: unknown): LayerPerf | null {
+  if (!p || typeof p !== "object") return null;
+  const obj = p as Record<string, unknown>;
+  if (typeof obj.latency_ms !== "number") return null;
+  const cache = obj.cache_status;
+  return {
+    latency_ms: Math.round(obj.latency_ms),
+    cache_status: typeof cache === "string" ? cache : null,
+  };
+}
 
 const productCache = new Map<string, Product>();
 
@@ -129,10 +169,10 @@ export async function backendSearch(
   query: string,
   topK = 24,
   tags: string[] = [],
-): Promise<Product[]> {
+): Promise<SearchResult> {
   if (!API_BASE) throw new Error("HEV_SHOP_API_BASE not set");
   const trimmed = query.trim();
-  if (!trimmed) return [];
+  if (!trimmed) return { products: [], layer_perf: null, stable_as_of: null };
 
   const res = await fetchWithTimeout(
     `${API_BASE}/search`,
@@ -154,10 +194,14 @@ export async function backendSearch(
   const json = (await res.json()) as BackendSearchResponse;
   const products = json.hits.map(hitToProduct);
   for (const p of products) cacheProduct(p);
-  return products;
+  return {
+    products,
+    layer_perf: parsePerf(json.layer_perf),
+    stable_as_of: json.stable_as_of ?? null,
+  };
 }
 
-export async function backendProduct(asin: string): Promise<Product | null> {
+export async function backendProduct(asin: string): Promise<ProductWithPerf | null> {
   if (!API_BASE) throw new Error("HEV_SHOP_API_BASE not set");
   const res = await fetchWithTimeout(
     `${API_BASE}/product/${encodeURIComponent(asin)}`,
@@ -171,7 +215,7 @@ export async function backendProduct(asin: string): Promise<Product | null> {
   const json = (await res.json()) as BackendProductResponse;
   const product = attributesToProduct(json.asin, json.attributes ?? {});
   cacheProduct(product);
-  return product;
+  return { product, layer_perf: parsePerf(json.layer_perf) };
 }
 
 export type CategoryBucket = {
@@ -185,6 +229,7 @@ export type BackendMeta = {
   categories: CategoryBucket[];
   stable_as_of: number | null;
   is_stable: boolean;
+  layer_perf: LayerPerf | null;
 };
 
 export async function backendMeta(): Promise<BackendMeta> {
@@ -198,24 +243,43 @@ export async function backendMeta(): Promise<BackendMeta> {
     const body = await res.text().catch(() => "");
     throw new Error(`meta upstream ${res.status}: ${body.slice(0, 200)}`);
   }
-  return (await res.json()) as BackendMeta;
+  const json = (await res.json()) as Omit<BackendMeta, "layer_perf"> & {
+    layer_perf?: unknown;
+  };
+  return {
+    namespace: json.namespace,
+    vectors: json.vectors,
+    categories: json.categories,
+    stable_as_of: json.stable_as_of ?? null,
+    is_stable: json.is_stable,
+    layer_perf: parsePerf(json.layer_perf),
+  };
 }
 
 export async function backendSimilar(
   asin: string,
   topK = 8,
-): Promise<Product[]> {
+): Promise<SearchResult> {
   const seed = getCachedProduct(asin);
-  if (!seed || !seed.title) return [];
-  const neighbors = await backendSearch(seed.title, topK + 1);
-  return neighbors.filter((p) => p.asin !== asin).slice(0, topK);
+  if (!seed || !seed.title) {
+    return { products: [], layer_perf: null, stable_as_of: null };
+  }
+  const { products, layer_perf, stable_as_of } = await backendSearch(
+    seed.title,
+    topK + 1,
+  );
+  return {
+    products: products.filter((p) => p.asin !== asin).slice(0, topK),
+    layer_perf,
+    stable_as_of,
+  };
 }
 
 export async function backendReviewSearch(
   asin: string,
   query: string,
   topK = 8,
-): Promise<ReviewHit[]> {
+): Promise<ReviewSearchResult> {
   if (!API_BASE) throw new Error("HEV_SHOP_API_BASE not set");
   const url = new URL(`${API_BASE}/search/reviews`);
   url.searchParams.set("asin", asin);
@@ -227,7 +291,7 @@ export async function backendReviewSearch(
     throw new Error(`review search upstream ${res.status}: ${body.slice(0, 200)}`);
   }
   const json = (await res.json()) as BackendSearchResponse;
-  return json.hits.map((hit) => {
+  const reviews = json.hits.map((hit) => {
     const a = hit.attributes ?? {};
     return {
       id: hit.id,
@@ -241,6 +305,11 @@ export async function backendReviewSearch(
       helpful_vote: parseNum(a.helpful_vote),
     };
   });
+  return {
+    reviews,
+    layer_perf: parsePerf(json.layer_perf),
+    stable_as_of: json.stable_as_of ?? null,
+  };
 }
 
 export async function backendReviewSamples(

@@ -21,12 +21,17 @@ export async function GET(req: Request) {
       });
     }
     try {
-      const results = await backendSimilar(asin, limit);
+      const { products, layer_perf, stable_as_of } = await backendSimilar(
+        asin,
+        limit,
+      );
       return NextResponse.json({
         asin,
-        results,
+        results: products,
         took_ms: Math.round(performance.now() - t0),
         source: "backend",
+        layer_perf,
+        stable_as_of,
       });
     } catch (err) {
       return NextResponse.json(

@@ -16,12 +16,18 @@ export async function GET(req: Request) {
 
   if (backendEnabled() && q.trim()) {
     try {
-      const results = await backendSearch(q, limit, tags);
+      const { products, layer_perf, stable_as_of } = await backendSearch(
+        q,
+        limit,
+        tags,
+      );
       return NextResponse.json({
         query: q,
-        results,
+        results: products,
         took_ms: Math.round(performance.now() - t0),
         source: "backend",
+        layer_perf,
+        stable_as_of,
       });
     } catch (err) {
       return NextResponse.json(

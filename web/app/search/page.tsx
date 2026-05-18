@@ -1,7 +1,12 @@
 import Link from "next/link";
 import { ProductGrid } from "@/components/ProductGrid";
 import { searchProducts } from "@/lib/search";
-import { backendEnabled, backendSearch } from "@/lib/backend";
+import {
+  backendEnabled,
+  backendSearch,
+  type LayerPerf,
+} from "@/lib/backend";
+import { LayerPerfBadge, StableAsOfBadge } from "@/components/LayerPerfBadge";
 import type { Product } from "@/lib/types";
 import { REVIEW_TAGS } from "@/lib/types";
 
@@ -18,10 +23,15 @@ export default async function SearchPage({
   );
   const t0 = performance.now();
   let results: Product[] = [];
+  let layerPerf: LayerPerf | null = null;
+  let stableAsOf: number | null = null;
   let error: string | null = null;
   if (backendEnabled() && q.trim()) {
     try {
-      results = await backendSearch(q, 48, selectedTags);
+      const r = await backendSearch(q, 48, selectedTags);
+      results = r.products;
+      layerPerf = r.layer_perf;
+      stableAsOf = r.stable_as_of;
     } catch (e) {
       error = e instanceof Error ? e.message : "search failed";
     }
@@ -47,8 +57,15 @@ export default async function SearchPage({
             )}
           </h1>
         </div>
-        <div className="text-xs text-ink-500">
-          {results.length} {results.length === 1 ? "match" : "matches"} · {took}ms
+        <div className="flex flex-col items-end gap-1.5 text-xs text-ink-500">
+          <div>
+            {results.length} {results.length === 1 ? "match" : "matches"} · {took}ms
+            <span className="ml-1 text-ink-400">page</span>
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-1.5">
+            <LayerPerfBadge perf={layerPerf} label="query" />
+            <StableAsOfBadge stableAsOf={stableAsOf} />
+          </div>
         </div>
       </div>
 

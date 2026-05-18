@@ -9,8 +9,10 @@ import {
   backendReviewSamples,
   backendReviewSearch,
   backendSimilar,
+  type LayerPerf,
 } from "@/lib/backend";
 import { ProductGrid } from "@/components/ProductGrid";
+import { LayerPerfBadge, StableAsOfBadge } from "@/components/LayerPerfBadge";
 import type { Product, ReviewHit, ReviewSample } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -20,27 +22,50 @@ export function generateStaticParams() {
   return PRODUCTS.map((p) => ({ asin: p.asin }));
 }
 
-async function load(
-  asin: string,
-  reviewQuery: string,
-): Promise<{
+type LoadedPage = {
   product: Product;
   similar: Product[];
   reviews: ReviewHit[];
   samples: ReviewSample[];
-} | null> {
+  perf: {
+    fetchDocument: LayerPerf | null;     // /v2/namespaces/.../documents/{asin}
+    similarQuery: LayerPerf | null;      // /v2/namespaces/.../query (similar)
+    reviewQuery: LayerPerf | null;       // /v2/namespaces/.../query (review)
+    reviewStableAsOf: number | null;
+  };
+};
+
+async function load(asin: string, reviewQuery: string): Promise<LoadedPage | null> {
   if (backendEnabled()) {
-    const product = await backendProduct(asin).catch(() => null);
-    if (!product) return null;
-    const similar = await backendSimilar(asin, 8).catch(() => [] as Product[]);
+    const fetched = await backendProduct(asin).catch(() => null);
+    if (!fetched) return null;
+    const { product, layer_perf: fetchDocumentPerf } = fetched;
     const sampleIds = Object.values(product.tag_samples ?? {}).flat();
-    const [reviews, samples] = await Promise.all([
-      backendReviewSearch(asin, reviewQuery || product.title, 8).catch(
-        () => [] as ReviewHit[],
-      ),
+    const [similarRes, reviewRes, samples] = await Promise.all([
+      backendSimilar(asin, 8).catch(() => ({
+        products: [] as Product[],
+        layer_perf: null,
+        stable_as_of: null,
+      })),
+      backendReviewSearch(asin, reviewQuery || product.title, 8).catch(() => ({
+        reviews: [] as ReviewHit[],
+        layer_perf: null,
+        stable_as_of: null,
+      })),
       backendReviewSamples(asin, sampleIds).catch(() => [] as ReviewSample[]),
     ]);
-    return { product, similar, reviews, samples };
+    return {
+      product,
+      similar: similarRes.products,
+      reviews: reviewRes.reviews,
+      samples,
+      perf: {
+        fetchDocument: fetchDocumentPerf,
+        similarQuery: similarRes.layer_perf,
+        reviewQuery: reviewRes.layer_perf,
+        reviewStableAsOf: reviewRes.stable_as_of,
+      },
+    };
   }
   const product = findByAsin(asin);
   if (!product) return null;
@@ -65,7 +90,18 @@ async function load(
     title: sample.title ?? "",
     helpful_vote: 0,
   }));
-  return { product, similar: similarProducts(asin, 8), reviews, samples };
+  return {
+    product,
+    similar: similarProducts(asin, 8),
+    reviews,
+    samples,
+    perf: {
+      fetchDocument: null,
+      similarQuery: null,
+      reviewQuery: null,
+      reviewStableAsOf: null,
+    },
+  };
 }
 
 export default async function ProductPage({
@@ -79,7 +115,7 @@ export default async function ProductPage({
   const { rq = "" } = await searchParams;
   const data = await load(asin, rq);
   if (!data) notFound();
-  const { product, similar, reviews, samples } = data;
+  const { product, similar, reviews, samples, perf } = data;
   const sampleById = new Map(samples.map((sample) => [sample.review_id, sample]));
 
   return (
@@ -199,16 +235,47 @@ export default async function ProductPage({
             </button>
           </div>
 
-          <dl className="mt-10 grid grid-cols-2 gap-y-4 border-t border-ink-200 pt-6 text-sm">
+          <dl className="mt-10 grid grid-cols-[max-content_1fr] gap-x-6 gap-y-3 border-t border-ink-200 pt-6 text-sm">
             <dt className="text-ink-500">ASIN</dt>
             <dd className="font-mono text-ink-900">{product.asin}</dd>
             <dt className="text-ink-500">Embedding</dt>
             <dd className="font-mono text-ink-900">CLIP ViT-L/14 · 768d</dd>
             <dt className="text-ink-500">Distance metric</dt>
             <dd className="font-mono text-ink-900">cosine</dd>
-            <dt className="text-ink-500">Returns policy</dt>
-            <dd className="text-ink-900">we keep the vector either way</dd>
+            <dt className="text-ink-500">Doc fetch</dt>
+            <dd className="flex flex-wrap items-center gap-1.5">
+              {perf.fetchDocument ? (
+                <LayerPerfBadge perf={perf.fetchDocument} />
+              ) : (
+                <span className="font-mono text-xs text-ink-400">
+                  (mock data — backend off)
+                </span>
+              )}
+              <span className="font-mono text-xs text-ink-400">
+                GET /v2/namespaces/amazon-products/documents/{product.asin}
+              </span>
+            </dd>
+            <dt className="text-ink-500">Similar query</dt>
+            <dd className="flex flex-wrap items-center gap-1.5">
+              {perf.similarQuery ? (
+                <LayerPerfBadge perf={perf.similarQuery} />
+              ) : (
+                <span className="font-mono text-xs text-ink-400">—</span>
+              )}
+              <span className="font-mono text-xs text-ink-400">
+                re-embed title → /query
+              </span>
+            </dd>
           </dl>
+
+          <p className="mt-4 text-xs text-ink-500">
+            <span className="font-semibold text-ink-700">Doc fetch</span> goes
+            through Layer's Aerospike pull-through cache; <span className="font-mono">cache hit</span>{" "}
+            served the row without touching turbopuffer. The <span className="font-semibold text-ink-700">similar query</span>{" "}
+            re-embeds this product's title with CLIP-text and runs a vector
+            query — queries don't go through the doc cache, so no cache
+            header is set.
+          </p>
         </div>
       </div>
 
@@ -221,6 +288,12 @@ export default async function ProductPage({
             <h2 className="mt-1 font-display text-3xl tracking-tight">
               Search inside customer reviews
             </h2>
+            {(perf.reviewQuery || perf.reviewStableAsOf !== null) && (
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <LayerPerfBadge perf={perf.reviewQuery} label="review query" />
+                <StableAsOfBadge stableAsOf={perf.reviewStableAsOf} />
+              </div>
+            )}
           </div>
           <form className="flex w-full gap-2 sm:w-auto" action={`/product/${product.asin}`}>
             <input

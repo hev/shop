@@ -1,6 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { ProductGrid } from "@/components/ProductGrid";
+import { LayerPerfBadge } from "@/components/LayerPerfBadge";
 import { PRODUCTS } from "@/lib/mock-data";
 import {
   backendEnabled,
@@ -41,7 +42,7 @@ async function getFeatured(): Promise<Product[]> {
   const out: Product[] = [];
   for (const b of batches) {
     if (b.status !== "fulfilled") continue;
-    for (const p of b.value) {
+    for (const p of b.value.products) {
       if (seen.has(p.asin)) continue;
       seen.add(p.asin);
       out.push(p);
@@ -79,12 +80,15 @@ export default async function HomePage() {
       <section className="border-b border-ink-200 bg-white">
         <div className="mx-auto grid max-w-7xl grid-cols-1 gap-10 px-4 py-16 lg:grid-cols-2 lg:py-24">
           <div className="flex flex-col justify-center">
-            <span className="text-xs font-semibold uppercase tracking-widest text-accent">
-              {vectorCount.toLocaleString()} vectors indexed
-              {lastIndexedAt !== null
-                ? ` · last indexed at ${formatStableAsOf(lastIndexedAt)}`
-                : null}
-            </span>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <span className="text-xs font-semibold uppercase tracking-widest text-accent">
+                {vectorCount.toLocaleString()} vectors indexed
+                {lastIndexedAt !== null
+                  ? ` · last indexed at ${formatStableAsOf(lastIndexedAt)}`
+                  : null}
+              </span>
+              <LayerPerfBadge perf={meta?.layer_perf ?? null} label="/meta" />
+            </div>
             <h1 className="mt-4 font-display text-5xl leading-[1.05] tracking-tight text-ink-900 sm:text-6xl">
               Find things by how they look, not what we called them.
             </h1>

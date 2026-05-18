@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import time
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -11,6 +13,24 @@ from .records import (
     review_raw_chunk_id,
     review_work_document_id,
 )
+
+
+@dataclass(frozen=True)
+class LayerPerf:
+    """Per-request observation for one Layer gateway round-trip.
+
+    `latency_ms` covers the HTTP call only (httpx send → status check),
+    so it isolates the gateway round-trip from any FastAPI work this
+    process does around it.
+
+    `cache_status` is the gateway's `x-layer-cache` header verbatim:
+    `"hit"`, `"miss"`, or `"miss-on-error"` for the degraded path. `None`
+    when the gateway didn't attach the header — the `query` endpoint
+    routes to turbopuffer and doesn't go through the Aerospike document
+    cache, so it never sets the header."""
+
+    latency_ms: int
+    cache_status: str | None
 
 
 class LayerClient:
@@ -263,15 +283,35 @@ class LayerClient:
         document_id: str,
         include_attributes: list[str] | None = None,
     ) -> dict[str, Any]:
+        body, _perf = await self.fetch_document_with_perf(
+            namespace, document_id, include_attributes
+        )
+        return body
+
+    async def fetch_document_with_perf(
+        self,
+        namespace: str,
+        document_id: str,
+        include_attributes: list[str] | None = None,
+    ) -> tuple[dict[str, Any], LayerPerf]:
+        """Like `fetch_document` but also returns a `LayerPerf` describing
+        the round-trip. UI endpoints use this to surface "cache hit · 8ms"
+        signals on product pages without obscuring the showcase."""
         params = None
         if include_attributes:
             params = {"include_attributes": ",".join(include_attributes)}
+        start = time.monotonic()
         response = await self._client.get(
             f"{self.base_url}/v2/namespaces/{namespace}/documents/{document_id}",
             params=params,
         )
+        latency_ms = int((time.monotonic() - start) * 1000)
         response.raise_for_status()
-        return response.json()
+        perf = LayerPerf(
+            latency_ms=latency_ms,
+            cache_status=response.headers.get("x-layer-cache"),
+        )
+        return response.json(), perf
 
     async def fetch_many_documents(
         self,
@@ -298,17 +338,40 @@ class LayerClient:
         `stable_as_of` is the epoch-ms upper bound the gateway applied to
         guarantee the result reflects a fully-indexed view; `None` before the
         consistency watcher has seen a clean snapshot."""
+        body, _perf = await self.query_namespace_with_perf(
+            namespace, vector, top_k, include_attributes, filters
+        )
+        return body
+
+    async def query_namespace_with_perf(
+        self,
+        namespace: str,
+        vector: list[float],
+        top_k: int,
+        include_attributes: list[str] | bool | None = None,
+        filters: Any | None = None,
+    ) -> tuple[dict[str, Any], LayerPerf]:
+        """Like `query_namespace` but also returns a `LayerPerf`. Note:
+        queries don't go through the document cache, so `cache_status`
+        on the returned perf will be `None`. The latency still isolates
+        the gateway+turbopuffer round-trip from any handler-side work."""
         payload: dict[str, Any] = {"vector": vector, "top_k": top_k}
         if include_attributes is not None:
             payload["include_attributes"] = include_attributes
         if filters is not None:
             payload["filters"] = filters
+        start = time.monotonic()
         response = await self._client.post(
             f"{self.base_url}/v2/namespaces/{namespace}/query",
             json=payload,
         )
+        latency_ms = int((time.monotonic() - start) * 1000)
         response.raise_for_status()
-        return response.json()
+        perf = LayerPerf(
+            latency_ms=latency_ms,
+            cache_status=response.headers.get("x-layer-cache"),
+        )
+        return response.json(), perf
 
     # --- Scan ---
     #
@@ -432,11 +495,24 @@ class LayerClient:
         """GET /v2/namespaces/{ns}/metadata — turbopuffer's response proxied
         verbatim plus a `layer.{stable_as_of, is_stable}` enhancement block.
         See apps/layer-gateway/docs/guides/namespaces.md → "Namespace metadata"."""
+        body, _perf = await self.fetch_namespace_metadata_with_perf(namespace)
+        return body
+
+    async def fetch_namespace_metadata_with_perf(
+        self, namespace: str
+    ) -> tuple[dict[str, Any], LayerPerf]:
+        """Like `fetch_namespace_metadata` but also returns a `LayerPerf`."""
+        start = time.monotonic()
         response = await self._client.get(
             f"{self.base_url}/v2/namespaces/{namespace}/metadata"
         )
+        latency_ms = int((time.monotonic() - start) * 1000)
         response.raise_for_status()
-        return response.json()
+        perf = LayerPerf(
+            latency_ms=latency_ms,
+            cache_status=response.headers.get("x-layer-cache"),
+        )
+        return response.json(), perf
 
     async def warm_namespace(self, namespace: str) -> dict[str, Any]:
         """POST /v2/namespaces/{ns}/warm — kick off a full origin scan that

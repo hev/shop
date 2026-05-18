@@ -124,6 +124,18 @@ class SearchRequest(BaseModel):
     tags: list[str] | None = None
 
 
+class LayerPerf(BaseModel):
+    """One Layer gateway round-trip's timing + cache disposition,
+    surfaced to the UI so the showcase can render `42ms · cache hit`
+    inline. `cache_status` is the gateway's `x-layer-cache` header
+    (`"hit"`, `"miss"`, or `"miss-on-error"`); `None` when the gateway
+    didn't attach the header — the `query` endpoint doesn't go through
+    the document cache, so query perfs always have `cache_status=None`."""
+
+    latency_ms: int
+    cache_status: str | None = None
+
+
 class SearchHit(BaseModel):
     id: str
     dist: float | None = None
@@ -142,6 +154,10 @@ class SearchResponse(BaseModel):
             "watcher has observed a clean snapshot for the namespace."
         ),
     )
+    layer_perf: LayerPerf | None = Field(
+        default=None,
+        description="Gateway round-trip timing for the query call.",
+    )
 
 
 class ReviewSearchResponse(SearchResponse):
@@ -153,6 +169,14 @@ class ProductResponse(BaseModel):
     asin: str
     namespace: str
     attributes: dict[str, Any] = Field(default_factory=dict)
+    layer_perf: LayerPerf | None = Field(
+        default=None,
+        description=(
+            "Gateway round-trip timing for the document fetch. `cache_status` "
+            "= 'hit' means Aerospike served the document without touching "
+            "turbopuffer."
+        ),
+    )
 
 
 class ReviewSample(BaseModel):
@@ -179,3 +203,10 @@ class MetaResponse(BaseModel):
     categories: list[CategoryBucket]
     stable_as_of: int | None = None
     is_stable: bool = False
+    layer_perf: LayerPerf | None = Field(
+        default=None,
+        description=(
+            "Gateway round-trip timing for the namespace metadata fetch "
+            "(not the category scan)."
+        ),
+    )
