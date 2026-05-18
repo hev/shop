@@ -9,6 +9,7 @@ metadata:
   labels:
     {{- include "hev-shop.labels" $root | nindent 4 }}
     app.kubernetes.io/component: {{ $worker.component }}
+    layer.hev.dev/component: worker
 spec:
   {{- if not (and $root.Values.autoscaling.enabled $worker.autoscaling.enabled) }}
   replicas: {{ $worker.replicaCount }}
@@ -26,6 +27,7 @@ spec:
       labels:
         {{- include "hev-shop.selectorLabels" $root | nindent 8 }}
         app.kubernetes.io/component: {{ $worker.component }}
+        layer.hev.dev/component: worker
     spec:
       terminationGracePeriodSeconds: 60
       {{- with $root.Values.imagePullSecrets }}
