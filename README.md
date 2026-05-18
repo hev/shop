@@ -76,13 +76,28 @@ product vectors as filterable tags.
 
 ## What To Inspect
 
-- `indexer/app/layer_client.py` shows the app-facing Layer pipeline and namespace calls.
-- `indexer/app/extraction.py` stages product images and review work.
-- `indexer/app/embedding.py` claims product work and writes CLIP vectors.
-- `indexer/app/review_workers.py` embeds reviews, classifies reviews, and rolls tags up.
-- `web/app/api/search/route.ts` passes search through the backend and preserves `stable_as_of`.
+- `indexer/app/layer_client.py` — the single HTTP path to the Layer gateway.
+  Every Layer call in the app goes through this file, including the
+  turbopuffer-compatible namespace surface (query/upsert/patch/fetch), the
+  pipeline state machine (create/claim/heartbeat/stage), and the
+  Layer-specific scan and document-cache APIs.
+- `indexer/app/pipeline.py` — the N-stage pipeline. One `STAGES` manifest plus
+  a `run_stage` driver that owns the claim/heartbeat/release lifecycle, so
+  each stage's `process_*` is just the work that's unique to that stage.
+  Stages: `embed-products` (CLIP), `embed-reviews` (Qwen), `classify-reviews`
+  (OpenRouter), `aggregate-tags` (postgres rollup → PATCH product rows).
+- `indexer/app/extraction.py` — the CPU extraction worker that drains the
+  Postgres job queue and stages products + raw reviews into the layer
+  pipelines.
+- `indexer/app/main.py` — FastAPI surface: `/search`, `/search/reviews`,
+  `/product/{asin}`, `/meta`, `/index`, `/backfill`.
+- `web/app/api/search/route.ts` and `web/lib/backend.ts` — passes search
+  through the backend and preserves `stable_as_of`.
 - `helm/hev-shop` deploys the full app with PostgreSQL-driven KEDA autoscaling
   and optional Karpenter CPU/GPU NodePools.
+
+For the "what does Layer add over turbopuffer" framing, see
+[`docs/LAYER_GATEWAY_SHOWCASE.md`](docs/LAYER_GATEWAY_SHOWCASE.md).
 
 ## Repo Layout
 

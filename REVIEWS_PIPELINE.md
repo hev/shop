@@ -1,5 +1,13 @@
 # Reviews Pipeline
 
+> **Status: implemented and in production.** This document is the original
+> design plan (PR 1–4 in "Implementation plan" below) and has been preserved
+> for the rationale and architectural framing. The "Status" section near the
+> end reflects the shipped state. For the current code layout, read
+> `indexer/app/pipeline.py` (stages + driver) and `indexer/app/extraction.py`
+> (raw ingest). The file references in the per-PR notes below predate the
+> consolidation — see the module map in `CLAUDE.md` for the current files.
+
 Plan for adding product reviews to hev-shop. Designed to showcase hev layer's parallel fan-out pipelines: one review ingest produces a searchable review index, a per-review LLM classifier, and a tag rollup written back to the product index — all coordinated through the same job-queue primitives as the existing product pipeline.
 
 ## Motivation

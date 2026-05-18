@@ -10,20 +10,17 @@ POST {API_BASE}/search
 Content-Type: application/json
 ```
 
-The API runs as `hev-shop-api` in the `hev-shop` namespace on the
-`mesh-bench` EKS cluster. There is **no public ingress yet** — reach it
-via `kubectl port-forward` or from inside the cluster.
+The API runs as `hev-shop-api` in the `hev-shop` namespace on EKS, fronted
+by the shared `hev-public` ALB. Three ways to reach it:
 
-Inside-cluster URL (for a Next.js app deployed in the same cluster):
-```
-http://hev-shop-api.hev-shop.svc.cluster.local:8080
-```
+| From | URL |
+| ---- | --- |
+| Public internet | `https://api.hev-shop.com` |
+| Inside the cluster (Next.js pod, other services) | `http://hev-shop-api.hev-shop.svc.cluster.local:8080` |
+| Local laptop bypassing the ALB | `kubectl port-forward -n hev-shop svc/hev-shop-api 8090:8080` → `http://127.0.0.1:8090` |
 
-Local dev port-forward:
-```
-kubectl port-forward -n hev-shop svc/hev-shop-api 8090:8080
-# → API_BASE=http://127.0.0.1:8090
-```
+The web pod uses the in-cluster URL via `HEV_SHOP_API_BASE`. See `CLAUDE.md`
+for the canonical list of live endpoints and curl examples.
 
 ## Request
 

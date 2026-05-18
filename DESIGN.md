@@ -1,5 +1,12 @@
 # hev-shop: Indexing Pipeline Design
 
+> **Status: implemented.** This is the original design doc, kept for the
+> rationale, data model, and infra framing. Tasks L1–L12 and S1–S9 in the
+> work breakdown are all shipped. The current code lives in
+> `indexer/app/pipeline.py` (stages + driver), `indexer/app/extraction.py`
+> (raw ingest), and `indexer/app/layer_client.py` (Layer HTTP client). See
+> `CLAUDE.md` for the up-to-date module map.
+
 ## Overview
 
 Two-stage product image indexing pipeline using CLIP, extended with a review
