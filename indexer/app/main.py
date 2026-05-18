@@ -361,10 +361,15 @@ async def search_reviews(
         raise HTTPException(status_code=422, detail="top_k must be between 1 and 200")
 
     settings = request.app.state.settings
+    if not settings.api_review_search_enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="review search is disabled on this pod (Qwen-8B requires GPU)",
+        )
     layer: LayerClient = request.app.state.layer
     namespace = review_namespace_for(
         asin,
-        namespace_base=settings.reviews_namespace_base,
+        namespace_base=settings.resolved_reviews_query_namespace_base,
         shard_count=settings.reviews_namespace_shard_count,
     )
     filters: list[list[object]] = [["asin", "Eq", asin]]

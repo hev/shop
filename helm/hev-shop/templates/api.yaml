@@ -58,12 +58,27 @@ spec:
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 5
+          # 60s startup window covers loading CLIP weights off the baked
+          # image; livenessProbe timeoutSeconds defaults to 1s which
+          # previously killed the pod when the event loop briefly stalled
+          # during a model load.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 24
           livenessProbe:
             httpGet:
               path: /healthz
               port: http
-            initialDelaySeconds: 15
+            initialDelaySeconds: 30
             periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
           {{- if or .Values.persistence.enabled .Values.api.volumeMounts }}

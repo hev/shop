@@ -11,6 +11,9 @@ data:
   REVIEWS_PIPELINE_ID: {{ .Values.pipeline.reviews.id | quote }}
   REVIEWS_AGGREGATE_PIPELINE_ID: {{ .Values.pipeline.reviewAggregate.id | quote }}
   REVIEWS_NAMESPACE_BASE: {{ .Values.pipeline.reviews.namespaceBase | quote }}
+  {{- with .Values.pipeline.reviews.queryNamespaceBase }}
+  REVIEWS_QUERY_NAMESPACE_BASE: {{ . | quote }}
+  {{- end }}
   REVIEWS_NAMESPACE_SHARD_COUNT: {{ .Values.pipeline.reviews.shardCount | quote }}
   {{- range $key, $value := .Values.config }}
   {{ $key }}: {{ $value | quote }}

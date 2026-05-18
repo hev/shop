@@ -40,8 +40,21 @@ class Settings(BaseSettings):
     review_aggregate_pipeline_id: str = Field(
         default="amazon-products-review-tags", alias="REVIEWS_AGGREGATE_PIPELINE_ID"
     )
+    # Review namespaces are versioned by prefix so we can swap embedding
+    # models without overwriting the existing corpus. To hot-swap:
+    #   1. Bump `reviews_namespace_base` to a new version (e.g. v3-amazon-reviews).
+    #      Workers will write the re-embedded corpus to the new prefix.
+    #   2. Leave `reviews_query_namespace_base` pinned to the old prefix on the
+    #      API pod so reads keep hitting the populated namespace.
+    #   3. Requeue review docs; wait for backfill to drain.
+    #   4. Unset `reviews_query_namespace_base` (or set it to the new prefix) on
+    #      the API. Reads cut over.
+    #   5. Delete the old namespaces.
     reviews_namespace_base: str = Field(
-        default="amazon-reviews", alias="REVIEWS_NAMESPACE_BASE"
+        default="v2-amazon-reviews", alias="REVIEWS_NAMESPACE_BASE"
+    )
+    reviews_query_namespace_base: str | None = Field(
+        default=None, alias="REVIEWS_QUERY_NAMESPACE_BASE"
     )
     reviews_namespace_shard_count: int = Field(
         default=16, alias="REVIEWS_NAMESPACE_SHARD_COUNT"
@@ -62,6 +75,14 @@ class Settings(BaseSettings):
     )
     prewarm_text_embedder: bool = Field(
         default=True, alias="PREWARM_TEXT_EMBEDDER"
+    )
+    # Review-query embedding uses Qwen3-Embedding-8B, which needs ~32 GB on
+    # CPU and is only viable on the GPU review-embed worker. The API pod
+    # ships with the same image but should NOT lazy-load it on demand
+    # (doing so triggers a liveness-probe death loop). Set to false in the
+    # api deployment; left true so local dev / GPU-equipped boxes still work.
+    api_review_search_enabled: bool = Field(
+        default=True, alias="API_REVIEW_SEARCH_ENABLED"
     )
     meta_cache_ttl_seconds: float = Field(default=30.0, alias="META_CACHE_TTL_SECONDS")
 
@@ -140,6 +161,10 @@ class Settings(BaseSettings):
         if self.worker_id:
             return self.worker_id
         return f"{self.worker_type}-worker"
+
+    @property
+    def resolved_reviews_query_namespace_base(self) -> str:
+        return self.reviews_query_namespace_base or self.reviews_namespace_base
 
 
 @lru_cache

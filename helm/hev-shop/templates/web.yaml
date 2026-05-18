@@ -45,6 +45,10 @@ spec:
               value: {{ .Values.pipeline.product.namespace | quote }}
             - name: LAYER_REVIEW_NAMESPACE_BASE
               value: {{ .Values.pipeline.reviews.namespaceBase | quote }}
+            {{- with .Values.pipeline.reviews.queryNamespaceBase }}
+            - name: LAYER_REVIEW_QUERY_NAMESPACE_BASE
+              value: {{ . | quote }}
+            {{- end }}
             - name: LAYER_REVIEW_SHARD_COUNT
               value: {{ .Values.pipeline.reviews.shardCount | quote }}
             - name: NODE_ENV

@@ -38,7 +38,15 @@ pipeline:
     namespace: amazon-products
   reviews:
     id: hev-shop-reviews
-    namespaceBase: amazon-reviews
+    # Versioned prefix — bump (e.g. v3-amazon-reviews) when you re-embed
+    # with a new model. Workers and pipeline registration use this value;
+    # the API can be pinned to an older namespace via queryNamespaceBase
+    # below during a hot-swap migration.
+    namespaceBase: v2-amazon-reviews
+    # Optional read-side override (api + web warm). When unset, reads
+    # follow namespaceBase. Set to the previous prefix while a backfill
+    # is in flight to keep serving the old corpus, then unset to cut over.
+    queryNamespaceBase: ""
     shardCount: 16
   reviewAggregate:
     id: amazon-products-review-tags
@@ -50,7 +58,7 @@ config:
   DATA_DIR: /data
   DATASET_DIR: /data/dataset
   IMAGE_DIR: /data/images
-  MODEL_CACHE_DIR: /data/models
+  MODEL_CACHE_DIR: /opt/model-cache
   CLIP_MODEL_NAME: openai/clip-vit-large-patch14
   CLIP_DEVICE: auto
   PREWARM_TEXT_EMBEDDER: "true"
@@ -192,29 +200,28 @@ api:
       operator: Equal
       value: infra
       effect: NoSchedule
+  # CLIP ViT-L/14 (~1.7 GB) is the only model the api pod loads — Qwen-8B
+  # would need ~32 GB CPU and is gated off via API_REVIEW_SEARCH_ENABLED.
+  # 3 Gi request gives CLIP + fastapi headroom on the m6a.large infra node.
   resources:
     requests:
       cpu: "1"
-      memory: 2Gi
-      ephemeral-storage: 5Gi
+      memory: 3Gi
+      ephemeral-storage: 25Gi
     limits:
       cpu: "4"
-      memory: 8Gi
+      memory: 5Gi
       ephemeral-storage: 30Gi
   env:
+    # Models are baked into the image at /opt/model-cache (see indexer/Dockerfile).
     - name: API_MODEL_CACHE_DIR
-      value: /model-cache
+      value: /opt/model-cache
     - name: HF_HOME
-      value: /model-cache
+      value: /opt/model-cache
     - name: TRANSFORMERS_CACHE
-      value: /model-cache
-  volumeMounts:
-    - name: model-cache
-      mountPath: /model-cache
-  volumes:
-    - name: model-cache
-      emptyDir:
-        sizeLimit: 30Gi
+      value: /opt/model-cache
+    - name: API_REVIEW_SEARCH_ENABLED
+      value: "false"
 
 web:
   replicaCount: 1
@@ -359,20 +366,23 @@ workers:
         memory: 15Gi
         ephemeral-storage: 200Gi
         nvidia.com/gpu: "1"
+    # Models are baked into the indexer image at /opt/model-cache — see
+    # indexer/Dockerfile. The emptyDir is kept as a writable spillover in
+    # case transformers tries to write tokenizer artifacts at runtime.
     env:
       - name: MODEL_CACHE_DIR
-        value: /model-cache
+        value: /opt/model-cache
       - name: HF_HOME
-        value: /model-cache
+        value: /opt/model-cache
       - name: TRANSFORMERS_CACHE
-        value: /model-cache
+        value: /opt/model-cache
     volumeMounts:
-      - name: model-cache
-        mountPath: /model-cache
+      - name: model-cache-spill
+        mountPath: /model-cache-spill
     volumes:
-      - name: model-cache
+      - name: model-cache-spill
         emptyDir:
-          sizeLimit: 200Gi
+          sizeLimit: 50Gi
     autoscaling:
       enabled: true
       pollingInterval: 15
