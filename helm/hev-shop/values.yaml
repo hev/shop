@@ -37,10 +37,13 @@ persistence:
   mountPath: /data
 
 pipeline:
+  # Pipeline IDs are app-owned Layer queues, so keep them under the hev-shop
+  # prefix. The amazon-* names below are Turbopuffer namespaces for the source
+  # corpus, not pipeline IDs.
   extraction:
     id: hev-shop-extraction-jobs
   product:
-    id: amazon-products-images
+    id: hev-shop-product-images
     namespace: amazon-products
   reviews:
     id: hev-shop-reviews
@@ -55,7 +58,7 @@ pipeline:
     queryNamespaceBase: ""
     shardCount: 16
   reviewAggregate:
-    id: amazon-products-review-tags
+    id: hev-shop-review-tags
 
 config:
   DEFAULT_CATEGORY: Electronics

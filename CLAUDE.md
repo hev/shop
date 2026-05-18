@@ -65,7 +65,7 @@ The Go CLI takes two URL flags: `--gateway-url` points at layer-gateway,
 `--indexer-url` points at the hev-shop indexer API. Both have public DNS:
 
 ```sh
-go run . status --indexer-url https://api.hev-shop.com --pipeline-id amazon-products-images
+go run . status --indexer-url https://api.hev-shop.com --pipeline-id hev-shop-product-images
 go run . health --gateway-url https://aws-us-east-1.hevlayer.com
 ```
 

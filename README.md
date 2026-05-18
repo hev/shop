@@ -153,7 +153,7 @@ Queue a small indexing job:
 
 ```sh
 go run . index --count 1000 --category Electronics
-go run . status --pipeline-id amazon-products-images
+go run . status --pipeline-id hev-shop-product-images
 ```
 
 ## Helm Deploy

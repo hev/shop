@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_NAMESPACE="${APP_NAMESPACE:-hev-shop}"
-PIPELINE_ID="${PIPELINE_ID:-amazon-products-images}"
+PIPELINE_ID="${PIPELINE_ID:-hev-shop-product-images}"
 TARGET_NAMESPACE="${TARGET_NAMESPACE:-amazon-products}"
 COUNT_PER_CATEGORY="${COUNT_PER_CATEGORY:-50000}"
 JOB_SIZE="${JOB_SIZE:-10000}"

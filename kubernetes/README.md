@@ -97,7 +97,7 @@ worker scaler is capped at 2 replicas for the current `mesh-bench` quota.
 See `SCALING.md` for the 100k smoke-run notes and current
 Karpenter behavior.
 
-The default product GPU scaler watches pipeline `amazon-products-images`.
+The default product GPU scaler watches pipeline `hev-shop-product-images`.
 Review scalers watch `hev-shop-reviews` work-item prefixes and
-`amazon-products-review-tags`. If you submit different pipeline IDs, update the
+`hev-shop-review-tags`. If you submit different pipeline IDs, update the
 matching ConfigMap values and ScaledObject queries together.

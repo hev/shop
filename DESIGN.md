@@ -115,7 +115,7 @@ POST /index
   "count": 100000,                       # -1 for all
   "category": "Electronics",             # HF config name
   "categories": ["Electronics", "Books"], # optional fan-out, overrides category
-  "pipeline_id": "amazon-products-images",
+  "pipeline_id": "hev-shop-product-images",
   "job_size": 10000
 }
 ```
@@ -267,7 +267,7 @@ spec:
       metadata:
         serverAddress: http://layer-gateway.layer.svc.cluster.local:8080/v2/metrics
         metricName: hev_shop_product_embedding_docs
-        query: 'sum(layer_pipeline_stage_count{pipeline_id="amazon-products-images",stage=~"pending|embedding"}) or vector(0)'
+        query: 'sum(layer_pipeline_stage_count{pipeline_id="hev-shop-product-images",stage=~"pending|embedding"}) or vector(0)'
         threshold: "10000"
 ```
 

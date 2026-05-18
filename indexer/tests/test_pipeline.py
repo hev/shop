@@ -202,7 +202,7 @@ class EmbedProductsStageTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, 0)
         self.assertEqual(self.layer.claim_calls[0]["claim_stage"], "embedding")
-        self.assertEqual(self.layer.claim_calls[0]["pipeline_id"], "amazon-products-images")
+        self.assertEqual(self.layer.claim_calls[0]["pipeline_id"], "hev-shop-product-images")
         self.assertIsNone(self.layer.claim_calls[0]["prefix"])
         self.assertEqual(self.layer.upsert_calls, [])
 
@@ -215,7 +215,7 @@ class EmbedProductsStageTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             layer.create_pipeline_calls,
-            [("amazon-products-images", "amazon-products", "cosine_distance")],
+            [("hev-shop-product-images", "amazon-products", "cosine_distance")],
         )
         ctor.assert_called_once_with(ctx.settings)
         self.assertIs(ctx._clip_image, self.embedder)
@@ -494,7 +494,7 @@ class ClassifyReviewsStageTests(unittest.IsolatedAsyncioTestCase):
         # Cross-stage hand-off: aggregate pipeline gets A1 transitioned
         # to pending so the aggregate-tags stage can pick it up next.
         hand_off = self.layer.set_stage_calls[0]
-        self.assertEqual(hand_off["pipeline_id"], "amazon-products-review-tags")
+        self.assertEqual(hand_off["pipeline_id"], "hev-shop-review-tags")
         self.assertEqual(hand_off["doc_ids"], ["A1"])
         self.assertEqual(hand_off["stage"], "pending")
         self.assertTrue(hand_off["create_missing"])
@@ -594,7 +594,7 @@ class AggregateTagsStageTests(unittest.IsolatedAsyncioTestCase):
         await _run_once(self.stage, self.ctx)
 
         call = self.layer.claim_calls[0]
-        self.assertEqual(call["pipeline_id"], "amazon-products-review-tags")
+        self.assertEqual(call["pipeline_id"], "hev-shop-review-tags")
         self.assertEqual(call["claim_stage"], "aggregating")
         self.assertIsNone(call["prefix"])
 

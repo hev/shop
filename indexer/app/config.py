@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     )
     namespace: str = Field(default="amazon-products", alias="TURBOPUFFER_NAMESPACE")
     default_pipeline_id: str = Field(
-        default="amazon-products-images", alias="PIPELINE_ID"
+        default="hev-shop-product-images", alias="PIPELINE_ID"
     )
     extraction_pipeline_id: str = Field(
         default="hev-shop-extraction-jobs", alias="EXTRACTION_PIPELINE_ID"
@@ -36,7 +36,7 @@ class Settings(BaseSettings):
         default="hev-shop-reviews", alias="REVIEWS_PIPELINE_ID"
     )
     review_aggregate_pipeline_id: str = Field(
-        default="amazon-products-review-tags", alias="REVIEWS_AGGREGATE_PIPELINE_ID"
+        default="hev-shop-review-tags", alias="REVIEWS_AGGREGATE_PIPELINE_ID"
     )
     # Review namespaces are versioned by prefix so we can swap embedding
     # models without overwriting the existing corpus. To hot-swap:

@@ -260,10 +260,10 @@ def make_settings(**overrides) -> SimpleNamespace:
     s = SimpleNamespace(
         resolved_worker_id="test-worker",
         namespace="amazon-products",
-        default_pipeline_id="amazon-products-images",
+        default_pipeline_id="hev-shop-product-images",
         extraction_pipeline_id="hev-shop-extraction-jobs",
         reviews_pipeline_id="hev-shop-reviews",
-        review_aggregate_pipeline_id="amazon-products-review-tags",
+        review_aggregate_pipeline_id="hev-shop-review-tags",
         reviews_namespace_base="amazon-reviews",
         reviews_namespace_shard_count=4,
         distance_metric="cosine_distance",

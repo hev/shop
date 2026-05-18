@@ -42,7 +42,7 @@ scripts/watch-scaling.sh
 Useful overrides:
 
 ```bash
-APP_NAMESPACE=hev-shop PIPELINE_ID=amazon-products-images INTERVAL_SECONDS=10 \
+APP_NAMESPACE=hev-shop PIPELINE_ID=hev-shop-product-images INTERVAL_SECONDS=10 \
   scripts/watch-scaling.sh
 ```
 
@@ -100,7 +100,7 @@ Result:
 Checkpoint:
 
 ```json
-{"pipeline_id":"amazon-products-images","layer":{"counts":{"embedding":20000,"pending":6424},"pending_count":6424},"jobs":{"succeeded":3,"queued":29,"running":9}}
+{"pipeline_id":"hev-shop-product-images","layer":{"counts":{"embedding":20000,"pending":6424},"pending_count":6424},"jobs":{"succeeded":3,"queued":29,"running":9}}
 ```
 
 Kubernetes state at the checkpoint:
@@ -118,7 +118,7 @@ keda-hpa-hev-shop-gpu-worker REPLICAS 3
 Queued:
 
 ```json
-{"count":100000,"category":"Electronics","pipeline_id":"amazon-products-images","job_size":10000}
+{"count":100000,"category":"Electronics","pipeline_id":"hev-shop-product-images","job_size":10000}
 ```
 
 Initial result:
@@ -163,7 +163,7 @@ keda-hpa-hev-shop-gpu-worker  TARGETS 197/10k  REPLICAS 1
 Current checkpoint before committing progress:
 
 ```json
-{"pipeline_id":"amazon-products-images","layer":{"counts":{"pending":6693},"pending_count":6693},"jobs":{"queued":9,"running":1,"succeeded":3}}
+{"pipeline_id":"hev-shop-product-images","layer":{"counts":{"pending":6693},"pending_count":6693},"jobs":{"queued":9,"running":1,"succeeded":3}}
 ```
 
 Kubernetes state at the original checkpoint:

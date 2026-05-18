@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_NAMESPACE="${APP_NAMESPACE:-hev-shop}"
-PIPELINE_ID="${PIPELINE_ID:-amazon-products-images}"
+PIPELINE_ID="${PIPELINE_ID:-hev-shop-product-images}"
 INTERVAL_SECONDS="${INTERVAL_SECONDS:-15}"
 
 while true; do
