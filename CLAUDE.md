@@ -76,11 +76,11 @@ go run . health --gateway-url https://aws-us-east-1.hevlayer.com
 | `main.py`         | FastAPI app — `/search`, `/product/{asin}`, `/meta`, `/index`, `/backfill` |
 | `worker.py`       | Process entrypoint. Reads `WORKER_TYPE` env, dispatches to a stage        |
 | `pipeline.py`     | **The N-stage pipeline.** `STAGES` dict + `run_stage` driver + `process_*` |
-| `extraction.py`   | CPU worker — drains the Postgres job queue, stages products + raw reviews |
+| `extraction.py`   | CPU worker — drains the Layer extraction pipeline, stages products + raw reviews |
 | `embedders.py`    | `CLIPImageEmbedder`, `CLIPTextEmbedder`, `QwenTextEmbedder` model wrappers |
 | `classifier.py`   | OpenRouter client for review tag classification                           |
 | `layer_client.py` | HTTP client for `layer-gateway`                                           |
-| `database.py`     | Postgres pool — job queue, review classifications, daily usage cap        |
+| `jobs.py`         | Extraction/backfill job document shape for the Layer pipeline             |
 | `dataset.py`      | HuggingFace `McAuley-Lab/Amazon-Reviews-2023` reader                      |
 | `records.py`      | Internal data shapes — `ProductRecord`, `ReviewRecord`, vector attrs, review-pipeline plumbing |
 | `models.py`       | Pydantic HTTP request/response contracts (API boundary only)              |
@@ -94,18 +94,18 @@ each stage's `process_*` function returns a `StageOutcome(complete=,
 fail=, release=)` listing per-doc dispositions.
 
 ```
-extract:          (postgres job queue) → stages products + raw reviews
+extract:          (Layer extraction pipeline) → stages products + raw reviews
 embed-products:   pending  → indexed   (CLIP image vectors)
 embed-reviews:    pending  → indexed   (Qwen text vectors, chunked, prefix=review-embed:)
 classify-reviews: pending  → indexed   (OpenRouter tags, prefix=review-classify:)
                                        — fans out ASINs to the aggregate pipeline
-aggregate-tags:   pending  → indexed   (postgres rollup → PATCH product rows)
+aggregate-tags:   pending  → indexed   (review scan → PATCH product rows)
 ```
 
 `WORKER_TYPE` env values map to `STAGES` keys via `worker.STAGE_FOR_WORKER_TYPE`
 (`gpu`→`embed-products`, `review-embed`→`embed-reviews`, etc). `cpu` runs
-`ExtractionWorker` instead because it consumes the postgres job queue,
-not a layer pipeline stage.
+`ExtractionWorker` instead because it expands extraction jobs into product and
+review work items.
 
 To add a new stage:
 1. Write `process_yourstage(ctx, doc_ids) -> StageOutcome` in `pipeline.py`
@@ -122,5 +122,5 @@ python3 -m pytest tests/ --tb=short
 ```
 
 43 tests; pure helpers + STAGES manifest + driver behavior + per-stage
-contracts against fake LayerClient/Database/embedders/classifier in
+contracts against fake LayerClient/embedders/classifier in
 `tests/_fakes.py`.

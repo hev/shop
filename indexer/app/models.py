@@ -83,7 +83,7 @@ class BackfillRequest(BaseModel):
 
 
 class BackfillResponse(BaseModel):
-    job_id: int
+    job_id: str
     pipeline_id: str
     namespace: str
     category: str
@@ -113,6 +113,7 @@ class StatusResponse(BaseModel):
     pipeline_id: str
     layer: dict[str, Any]
     jobs: dict[str, int]
+    extraction: dict[str, Any] = Field(default_factory=dict)
 
 
 class SearchRequest(BaseModel):

@@ -10,9 +10,10 @@ spec:
   minReplicaCount: 0
   maxReplicaCount: 1
   triggers:
-    - type: postgresql
+    - type: prometheus
       metadata:
-        connectionFromEnv: LAYER_DATABASE_URL
-        query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM pipeline_documents WHERE pipeline_id = 'hev-shop-reviews' AND document_id LIKE 'review-embed:%' AND stage IN ('pending', 'embedding') LIMIT 1) THEN 1000 ELSE 0 END"
-        targetQueryValue: "1000"
-        activationTargetQueryValue: "0"
+        serverAddress: http://layer-gateway.layer.svc.cluster.local:8080/v2/metrics
+        metricName: hev_shop_review_embedding_docs
+        query: 'sum(layer_pipeline_stage_count{pipeline_id="hev-shop-reviews",stage=~"pending|embedding"}) or vector(0)'
+        threshold: "1000"
+        activationThreshold: "0"

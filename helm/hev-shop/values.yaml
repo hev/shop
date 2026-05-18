@@ -20,7 +20,6 @@ imagePullSecrets: []
 
 layer:
   gatewayUrl: http://layer-gateway.layer.svc.cluster.local:8080
-  databaseUrl: postgres://hevlayer:hevlayer@layer-postgres.layer.svc.cluster.local:5432/hevlayer
 
 secrets:
   create: true
@@ -38,6 +37,8 @@ persistence:
   mountPath: /data
 
 pipeline:
+  extraction:
+    id: hev-shop-extraction-jobs
   product:
     id: amazon-products-images
     namespace: amazon-products
@@ -81,13 +82,13 @@ config:
   REVIEW_EMBEDDING_BATCH_SIZE: "4"
   EMBEDDING_CLAIM_SIZE: "2000"
   VECTOR_UPSERT_BATCH_SIZE: "10000"
+  REVIEW_AGGREGATE_SCAN_PAGE_SIZE: "10000"
   CHUNK_FETCH_CONCURRENCY: "32"
   CLEANUP_EMBEDDED_IMAGES: "true"
   WORKER_POLL_SECONDS: "5"
   CLAIM_LEASE_SECONDS: "900"
   CLAIM_HEARTBEAT_SECONDS: "60"
   REVIEW_CLASSIFICATION_BATCH_SIZE: "8"
-  REVIEW_CLASSIFICATION_DAILY_REVIEW_LIMIT: "100000"
   REVIEW_RECENT_CAP_PER_PRODUCT: "200"
   REVIEW_HELPFUL_CAP_PER_PRODUCT: "200"
   REVIEW_TAG_MIN_COUNT: "3"
@@ -100,6 +101,7 @@ config:
 autoscaling:
   enabled: true
   apiVersion: keda.sh/v1alpha1
+  prometheusServerAddress: http://layer-gateway.layer.svc.cluster.local:8080/v2/metrics
 
 karpenter:
   enabled: false
@@ -114,6 +116,9 @@ karpenter:
     enabled: true
     name: ""
     amiFamily: AL2023
+    rootVolumeSize: 100Gi
+    rootVolumeThroughput: 500
+    rootVolumeIops: 6000
     metadataOptions:
       httpEndpoint: enabled
       httpProtocolIPv6: disabled
@@ -198,12 +203,15 @@ karpenter:
 
 api:
   replicaCount: 1
+  # Lands on the Karpenter `app` pool — the small `infra` m6a.large root
+  # disk can't hold the indexer image (torch unpacks to ~14 GB and the
+  # infra node has ~18 Gi total root, shared with the web pod).
   nodeSelector:
-    mesh-role: infra
+    mesh-role: app
   tolerations:
     - key: mesh-role
       operator: Equal
-      value: infra
+      value: app
       effect: NoSchedule
   # CLIP ViT-L/14 (~1.7 GB) is the only model the api pod loads — Qwen-8B
   # would need ~32 GB CPU and is gated off via API_REVIEW_SEARCH_ENABLED.
@@ -212,11 +220,11 @@ api:
     requests:
       cpu: "1"
       memory: 3Gi
-      ephemeral-storage: 25Gi
+      ephemeral-storage: 10Gi
     limits:
       cpu: "4"
       memory: 5Gi
-      ephemeral-storage: 30Gi
+      ephemeral-storage: 15Gi
   env:
     # Models are baked into the image at /opt/model-cache (see indexer/Dockerfile).
     - name: API_MODEL_CACHE_DIR
@@ -270,18 +278,24 @@ workers:
       requests:
         cpu: 500m
         memory: 1Gi
+        # Reserve enough ephemeral-storage so kubelet schedules at most
+        # one cpu-worker per 50 GiB Karpenter node. The indexer image
+        # unpacks to ~25 GiB and we leave headroom for OS + logs.
+        ephemeral-storage: 35Gi
       limits:
         cpu: "2"
         memory: 2Gi
+        ephemeral-storage: 40Gi
     autoscaling:
       enabled: true
       pollingInterval: 10
       cooldownPeriod: 60
       minReplicaCount: 0
       maxReplicaCount: 8
-      query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM hev_shop_index_jobs WHERE status IN ('queued', 'retry', 'running') LIMIT 1) THEN 16 ELSE 0 END"
-      targetQueryValue: "2"
-      activationTargetQueryValue: "0"
+      metricName: hev_shop_extraction_jobs
+      query: 'sum(layer_pipeline_stage_count{pipeline_id="{{ .Values.pipeline.extraction.id }}",stage=~"pending|extracting"}) or vector(0)'
+      threshold: "2"
+      activationThreshold: "0"
 
   gpu:
     enabled: true
@@ -327,9 +341,10 @@ workers:
       cooldownPeriod: 300
       minReplicaCount: 0
       maxReplicaCount: 1
-      query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM pipeline_documents WHERE pipeline_id = '{{ .Values.pipeline.product.id }}' AND stage IN ('pending', 'embedding') LIMIT 1) THEN 10000 ELSE 0 END"
-      targetQueryValue: "10000"
-      activationTargetQueryValue: "0"
+      metricName: hev_shop_product_embedding_docs
+      query: 'sum(layer_pipeline_stage_count{pipeline_id="{{ .Values.pipeline.product.id }}",stage=~"pending|embedding"}) or vector(0)'
+      threshold: "10000"
+      activationThreshold: "0"
 
   reviewEmbed:
     enabled: true
@@ -394,9 +409,10 @@ workers:
       cooldownPeriod: 300
       minReplicaCount: 0
       maxReplicaCount: 1
-      query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM pipeline_documents WHERE pipeline_id = '{{ .Values.pipeline.reviews.id }}' AND document_id LIKE 'review-embed:%' AND stage IN ('pending', 'embedding') LIMIT 1) THEN 1000 ELSE 0 END"
-      targetQueryValue: "1000"
-      activationTargetQueryValue: "0"
+      metricName: hev_shop_review_embedding_docs
+      query: 'sum(layer_pipeline_stage_count{pipeline_id="{{ .Values.pipeline.reviews.id }}",stage=~"pending|embedding"}) or vector(0)'
+      threshold: "1000"
+      activationThreshold: "0"
 
   reviewClassify:
     enabled: true
@@ -425,9 +441,10 @@ workers:
       cooldownPeriod: 120
       minReplicaCount: 0
       maxReplicaCount: 4
-      query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM pipeline_documents WHERE pipeline_id = '{{ .Values.pipeline.reviews.id }}' AND document_id LIKE 'review-classify:%' AND stage IN ('pending', 'classifying') LIMIT 1) THEN 400 ELSE 0 END"
-      targetQueryValue: "100"
-      activationTargetQueryValue: "0"
+      metricName: hev_shop_review_classification_docs
+      query: 'sum(layer_pipeline_stage_count{pipeline_id="{{ .Values.pipeline.reviews.id }}",stage=~"pending|classifying"}) or vector(0)'
+      threshold: "100"
+      activationThreshold: "0"
 
   reviewAggregate:
     enabled: true
@@ -456,6 +473,7 @@ workers:
       cooldownPeriod: 60
       minReplicaCount: 0
       maxReplicaCount: 4
-      query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM pipeline_documents WHERE pipeline_id = '{{ .Values.pipeline.reviewAggregate.id }}' AND stage IN ('pending', 'aggregating') LIMIT 1) THEN 4 ELSE 0 END"
-      targetQueryValue: "1"
-      activationTargetQueryValue: "0"
+      metricName: hev_shop_review_aggregation_docs
+      query: 'sum(layer_pipeline_stage_count{pipeline_id="{{ .Values.pipeline.reviewAggregate.id }}",stage=~"pending|aggregating"}) or vector(0)'
+      threshold: "1"
+      activationThreshold: "0"

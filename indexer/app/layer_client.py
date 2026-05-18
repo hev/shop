@@ -189,37 +189,49 @@ class LayerClient:
         )
 
     async def stage_product(self, pipeline_id: str, product: ProductRecord) -> None:
-        response = await self._client.put(
-            f"{self.base_url}/v2/pipelines/{pipeline_id}/documents/{product.asin}",
-            json={
-                "chunks": [
-                    {
-                        "id": product.asin,
-                        "text": product.document_text(),
-                        "metadata": product.attributes(),
-                    }
-                ]
-            },
+        await self.stage_pipeline_document(
+            pipeline_id,
+            product.asin,
+            chunks=[
+                {
+                    "id": product.asin,
+                    "text": product.document_text(),
+                    "metadata": product.attributes(),
+                }
+            ],
         )
-        response.raise_for_status()
 
     async def stage_review(
-        self, pipeline_id: str, review: ReviewRecord, *, work_item: str
+        self,
+        pipeline_id: str,
+        review: ReviewRecord,
+        *,
+        work_item: str,
+        enqueue_classify: bool = False,
     ) -> None:
         if work_item not in {"embed", "classify"}:
             raise ValueError("work_item must be 'embed' or 'classify'")
+        metadata = review.attributes()
+        if work_item == "embed" and enqueue_classify:
+            metadata["enqueue_classify"] = True
+        await self.stage_pipeline_document(
+            pipeline_id,
+            review_work_document_id(work_item, review.review_id),
+            chunks=[
+                {
+                    "id": review_raw_chunk_id(review.review_id),
+                    "text": review.document_text(),
+                    "metadata": metadata,
+                }
+            ],
+        )
+
+    async def stage_pipeline_document(
+        self, pipeline_id: str, document_id: str, *, chunks: list[dict[str, Any]]
+    ) -> None:
         response = await self._client.put(
-            f"{self.base_url}/v2/pipelines/{pipeline_id}/documents/"
-            f"{review_work_document_id(work_item, review.review_id)}",
-            json={
-                "chunks": [
-                    {
-                        "id": review_raw_chunk_id(review.review_id),
-                        "text": review.document_text(),
-                        "metadata": review.attributes(),
-                    }
-                ]
-            },
+            f"{self.base_url}/v2/pipelines/{pipeline_id}/documents/{document_id}",
+            json={"chunks": chunks},
         )
         response.raise_for_status()
 

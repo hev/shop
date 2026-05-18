@@ -7,6 +7,7 @@ metadata:
 data:
   LAYER_GATEWAY_URL: {{ .Values.layer.gatewayUrl | quote }}
   TURBOPUFFER_NAMESPACE: {{ .Values.pipeline.product.namespace | quote }}
+  EXTRACTION_PIPELINE_ID: {{ .Values.pipeline.extraction.id | quote }}
   PIPELINE_ID: {{ .Values.pipeline.product.id | quote }}
   REVIEWS_PIPELINE_ID: {{ .Values.pipeline.reviews.id | quote }}
   REVIEWS_AGGREGATE_PIPELINE_ID: {{ .Values.pipeline.reviewAggregate.id | quote }}

@@ -10,9 +10,10 @@ spec:
   minReplicaCount: 0
   maxReplicaCount: 1
   triggers:
-    - type: postgresql
+    - type: prometheus
       metadata:
-        connectionFromEnv: LAYER_DATABASE_URL
-        query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM pipeline_documents WHERE pipeline_id = 'amazon-products-images' AND stage IN ('pending', 'embedding') LIMIT 1) THEN 10000 ELSE 0 END"
-        targetQueryValue: "10000"
-        activationTargetQueryValue: "0"
+        serverAddress: http://layer-gateway.layer.svc.cluster.local:8080/v2/metrics
+        metricName: hev_shop_product_embedding_docs
+        query: 'sum(layer_pipeline_stage_count{pipeline_id="amazon-products-images",stage=~"pending|embedding"}) or vector(0)'
+        threshold: "10000"
+        activationThreshold: "0"

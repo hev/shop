@@ -3,7 +3,7 @@
 Imports `STAGES`, `Stage`, `StageContext`, `StageOutcome`, `_run_once`
 from `app.pipeline`. The driver tests use synthetic Stage entries to
 exercise `_run_once` in isolation; the per-stage tests run the real
-STAGES entries against fake LayerClient/Database/embedders/classifier.
+STAGES entries against fake LayerClient/embedders/classifier.
 
 When all of these go green, this file replaces
 `test_workers_characterization.py`.
@@ -28,7 +28,6 @@ from app.pipeline import (
 from _fakes import (
     FakeClassifier,
     FakeClipImageEmbedder,
-    FakeDatabase,
     FakeLayerClient,
     FakeQwenTextEmbedder,
     make_settings,
@@ -37,13 +36,11 @@ from _fakes import (
 
 def make_ctx(
     layer: FakeLayerClient | None = None,
-    database: FakeDatabase | None = None,
     settings=None,
     **embedder_overrides,
 ) -> StageContext:
     ctx = StageContext(
         settings=settings or make_settings(),
-        database=database or FakeDatabase(),
         layer=layer or FakeLayerClient(),
     )
     for key, value in embedder_overrides.items():
@@ -187,18 +184,12 @@ class DriverTests(unittest.IsolatedAsyncioTestCase):
 class EmbedProductsStageTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.layer = FakeLayerClient()
-        self.database = FakeDatabase(
-            tag_attrs_by_asin={
-                "A1": {"tags": ["Value Leader"], "classified_review_count": 7}
-            }
-        )
         self.embedder = FakeClipImageEmbedder()
         self.tmp = TemporaryDirectory()
         self.image_path = Path(self.tmp.name) / "A1.jpg"
         self.image_path.write_bytes(b"\xff\xd8\xff")
         self.ctx = make_ctx(
             layer=self.layer,
-            database=self.database,
             _clip_image=self.embedder,
         )
         self.stage = STAGES["embed-products"]
@@ -217,7 +208,7 @@ class EmbedProductsStageTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_setup_creates_pipeline_and_warms_clip_before_claim(self) -> None:
         layer = FakeLayerClient()
-        ctx = make_ctx(layer=layer, database=self.database)
+        ctx = make_ctx(layer=layer)
 
         with patch("app.embedders.CLIPImageEmbedder", return_value=self.embedder) as ctor:
             await self.stage.setup(ctx)
@@ -230,7 +221,7 @@ class EmbedProductsStageTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(ctx._clip_image, self.embedder)
         self.assertEqual(layer.claim_calls, [])
 
-    async def test_happy_path_merges_tag_rollup_and_completes(self) -> None:
+    async def test_happy_path_upserts_product_attrs_and_completes(self) -> None:
         self.layer.next_claim = ["A1"]
         self.layer.chunks_by_doc_id = {
             "A1": [
@@ -257,8 +248,7 @@ class EmbedProductsStageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(upsert["vectors"][0]["id"], "A1")
         attrs = upsert["vectors"][0]["attributes"]
         self.assertEqual(attrs["asin"], "A1")
-        self.assertEqual(attrs["tags"], ["Value Leader"])
-        self.assertEqual(attrs["classified_review_count"], 7)
+        self.assertNotIn("tags", attrs)
         self.assertEqual(self.layer.complete_calls[0]["doc_ids"], ["A1"])
         self.assertEqual(self.layer.complete_calls[0]["from_stage"], "embedding")
 
@@ -312,9 +302,8 @@ class EmbedProductsStageTests(unittest.IsolatedAsyncioTestCase):
 class EmbedReviewsStageTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.layer = FakeLayerClient()
-        self.database = FakeDatabase()
         self.embedder = FakeQwenTextEmbedder()
-        self.ctx = make_ctx(layer=self.layer, database=self.database, _qwen=self.embedder)
+        self.ctx = make_ctx(layer=self.layer, _qwen=self.embedder)
         self.stage = STAGES["embed-reviews"]
 
     async def test_claims_with_review_embed_prefix(self) -> None:
@@ -327,7 +316,7 @@ class EmbedReviewsStageTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_setup_creates_pipeline_and_warms_qwen_before_claim(self) -> None:
         layer = FakeLayerClient()
-        ctx = make_ctx(layer=layer, database=self.database)
+        ctx = make_ctx(layer=layer)
 
         with patch("app.embedders.QwenTextEmbedder", return_value=self.embedder) as ctor:
             await self.stage.setup(ctx)
@@ -372,6 +361,31 @@ class EmbedReviewsStageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(upsert["vectors"][0]["attributes"]["asin"], "A1")
         self.assertEqual(self.layer.complete_calls[0]["doc_ids"], [doc_id])
 
+    async def test_embed_hands_off_to_classify_when_requested(self) -> None:
+        doc_id = "review-embed:r-1"
+        self.layer.next_claim = [doc_id]
+        self.layer.chunks_by_doc_id = {
+            doc_id: [
+                {
+                    "id": "review-raw:r-1",
+                    "text": "great camera",
+                    "metadata": {
+                        "asin": "A1",
+                        "review_id": "r-1",
+                        "enqueue_classify": True,
+                    },
+                }
+            ]
+        }
+
+        result = await _run_once(self.stage, self.ctx)
+
+        self.assertEqual(result, 1)
+        handoff = self.layer.stage_document_calls[0]
+        self.assertEqual(handoff["pipeline_id"], "hev-shop-reviews")
+        self.assertEqual(handoff["document_id"], "review-classify:r-1")
+        self.assertNotIn("enqueue_classify", handoff["chunks"][0]["metadata"])
+
     async def test_missing_asin_or_text_fails_document(self) -> None:
         self.layer.next_claim = ["review-embed:bad"]
         self.layer.chunks_by_doc_id = {
@@ -409,11 +423,8 @@ class EmbedReviewsStageTests(unittest.IsolatedAsyncioTestCase):
 class ClassifyReviewsStageTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.layer = FakeLayerClient()
-        self.database = FakeDatabase()
         self.classifier = FakeClassifier()
-        self.ctx = make_ctx(
-            layer=self.layer, database=self.database, _classifier=self.classifier
-        )
+        self.ctx = make_ctx(layer=self.layer, _classifier=self.classifier)
         self.stage = STAGES["classify-reviews"]
 
     async def test_claims_with_classify_prefix_and_stage(self) -> None:
@@ -438,12 +449,19 @@ class ClassifyReviewsStageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, 0)
         self.assertEqual(self.layer.release_calls[0]["doc_ids"], ["review-classify:r-1"])
         self.assertEqual(self.classifier.calls, [])
-        self.assertEqual(self.database.replace_calls, [])
         self.assertEqual(self.layer.set_stage_calls, [])
 
-    async def test_happy_path_writes_tags_and_hands_off_to_aggregate(self) -> None:
+    async def test_happy_path_patches_review_vector_and_hands_off_to_aggregate(self) -> None:
+        from app.records import review_namespace_for
+
         doc_id = "review-classify:r-1"
         self.layer.next_claim = [doc_id]
+        review_namespace = review_namespace_for(
+            "A1", namespace_base="amazon-reviews", shard_count=4
+        )
+        self.layer.documents_by_namespace[(review_namespace, "r-1:chunk:0000")] = {
+            "attributes": {"review_id": "r-1"}
+        }
         self.layer.chunks_by_doc_id = {
             doc_id: [
                 {
@@ -465,9 +483,13 @@ class ClassifyReviewsStageTests(unittest.IsolatedAsyncioTestCase):
         result = await _run_once(self.stage, self.ctx)
 
         self.assertEqual(result, 1)
+        patch = self.layer.patch_calls[0]
+        self.assertEqual(patch["namespace"], review_namespace)
+        self.assertEqual(patch["patches"][0]["id"], "r-1:chunk:0000")
+        self.assertEqual(patch["patches"][0]["attributes"]["tags"], ["Value Leader"])
         self.assertEqual(
-            self.database.replace_calls,
-            [{"asin": "A1", "review_id": "r-1", "tags": [("Value Leader", 0.9)]}],
+            patch["patches"][0]["attributes"]["tag_confidences"],
+            '{"Value Leader":0.9}',
         )
         # Cross-stage hand-off: aggregate pipeline gets A1 transitioned
         # to pending so the aggregate-tags stage can pick it up next.
@@ -479,10 +501,18 @@ class ClassifyReviewsStageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.layer.complete_calls[0]["doc_ids"], [doc_id])
         self.assertEqual(self.layer.complete_calls[0]["from_stage"], "classifying")
 
-    async def test_daily_cap_releases_all_docs_and_skips_classifier(self) -> None:
-        self.database.allow_reservation = False
+    async def test_missing_review_vector_releases_doc_and_skips_classifier(self) -> None:
         doc_id = "review-classify:r-1"
         self.layer.next_claim = [doc_id]
+        self.layer.chunks_by_doc_id = {
+            doc_id: [
+                {
+                    "id": "review-raw:r-1",
+                    "text": "Built to last",
+                    "metadata": {"asin": "A1", "review_id": "r-1"},
+                }
+            ]
+        }
 
         result = await _run_once(self.stage, self.ctx)
 
@@ -493,9 +523,17 @@ class ClassifyReviewsStageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.layer.set_stage_calls, [])
 
     async def test_classifier_raises_releases_all_docs(self) -> None:
+        from app.records import review_namespace_for
+
         self.classifier.raise_on_call = True
         doc_id = "review-classify:r-1"
         self.layer.next_claim = [doc_id]
+        review_namespace = review_namespace_for(
+            "A1", namespace_base="amazon-reviews", shard_count=4
+        )
+        self.layer.documents_by_namespace[(review_namespace, "r-1:chunk:0000")] = {
+            "attributes": {"review_id": "r-1"}
+        }
         self.layer.chunks_by_doc_id = {
             doc_id: [
                 {
@@ -516,14 +554,40 @@ class ClassifyReviewsStageTests(unittest.IsolatedAsyncioTestCase):
 
 class AggregateTagsStageTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
+        from app.records import review_namespace_for
+
         self.layer = FakeLayerClient()
-        self.database = FakeDatabase(
-            tag_attrs_by_asin={
-                "A1": {"tags": ["Value Leader"], "classified_review_count": 9},
-                "A2": {"tags": ["Overpriced"], "classified_review_count": 4},
-            }
+        ns_a1 = review_namespace_for(
+            "A1", namespace_base="amazon-reviews", shard_count=4
         )
-        self.ctx = make_ctx(layer=self.layer, database=self.database)
+        ns_a2 = review_namespace_for(
+            "A2", namespace_base="amazon-reviews", shard_count=4
+        )
+        self.layer.scan_results_by_namespace.setdefault(ns_a1, []).extend([
+            {
+                "attributes": {
+                    "asin": "A1",
+                    "review_id": f"a1-r-{idx}",
+                    "tags": ["Value Leader"],
+                    "tag_confidences": '{"Value Leader":0.9}',
+                    "review_classified_at": "2026-05-18T00:00:00+00:00",
+                }
+            }
+            for idx in range(3)
+        ])
+        self.layer.scan_results_by_namespace.setdefault(ns_a2, []).extend([
+            {
+                "attributes": {
+                    "asin": "A2",
+                    "review_id": f"a2-r-{idx}",
+                    "tags": ["Overpriced"],
+                    "tag_confidences": '{"Overpriced":0.8}',
+                    "review_classified_at": "2026-05-18T00:00:00+00:00",
+                }
+            }
+            for idx in range(3)
+        ])
+        self.ctx = make_ctx(layer=self.layer)
         self.stage = STAGES["aggregate-tags"]
 
     async def test_claims_with_aggregating_stage(self) -> None:

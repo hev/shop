@@ -58,7 +58,7 @@ the classifier path writes Phase 1 tags back to product attrs.
 │  GET  /status                                        │
 │                                                      │
 │  CPU mode (WORKER_TYPE=cpu):                         │
-│    claim extraction jobs from PostgreSQL             │
+│    claim extraction jobs from Layer pipeline API     │
 │    for each product:                                 │
 │      stream metadata from HuggingFace                │
 │      download image → PVC /data/images/{asin}.jpg    │
@@ -87,12 +87,13 @@ the classifier path writes Phase 1 tags back to product attrs.
 │    PUT    .../documents/{d}/vectors       │
 │                                          │
 │  Storage:                                │
-│    Aerospike — chunk data (KV cache)     │
-│    PostgreSQL — pipeline state, KEDA     │
+│    Embedded Aerospike — chunk data       │
+│    Embedded PostgreSQL — pipeline state  │
+│    Gateway metrics — KEDA signal         │
 │    Turbopuffer — final vectors           │
 └──────────────────────────────────────────┘
        │              │
-  Shared PVC      KEDA polls PG
+  Shared PVC      KEDA polls gateway metrics
   /data/          scales GPU workers 0→N
   ├── dataset/
   └── images/
@@ -163,7 +164,7 @@ CREATE TABLE pipelines (
 
 ### Implemented Claiming
 
-- CPU workers claim rows from `hev_shop_index_jobs`, download images, and stage one chunk per ASIN.
+- CPU workers claim extraction-job documents from the Layer extraction pipeline, download images, and stage one chunk per ASIN.
 - Embedding, classification, and aggregation workers claim pipeline documents through layer-gateway, heartbeat active claims, and ask layer-gateway to move rows to `pending`, `failed`, or `indexed`.
 
 ```
@@ -262,15 +263,12 @@ spec:
   cooldownPeriod: 300
   pollingInterval: 30
   triggers:
-    - type: postgresql
+    - type: prometheus
       metadata:
-        connectionFromEnv: LAYER_DATABASE_URL
-        query: >
-          SELECT COALESCE(count(*), 0)
-          FROM pipeline_documents
-          WHERE pipeline_id = 'amazon-products-images'
-          AND stage IN ('pending', 'embedding')
-        targetQueryValue: "10000"
+        serverAddress: http://layer-gateway.layer.svc.cluster.local:8080/v2/metrics
+        metricName: hev_shop_product_embedding_docs
+        query: 'sum(layer_pipeline_stage_count{pipeline_id="amazon-products-images",stage=~"pending|embedding"}) or vector(0)'
+        threshold: "10000"
 ```
 
 Production-scale load tests should use 10k extraction jobs and 10k Turbopuffer

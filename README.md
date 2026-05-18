@@ -19,8 +19,8 @@ under an application-shaped indexing and search flow:
 
 - Source data comes from [McAuley-Lab/Amazon-Reviews-2023](https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023).
 - Vectors land in Turbopuffer through Layer namespace APIs.
-- Indexing work is coordinated through Layer pipeline APIs backed by PostgreSQL.
-- KEDA scales workers from Layer PostgreSQL state instead of a separate queue.
+- Indexing work is coordinated through Layer pipeline APIs.
+- KEDA scales workers from Layer pipeline metrics instead of a separate queue.
 - Karpenter NodePools can be deployed with the app, so pod scaling and node
   scaling live next to the workload that creates the demand.
 
@@ -39,7 +39,7 @@ query with freshness signals, and let the gateway own the Turbopuffer edge.
   product state without building a separate warehouse path for every facet.
 - **Multi-stage autoscaling Kubernetes pipeline.** CPU extraction, GPU image
   embedding, GPU review embedding, LLM classification, and tag aggregation run
-  as separate workers. KEDA reads Layer PostgreSQL pipeline state to scale pods,
+  as separate workers. KEDA reads Layer pipeline metrics to scale pods,
   while optional Karpenter NodePools add the CPU/GPU node capacity those pods
   require.
 - **Review-based LLM classifier to improve product search.** Review text is
@@ -55,7 +55,7 @@ query with freshness signals, and let the gateway own the Turbopuffer edge.
 Amazon Reviews 2023
         |
         v
-  indexer API  ---- job rows ----> CPU product/review workers
+  indexer API  ---- extraction docs ----> CPU product/review workers
         |                              |
         |                              v
         |                    Layer pipeline document staging
@@ -63,7 +63,7 @@ Amazon Reviews 2023
         v                              v
    Next.js web <---- search ---- indexer API ---- Layer gateway
                                              |         |
-                                             |         +--> Layer PostgreSQL pipeline state
+                                             |         +--> Layer pipeline state + metrics
                                              |         +--> Aerospike chunk/cache data
                                              |         +--> Turbopuffer vector namespaces
                                              |
@@ -85,9 +85,9 @@ product vectors as filterable tags.
   a `run_stage` driver that owns the claim/heartbeat/release lifecycle, so
   each stage's `process_*` is just the work that's unique to that stage.
   Stages: `embed-products` (CLIP), `embed-reviews` (Qwen), `classify-reviews`
-  (OpenRouter), `aggregate-tags` (postgres rollup → PATCH product rows).
+  (OpenRouter), `aggregate-tags` (review scan → PATCH product rows).
 - `indexer/app/extraction.py` — the CPU extraction worker that drains the
-  Postgres job queue and stages products + raw reviews into the layer
+  Layer extraction pipeline and stages products + raw reviews into the layer
   pipelines.
 - `indexer/app/main.py` — FastAPI surface: `/search`, `/search/reviews`,
   `/product/{asin}`, `/meta`, `/index`, `/backfill`.
@@ -161,7 +161,7 @@ go run . status --pipeline-id amazon-products-images
 The Helm chart assumes Layer is already installed and exposes:
 
 - `layer-gateway.layer.svc.cluster.local:8080`
-- `layer-postgres.layer.svc.cluster.local:5432`
+- `layer-gateway.layer.svc.cluster.local:8080/v2/metrics` for Prometheus-compatible metric queries
 - KEDA in the cluster
 - Karpenter in the cluster when `karpenter.enabled=true`
 - an RWX storage class for the shared image/model cache
@@ -176,17 +176,9 @@ helm upgrade --install hev-shop ./helm/hev-shop \
   --set webImage.repository=ghcr.io/hev/hev-shop-web
 ```
 
-Override the Layer PostgreSQL URL when Layer uses a managed database:
-
-```sh
-helm upgrade --install hev-shop ./helm/hev-shop \
-  --namespace hev-shop \
-  --create-namespace \
-  --set-string layer.databaseUrl='postgres://user:pass@host:5432/hevlayer'
-```
-
-The KEDA ScaledObjects use `connectionFromEnv: LAYER_DATABASE_URL`, so every
-worker reads the same Layer PostgreSQL URL that the scaler uses for queue depth.
+The KEDA ScaledObjects use Prometheus queries against
+`layer_pipeline_stage_count`, so hev-shop never needs Layer PostgreSQL
+credentials.
 
 Enable app-owned Karpenter NodePools:
 

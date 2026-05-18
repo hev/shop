@@ -6,30 +6,31 @@ function only contains the work that's unique to that stage.
 
 Stages, top-down:
 
-    extract:          (postgres job queue) → stages products + raw reviews
-                                             into the layer pipelines
+    extract:          (Layer extraction pipeline) → stages products + raw
+                                             reviews into the layer pipelines
     embed-products:   pending  → indexed   (CLIP image vectors, prod ns)
     embed-reviews:    pending  → indexed   (Qwen text vectors, review ns,
                                             chunked, prefix=embed:)
     classify-reviews: pending  → indexed   (OpenRouter tag classification,
                                             prefix=classify:) — fans out
                                             ASINs into the aggregate pipeline
-    aggregate-tags:   pending  → indexed   (Postgres rollup → PATCH product
-                                            rows with tag_counts/samples)
+    aggregate-tags:   pending  → indexed   (review namespace scan → PATCH
+                                            product rows with tag_counts/samples)
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import signal
 from contextlib import suppress
 from dataclasses import dataclass, field
+from math import ceil
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from .config import Settings, get_settings
-from .database import Database
 from .layer_client import LayerClient
 from datetime import datetime, timezone
 
@@ -37,9 +38,12 @@ from .classifier import ReviewClassificationInput
 from .records import (
     REVIEW_CLASSIFY_PREFIX,
     REVIEW_EMBED_PREFIX,
+    REVIEW_TAGS,
     product_vector_attributes,
+    review_raw_chunk_id,
     review_namespace_for,
     review_vector_attributes,
+    review_work_document_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,7 +57,6 @@ logger = logging.getLogger(__name__)
 @dataclass
 class StageContext:
     settings: Settings
-    database: Database
     layer: LayerClient
     # Lazy singletons so stages that need a model don't pay for one they don't.
     _clip_image: Any = None
@@ -197,12 +200,6 @@ async def process_embed_products(ctx: StageContext, doc_ids: list[str]) -> Stage
             fail.append(doc_id)
             continue
         attrs = product_vector_attributes(meta, doc_id)
-        attrs.update(await ctx.database.aggregate_review_tag_attrs(
-            str(attrs["asin"]),
-            min_count=ctx.settings.review_tag_min_count,
-            min_fraction=ctx.settings.review_tag_min_fraction,
-            sample_count=ctx.settings.review_tag_sample_count,
-        ))
         prepared.append((doc_id, image, attrs))
 
     if not prepared:
@@ -251,8 +248,10 @@ async def process_embed_reviews(ctx: StageContext, doc_ids: list[str]) -> StageO
     release: list[str] = []
     complete: list[str] = []
 
-    # (doc_id, namespace, [{"id": vector_id, "attributes": attrs, "text_chunk": str}, ...])
-    prepared: list[tuple[str, str, list[dict[str, Any]]]] = []
+    # (doc_id, namespace, vector items, optional classify handoff chunk)
+    prepared: list[
+        tuple[str, str, list[dict[str, Any]], dict[str, Any] | None]
+    ] = []
     for doc_id in doc_ids:
         try:
             chunks = await ctx.layer.get_chunks(ctx.settings.reviews_pipeline_id, doc_id)
@@ -293,7 +292,16 @@ async def process_embed_reviews(ctx: StageContext, doc_ids: list[str]) -> StageO
             }
             for idx, chunk_text in enumerate(text_chunks)
         ]
-        prepared.append((doc_id, namespace, vector_items))
+        classify_chunk = None
+        if metadata.get("enqueue_classify") is True:
+            classify_metadata = dict(metadata)
+            classify_metadata.pop("enqueue_classify", None)
+            classify_chunk = {
+                "id": review_raw_chunk_id(review_id),
+                "text": text,
+                "metadata": classify_metadata,
+            }
+        prepared.append((doc_id, namespace, vector_items, classify_chunk))
 
     if not prepared:
         return StageOutcome(fail=fail, release=release)
@@ -301,7 +309,7 @@ async def process_embed_reviews(ctx: StageContext, doc_ids: list[str]) -> StageO
     # Batch-encode across all (doc_id, vector_id, item) flat tuples, then
     # upsert per-doc so a single doc fully succeeds or fully releases.
     flat: list[tuple[str, dict[str, Any]]] = [
-        (doc_id, item) for doc_id, _ns, items in prepared for item in items
+        (doc_id, item) for doc_id, _ns, items, _handoff in prepared for item in items
     ]
     batch_size = ctx.settings.review_embedding_batch_size
     for batch in _batches(flat, batch_size):
@@ -318,13 +326,20 @@ async def process_embed_reviews(ctx: StageContext, doc_ids: list[str]) -> StageO
         for (_doc_id, item), vector in zip(batch, vectors, strict=True):
             item["vector"] = vector
 
-    for doc_id, namespace, items in prepared:
+    for doc_id, namespace, items, classify_chunk in prepared:
         if doc_id in release:
             continue
         if any("vector" not in item for item in items):
             continue
         try:
             await ctx.layer.upsert_vectors(namespace, items)
+            if classify_chunk is not None:
+                review_id = str(classify_chunk["metadata"]["review_id"])
+                await ctx.layer.stage_pipeline_document(
+                    ctx.settings.reviews_pipeline_id,
+                    review_work_document_id("classify", review_id),
+                    chunks=[classify_chunk],
+                )
             complete.append(doc_id)
         except Exception:
             logger.exception("failed to upsert review vector batch")
@@ -353,24 +368,17 @@ async def setup_classify_reviews(ctx: StageContext) -> None:
 async def process_classify_reviews(ctx: StageContext, doc_ids: list[str]) -> StageOutcome:
     # Behavior shift from the old worker: we claim then release when the
     # API key is missing (the old worker short-circuited before claiming).
-    # End state is identical — no progress, no tag writes — at the cost
+    # End state is identical — no progress, no tag patches — at the cost
     # of one extra lease round-trip per idle tick.
     if not ctx.settings.openrouter_api_key:
         logger.warning("OPENROUTER_API_KEY is not set; releasing claimed review docs")
-        return StageOutcome(release=list(doc_ids))
-
-    if not await ctx.database.try_reserve_review_classification(
-        usage_date=datetime.now(timezone.utc).date(),
-        review_count=len(doc_ids),
-        daily_review_limit=ctx.settings.review_classification_daily_review_limit,
-    ):
-        logger.warning("daily review classification cap reached")
         return StageOutcome(release=list(doc_ids))
 
     fail: list[str] = []
     release: list[str] = []
     reviews: list[ReviewClassificationInput] = []
     doc_id_by_review: dict[str, str] = {}
+    vector_ref_by_review: dict[str, tuple[str, str]] = {}
 
     for doc_id in doc_ids:
         try:
@@ -394,7 +402,27 @@ async def process_classify_reviews(ctx: StageContext, doc_ids: list[str]) -> Sta
         if not asin or not review_id or not text:
             fail.append(doc_id)
             continue
+        namespace = review_namespace_for(
+            asin,
+            namespace_base=ctx.settings.reviews_namespace_base,
+            shard_count=ctx.settings.reviews_namespace_shard_count,
+        )
+        vector_id = review_chunk_vector_id(review_id)
+        try:
+            await ctx.layer.fetch_document(
+                namespace,
+                vector_id,
+                include_attributes=["review_id"],
+            )
+        except Exception:
+            logger.info(
+                "review vector is not visible yet; releasing classification",
+                extra={"doc_id": doc_id, "namespace": namespace, "vector_id": vector_id},
+            )
+            release.append(doc_id)
+            continue
         doc_id_by_review[review_id] = doc_id
+        vector_ref_by_review[review_id] = (namespace, vector_id)
         reviews.append(
             ReviewClassificationInput(
                 asin=asin,
@@ -419,15 +447,39 @@ async def process_classify_reviews(ctx: StageContext, doc_ids: list[str]) -> Sta
 
     complete: list[str] = []
     aggregate_asins: list[str] = []
+    patches_by_namespace: dict[str, list[dict[str, Any]]] = {}
+    classified_at = datetime.now(timezone.utc).isoformat()
     for review in reviews:
         tags = classified.get(review.review_id, [])
-        await ctx.database.replace_review_classification(
-            asin=review.asin,
-            review_id=review.review_id,
-            tags=[(tag.tag, tag.confidence) for tag in tags],
+        namespace, vector_id = vector_ref_by_review[review.review_id]
+        tag_names = [tag.tag for tag in tags if tag.tag in REVIEW_TAGS]
+        confidences = {
+            tag.tag: float(tag.confidence)
+            for tag in tags
+            if tag.tag in REVIEW_TAGS
+        }
+        patches_by_namespace.setdefault(namespace, []).append(
+            {
+                "id": vector_id,
+                "attributes": {
+                    "tags": tag_names,
+                    "tag_confidences": json.dumps(
+                        confidences, separators=(",", ":")
+                    ),
+                    "review_classified_at": classified_at,
+                },
+            }
         )
         aggregate_asins.append(review.asin)
         complete.append(doc_id_by_review[review.review_id])
+
+    try:
+        for namespace, patches in patches_by_namespace.items():
+            await ctx.layer.patch_attributes(namespace, patches)
+    except Exception:
+        logger.exception("failed to patch review classification attrs")
+        release.extend(doc_id_by_review[review.review_id] for review in reviews)
+        return StageOutcome(fail=fail, release=release)
 
     # The cross-stage hand-off: transition the touched ASINs to `pending`
     # on the aggregate pipeline so the next-stage worker can pick them up.
@@ -443,7 +495,7 @@ async def process_classify_reviews(ctx: StageContext, doc_ids: list[str]) -> Sta
 
 
 # ---------------------------------------------------------------------------
-# Stage: aggregate-tags  (postgres rollup → PATCH product rows)
+# Stage: aggregate-tags  (review namespace scan → PATCH product rows)
 # ---------------------------------------------------------------------------
 
 async def setup_aggregate_tags(ctx: StageContext) -> None:
@@ -457,23 +509,147 @@ async def setup_aggregate_tags(ctx: StageContext) -> None:
 async def process_aggregate_tags(ctx: StageContext, asins: list[str]) -> StageOutcome:
     # `asins` are the claimed doc_ids — the aggregate pipeline indexes
     # rows by ASIN, so the driver abstraction doesn't notice the rename.
-    patches: list[dict[str, Any]] = []
-    for asin in asins:
-        attrs = await ctx.database.aggregate_review_tag_attrs(
-            asin,
-            min_count=ctx.settings.review_tag_min_count,
-            min_fraction=ctx.settings.review_tag_min_fraction,
-            sample_count=ctx.settings.review_tag_sample_count,
-        )
-        patches.append({"id": asin, "attributes": attrs})
-
     try:
+        patches: list[dict[str, Any]] = []
+        for asin in asins:
+            attrs = await aggregate_review_tag_attrs(
+                ctx,
+                asin,
+                min_count=ctx.settings.review_tag_min_count,
+                min_fraction=ctx.settings.review_tag_min_fraction,
+                sample_count=ctx.settings.review_tag_sample_count,
+            )
+            patches.append({"id": asin, "attributes": attrs})
         await ctx.layer.patch_attributes(ctx.settings.namespace, patches)
     except Exception:
         logger.exception("failed to aggregate review tags")
         return StageOutcome(release=list(asins))
 
     return StageOutcome(complete=list(asins))
+
+
+def review_chunk_vector_id(review_id: str) -> str:
+    return f"{review_id}:chunk:0000"
+
+
+async def aggregate_review_tag_attrs(
+    ctx: StageContext,
+    asin: str,
+    *,
+    min_count: int,
+    min_fraction: float,
+    sample_count: int,
+) -> dict[str, Any]:
+    namespace = review_namespace_for(
+        asin,
+        namespace_base=ctx.settings.reviews_namespace_base,
+        shard_count=ctx.settings.reviews_namespace_shard_count,
+    )
+    scan = await ctx.layer.scan(
+        namespace,
+        "full_document",
+        filters=["asin", "Eq", asin],
+        page_size=ctx.settings.review_aggregate_scan_page_size,
+    )
+    results = await ctx.layer.get_scan_results(namespace, scan["id"])
+
+    classified: dict[str, dict[str, Any]] = {}
+    for row in scan_result_rows(results):
+        attrs = row_attrs(row)
+        review_id = str(attrs.get("review_id") or "").strip()
+        if not review_id:
+            continue
+        if "review_classified_at" not in attrs and "tags" not in attrs:
+            continue
+        classified.setdefault(review_id, attrs)
+
+    total = len(classified)
+    threshold = max(min_count, ceil(total * min_fraction)) if total else min_count
+    tag_counts: dict[str, int] = {}
+    sample_candidates: dict[str, list[tuple[float, str, str]]] = {}
+    for review_id, attrs in classified.items():
+        confidences = parse_tag_confidences(attrs.get("tag_confidences"))
+        classified_at = str(attrs.get("review_classified_at") or "")
+        for tag in coerce_review_tags(attrs.get("tags")):
+            tag_counts[tag] = tag_counts.get(tag, 0) + 1
+            sample_candidates.setdefault(tag, []).append(
+                (float(confidences.get(tag, 0.0)), classified_at, review_id)
+            )
+
+    tags = [
+        tag
+        for tag, count in sorted(
+            tag_counts.items(), key=lambda item: (-item[1], item[0])
+        )
+        if count >= threshold
+    ]
+    tag_samples: dict[str, list[str]] = {}
+    for tag in tags:
+        candidates = sorted(
+            sample_candidates.get(tag, []),
+            key=lambda item: (-item[0], item[1], item[2]),
+        )
+        tag_samples[tag] = [review_id for _conf, _at, review_id in candidates[:sample_count]]
+
+    attrs: dict[str, Any] = {
+        "tags": tags,
+        "classified_review_count": total,
+        "tag_threshold": threshold,
+    }
+    if tag_counts:
+        attrs["tag_counts"] = json.dumps(tag_counts, separators=(",", ":"))
+    if tag_samples:
+        attrs["tag_samples"] = json.dumps(tag_samples, separators=(",", ":"))
+    return attrs
+
+
+def scan_result_rows(results: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = results.get("results")
+    if rows is None:
+        rows = results.get("data")
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def row_attrs(row: dict[str, Any]) -> dict[str, Any]:
+    attrs = row.get("attributes")
+    if isinstance(attrs, dict):
+        return attrs
+    return row
+
+
+def parse_tag_confidences(value: Any) -> dict[str, float]:
+    if not isinstance(value, str):
+        return {}
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    out: dict[str, float] = {}
+    for key, raw in parsed.items():
+        try:
+            out[str(key)] = float(raw)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def coerce_review_tags(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    allowed = set(REVIEW_TAGS)
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        tag = str(item)
+        if tag not in allowed or tag in seen:
+            continue
+        out.append(tag)
+        seen.add(tag)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -515,9 +691,9 @@ STAGES: dict[str, Stage] = {
         setup=setup_aggregate_tags,
         process=process_aggregate_tags,
     ),
-    # "extract" stays separate — it pulls from the Postgres job queue, not
-    # from a layer stage — and remains in extraction.py (or moves here as a
-    # special-cased run_extract(ctx, stop)).
+    # "extract" stays separate because it expands one extraction job into
+    # product/review documents, but it now claims those jobs from a Layer
+    # pipeline too.
 }
 
 
@@ -561,17 +737,14 @@ async def amain(stage_name: str) -> None:
     if stage_name not in STAGES:
         raise SystemExit(f"unknown stage {stage_name!r}; choose from {sorted(STAGES)}")
     settings = get_settings()
-    database = await Database.connect(settings.layer_database_url)
-    await database.ensure_schema()
     layer = LayerClient(settings.layer_gateway_url, settings.http_timeout_seconds)
-    ctx = StageContext(settings=settings, database=database, layer=layer)
+    ctx = StageContext(settings=settings, layer=layer)
     stop = asyncio.Event()
     _install_signals(stop)
     try:
         await run_stage(STAGES[stage_name], ctx, stop)
     finally:
         await layer.close()
-        await database.close()
 
 
 def _install_signals(stop: asyncio.Event) -> None:

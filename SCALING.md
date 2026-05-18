@@ -131,9 +131,10 @@ Initial result:
   pipeline documents and scaled from 0 to 1. The scaler now counts pending and
   embedding documents so claimed embedding batches keep workers alive.
 - `layer` and `hev-shop` are separated: application workloads run in
-  `hev-shop`; platform gateway and PostgreSQL remain in `layer`.
-- `mesh-postgres` is no longer rendered by the mesh Helm chart; only
-  `layer-postgres` remains for pipeline state.
+  `hev-shop`; platform gateway metrics and queue state remain owned by `layer`.
+- hev-shop KEDA scalers read `layer_pipeline_stage_count` through the
+  Prometheus-compatible metrics endpoint instead of connecting to gateway
+  PostgreSQL.
 
 Original cluster bottleneck:
 

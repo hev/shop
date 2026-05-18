@@ -9,16 +9,17 @@ This chart deploys the full hev-shop app:
 - GPU review embedding worker
 - CPU review classification worker
 - CPU review aggregation worker
-- KEDA ScaledObjects backed by Layer PostgreSQL
+- KEDA ScaledObjects backed by Layer pipeline metrics
 - optional Karpenter EC2NodeClasses and NodePools for CPU/GPU workers
 - shared RWX PVC for dataset, image, and model caches
 
-The chart assumes Layer already provides the gateway and PostgreSQL services.
+The chart assumes Layer already provides the gateway and a Prometheus-compatible
+query API for gateway metrics.
 By default it uses:
 
 ```text
 http://layer-gateway.layer.svc.cluster.local:8080
-postgres://hevlayer:hevlayer@layer-postgres.layer.svc.cluster.local:5432/hevlayer
+http://layer-gateway.layer.svc.cluster.local:8080/v2/metrics
 ```
 
 Install:
@@ -27,15 +28,6 @@ Install:
 helm upgrade --install hev-shop ./helm/hev-shop \
   --namespace hev-shop \
   --create-namespace
-```
-
-Use a managed Layer PostgreSQL URL:
-
-```sh
-helm upgrade --install hev-shop ./helm/hev-shop \
-  --namespace hev-shop \
-  --create-namespace \
-  --set-string layer.databaseUrl='postgres://user:pass@host:5432/hevlayer'
 ```
 
 Use an existing secret:
@@ -48,14 +40,14 @@ helm upgrade --install hev-shop ./helm/hev-shop \
   --set secrets.existingSecret=hev-shop-secrets
 ```
 
-The secret must provide `LAYER_DATABASE_URL`; KEDA reads it through
-`connectionFromEnv`.
+The secret is only for app credentials such as `OPENROUTER_API_KEY`; hev-shop
+does not need Layer PostgreSQL credentials.
 
 ## Karpenter NodePools
 
 The chart can also own the app's Karpenter capacity. This keeps node scaling
 with the workload whose KEDA ScaledObjects create pod demand from Layer
-PostgreSQL state.
+pipeline metrics.
 
 Karpenter and its CRDs must already be installed. Enable the app NodePools with:
 

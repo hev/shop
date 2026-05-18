@@ -25,14 +25,12 @@ class Settings(BaseSettings):
     layer_gateway_url: str = Field(
         default="http://localhost:8080", alias="LAYER_GATEWAY_URL"
     )
-    layer_database_url: str = Field(
-        default="postgres://hevlayer:hevlayer@localhost:5432/hevlayer",
-        alias="LAYER_DATABASE_URL",
-    )
-
     namespace: str = Field(default="amazon-products", alias="TURBOPUFFER_NAMESPACE")
     default_pipeline_id: str = Field(
         default="amazon-products-images", alias="PIPELINE_ID"
+    )
+    extraction_pipeline_id: str = Field(
+        default="hev-shop-extraction-jobs", alias="EXTRACTION_PIPELINE_ID"
     )
     reviews_pipeline_id: str = Field(
         default="hev-shop-reviews", alias="REVIEWS_PIPELINE_ID"
@@ -110,10 +108,13 @@ class Settings(BaseSettings):
     )
     embedding_claim_size: int = Field(default=2_000, alias="EMBEDDING_CLAIM_SIZE")
     vector_upsert_batch_size: int = Field(default=10_000, alias="VECTOR_UPSERT_BATCH_SIZE")
-    # Aggregate-worker batches expand into hundreds of Postgres queries per
-    # ASIN plus one PATCH call, so they need a smaller cap than the embed-side
+    # Aggregate-worker batches expand into one review-namespace scan per ASIN
+    # plus one PATCH call, so they need a smaller cap than the embed-side
     # vector upserts. Sized to fit comfortably under the 60s ALB request limit.
     review_aggregate_batch_size: int = Field(default=200, alias="REVIEW_AGGREGATE_BATCH_SIZE")
+    review_aggregate_scan_page_size: int = Field(
+        default=10_000, alias="REVIEW_AGGREGATE_SCAN_PAGE_SIZE"
+    )
     chunk_fetch_concurrency: int = Field(default=32, alias="CHUNK_FETCH_CONCURRENCY")
     cleanup_embedded_images: bool = Field(default=True, alias="CLEANUP_EMBEDDED_IMAGES")
     worker_poll_seconds: float = Field(default=5.0, alias="WORKER_POLL_SECONDS")
@@ -122,9 +123,6 @@ class Settings(BaseSettings):
     max_job_retries: int = Field(default=3, alias="MAX_JOB_RETRIES")
     review_classification_batch_size: int = Field(
         default=8, alias="REVIEW_CLASSIFICATION_BATCH_SIZE"
-    )
-    review_classification_daily_review_limit: int = Field(
-        default=10_000, alias="REVIEW_CLASSIFICATION_DAILY_REVIEW_LIMIT"
     )
     review_recent_cap_per_product: int = Field(
         default=200, alias="REVIEW_RECENT_CAP_PER_PRODUCT"

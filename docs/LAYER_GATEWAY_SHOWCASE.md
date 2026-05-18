@@ -22,7 +22,7 @@ is structured to make each one visible:
 | ---------- | ----------------- |
 | **Document cache** — Aerospike pull-through on `fetch_document` / `fetch_many_documents`, populated by warm scans and read-through. Cache hits show `x-layer-cache: hit`. | Product detail pages call `LayerClient.fetch_document`; the storefront's `/product/[asin]` route reads from the cache without touching turbopuffer for the second hit. |
 | **Scans** — `field_values`, full-document, auto-mode source selection (cache vs origin) gated on a freshness watermark, plus a `warm` operation that primes the cache. | `/meta` issues a `field_values` scan on `category` to drive the landing-page facets; the gateway picks cache or origin based on `stable_as_of`. |
-| **Pipeline state machine** — `pending → embedding → indexed/failed` per document, persisted in Postgres, with atomic `claim` via `FOR UPDATE SKIP LOCKED`, leases, heartbeats, and stale-claim recovery. | `pipeline.py` is the entire app-side contract: claim, heartbeat, complete/fail/release. KEDA scales workers by polling the same Postgres tables. |
+| **Pipeline state machine** — `pending → embedding → indexed/failed` per document, exposed through Layer's pipeline API with atomic claim, leases, heartbeats, and stale-claim recovery. | `pipeline.py` is the entire app-side contract: claim, heartbeat, complete/fail/release. KEDA scales workers from `layer_pipeline_stage_count` metrics. |
 | **Freshness watermark** — every query response carries `stable_as_of` (epoch ms) and namespaces expose `is_stable`, derived from a consistency watcher that tracks when `unindexed_bytes` reaches 0. | `/search`, `/search/reviews`, and `/meta` pass the watermark through to the UI; the homepage renders "last indexed at …" against it. |
 
 These are the four properties to keep in mind when adding features: prefer
@@ -55,7 +55,7 @@ Relevant code:
 
 The app uses gateway pipeline state instead of maintaining a bespoke GPU queue.
 CPU workers stage documents, GPU workers claim and heartbeat documents, and the
-gateway owns the PostgreSQL state transitions.
+gateway owns the queue state transitions.
 
 Main stages:
 
@@ -77,8 +77,8 @@ Relevant code:
 - `indexer/app/pipeline.py` — `STAGES` manifest + `run_stage` driver + each
   stage's `process_*` function
 - `indexer/app/worker.py` — `WORKER_TYPE` env → stage dispatch
-- `kubernetes/*-scaledobject.yaml`, `helm/hev-shop/templates/workers.yaml` —
-  KEDA polls Postgres pipeline tables to scale each stage
+- `kubernetes/*-scaledobject.yaml`, `helm/hev-shop/templates/scaledobjects.yaml` —
+  KEDA queries Layer pipeline metrics to scale each stage
 
 ## Developer Contract
 

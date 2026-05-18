@@ -24,6 +24,9 @@ class FakeLayerClient:
     def __init__(self) -> None:
         self.next_claim: list[str] = []
         self.chunks_by_doc_id: dict[str, list[dict[str, Any]]] = {}
+        self.documents_by_namespace: dict[tuple[str, str], dict[str, Any]] = {}
+        self.scan_results_by_namespace: dict[str, list[dict[str, Any]]] = {}
+        self.scan_filters_by_id: dict[str, Any] = {}
 
         self.create_pipeline_calls: list[tuple[str, str, str]] = []
         self.claim_calls: list[dict[str, Any]] = []
@@ -34,6 +37,8 @@ class FakeLayerClient:
         self.patch_calls: list[dict[str, Any]] = []
         self.heartbeat_calls: list[dict[str, Any]] = []
         self.set_stage_calls: list[dict[str, Any]] = []
+        self.scan_calls: list[dict[str, Any]] = []
+        self.stage_document_calls: list[dict[str, Any]] = []
 
     async def create_pipeline(self, pipeline_id, namespace, distance_metric):
         self.create_pipeline_calls.append((pipeline_id, namespace, distance_metric))
@@ -139,47 +144,69 @@ class FakeLayerClient:
     async def get_chunks(self, pipeline_id, document_id):
         return self.chunks_by_doc_id.get(document_id, [])
 
+    async def stage_pipeline_document(self, pipeline_id, document_id, *, chunks):
+        self.stage_document_calls.append(
+            {
+                "pipeline_id": pipeline_id,
+                "document_id": document_id,
+                "chunks": list(chunks),
+            }
+        )
+        self.chunks_by_doc_id[document_id] = list(chunks)
+
+    async def fetch_document(self, namespace, document_id, include_attributes=None):
+        key = (namespace, document_id)
+        if key not in self.documents_by_namespace:
+            raise RuntimeError("not found")
+        return self.documents_by_namespace[key]
+
     async def upsert_vectors(self, namespace, vectors):
         self.upsert_calls.append({"namespace": namespace, "vectors": list(vectors)})
 
     async def patch_attributes(self, namespace, patches):
         self.patch_calls.append({"namespace": namespace, "patches": list(patches)})
+        for patch in patches:
+            key = (namespace, patch["id"])
+            document = self.documents_by_namespace.setdefault(key, {"attributes": {}})
+            attrs = document.setdefault("attributes", {})
+            attrs.update(patch.get("attributes") or {})
 
-
-class FakeDatabase:
-    def __init__(
+    async def scan(
         self,
+        namespace,
+        scan_type,
         *,
-        allow_reservation: bool = True,
-        tag_attrs_by_asin: dict[str, dict[str, Any]] | None = None,
-    ) -> None:
-        self.allow_reservation = allow_reservation
-        self.tag_attrs_by_asin = tag_attrs_by_asin or {}
-        self.replace_calls: list[dict[str, Any]] = []
-        self.reserve_calls: list[dict[str, Any]] = []
-
-    async def aggregate_review_tag_attrs(
-        self, asin, *, min_count, min_fraction, sample_count
+        field=None,
+        source=None,
+        filters=None,
+        page_size=None,
+        poll_interval=1.0,
+        timeout=None,
     ):
-        default = {"tags": [], "classified_review_count": 0, "tag_threshold": min_count}
-        return dict(self.tag_attrs_by_asin.get(asin, default))
-
-    async def replace_review_classification(self, *, asin, review_id, tags):
-        self.replace_calls.append(
-            {"asin": asin, "review_id": review_id, "tags": list(tags)}
-        )
-
-    async def try_reserve_review_classification(
-        self, *, usage_date, review_count, daily_review_limit
-    ):
-        self.reserve_calls.append(
+        self.scan_calls.append(
             {
-                "usage_date": usage_date,
-                "review_count": review_count,
-                "limit": daily_review_limit,
+                "namespace": namespace,
+                "scan_type": scan_type,
+                "field": field,
+                "filters": filters,
+                "page_size": page_size,
             }
         )
-        return self.allow_reservation
+        scan_id = f"scan-{len(self.scan_calls)}"
+        self.scan_filters_by_id[scan_id] = filters
+        return {"id": scan_id, "status": "completed"}
+
+    async def get_scan_results(self, namespace, scan_id):
+        rows = list(self.scan_results_by_namespace.get(namespace, []))
+        filters = self.scan_filters_by_id.get(scan_id)
+        if isinstance(filters, list) and len(filters) == 3 and filters[1] == "Eq":
+            field, _op, expected = filters
+            rows = [
+                row
+                for row in rows
+                if (row.get("attributes") or row).get(field) == expected
+            ]
+        return {"results": rows}
 
 
 class FakeClipImageEmbedder:
@@ -234,6 +261,7 @@ def make_settings(**overrides) -> SimpleNamespace:
         resolved_worker_id="test-worker",
         namespace="amazon-products",
         default_pipeline_id="amazon-products-images",
+        extraction_pipeline_id="hev-shop-extraction-jobs",
         reviews_pipeline_id="hev-shop-reviews",
         review_aggregate_pipeline_id="amazon-products-review-tags",
         reviews_namespace_base="amazon-reviews",
@@ -244,6 +272,7 @@ def make_settings(**overrides) -> SimpleNamespace:
         claim_heartbeat_seconds=3600,  # large → heartbeat task sleeps, never fires
         embedding_batch_size=16,
         vector_upsert_batch_size=10_000,
+        review_aggregate_scan_page_size=10_000,
         chunk_fetch_concurrency=4,
         cleanup_embedded_images=False,
         worker_poll_seconds=5.0,
@@ -254,7 +283,6 @@ def make_settings(**overrides) -> SimpleNamespace:
         review_chunk_overlap=8,
         review_embedding_batch_size=4,
         review_classification_batch_size=4,
-        review_classification_daily_review_limit=100,
         review_aggregate_batch_size=10,
         openrouter_api_key="test-key",
     )

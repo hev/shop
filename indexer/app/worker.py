@@ -5,7 +5,6 @@ import logging
 import signal
 
 from .config import get_settings
-from .database import Database
 from .dataset import AmazonProductDataset
 from .extraction import ExtractionWorker
 from .layer_client import LayerClient
@@ -36,15 +35,17 @@ async def amain() -> None:
     settings = get_settings()
     stop_event = asyncio.Event()
     install_signal_handlers(stop_event)
-    database = await Database.connect(settings.layer_database_url)
-    await database.ensure_schema()
     layer = LayerClient(settings.layer_gateway_url, settings.http_timeout_seconds)
 
     try:
         if settings.worker_type == "cpu":
+            await layer.create_pipeline(
+                settings.extraction_pipeline_id,
+                settings.namespace,
+                settings.distance_metric,
+            )
             worker = ExtractionWorker(
                 settings=settings,
-                database=database,
                 layer=layer,
                 dataset=AmazonProductDataset(settings),
             )
@@ -54,7 +55,7 @@ async def amain() -> None:
                 await worker.close()
         elif settings.worker_type in STAGE_FOR_WORKER_TYPE:
             stage = STAGES[STAGE_FOR_WORKER_TYPE[settings.worker_type]]
-            ctx = StageContext(settings=settings, database=database, layer=layer)
+            ctx = StageContext(settings=settings, layer=layer)
             try:
                 await run_stage(stage, ctx, stop_event)
             finally:
@@ -70,7 +71,6 @@ async def amain() -> None:
             )
     finally:
         await layer.close()
-        await database.close()
 
 
 def main() -> None:

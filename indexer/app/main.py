@@ -10,7 +10,12 @@ from typing import Any, AsyncIterator
 from fastapi import FastAPI, HTTPException, Request
 
 from .config import get_settings
-from .database import Database
+from .jobs import (
+    EXTRACTION_JOB_CHUNK_ID,
+    build_backfill_job,
+    build_index_jobs,
+    extraction_job_metadata,
+)
 from .layer_client import LayerClient
 from .models import (
     BackfillRequest,
@@ -35,7 +40,6 @@ from .records import (
     normalize_backfill_stages,
     normalize_review_tags,
     review_namespace_for,
-    review_work_document_id,
 )
 
 logger = logging.getLogger("hev_shop.indexer")
@@ -44,8 +48,6 @@ logger = logging.getLogger("hev_shop.indexer")
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    database = await Database.connect(settings.layer_database_url)
-    await database.ensure_schema()
     layer = LayerClient(settings.layer_gateway_url, settings.http_timeout_seconds)
     text_settings = (
         settings.model_copy(update={"model_cache_dir": settings.api_model_cache_dir})
@@ -54,7 +56,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     app.state.settings = settings
     app.state.text_embedder_settings = text_settings
-    app.state.database = database
     app.state.layer = layer
     app.state.text_embedder = None
     app.state.text_embedder_lock = asyncio.Lock()
@@ -74,7 +75,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if warm_task is not None and not warm_task.done():
             warm_task.cancel()
         await layer.close()
-        await database.close()
 
 
 async def get_text_embedder(app: FastAPI):
@@ -157,7 +157,6 @@ async def healthz() -> dict[str, str]:
 @app.post("/index", response_model=IndexResponse)
 async def index_products(request: Request, body: IndexRequest) -> IndexResponse:
     settings = request.app.state.settings
-    database: Database = request.app.state.database
     layer: LayerClient = request.app.state.layer
 
     pipeline_id = body.pipeline_id or settings.default_pipeline_id
@@ -172,21 +171,37 @@ async def index_products(request: Request, body: IndexRequest) -> IndexResponse:
         raise HTTPException(status_code=422, detail="job_size must be positive")
 
     await layer.create_pipeline(pipeline_id, namespace, settings.distance_metric)
+    await layer.create_pipeline(
+        settings.extraction_pipeline_id,
+        namespace,
+        settings.distance_metric,
+    )
     category_results: list[IndexCategoryResponse] = []
     for category in categories:
-        jobs_created = await database.enqueue_index_jobs(
+        jobs = build_index_jobs(
             pipeline_id=pipeline_id,
             namespace=namespace,
             category=category,
             count=body.count,
             job_size=job_size,
-            max_retries=settings.max_job_retries,
         )
+        for job in jobs:
+            await layer.stage_pipeline_document(
+                settings.extraction_pipeline_id,
+                job.id,
+                chunks=[
+                    {
+                        "id": EXTRACTION_JOB_CHUNK_ID,
+                        "text": "",
+                        "metadata": extraction_job_metadata(job),
+                    }
+                ],
+            )
         category_results.append(
             IndexCategoryResponse(
                 category=category,
                 count=body.count,
-                jobs_created=jobs_created,
+                jobs_created=len(jobs),
             )
         )
 
@@ -207,7 +222,7 @@ async def backfill(request: Request, body: BackfillRequest) -> BackfillResponse:
     worker picks the job up and uses the layer-gateway pipelines that the
     review-embed / review-classify / review-aggregate workers already consume."""
     settings = request.app.state.settings
-    database: Database = request.app.state.database
+    layer: LayerClient = request.app.state.layer
 
     category = body.category.strip()
     if not category:
@@ -241,7 +256,12 @@ async def backfill(request: Request, body: BackfillRequest) -> BackfillResponse:
     pipeline_id = body.pipeline_id or settings.default_pipeline_id
     namespace = body.namespace or settings.namespace
 
-    job_id = await database.enqueue_backfill_job(
+    await layer.create_pipeline(
+        settings.extraction_pipeline_id,
+        namespace,
+        settings.distance_metric,
+    )
+    job = build_backfill_job(
         pipeline_id=pipeline_id,
         namespace=namespace,
         category=category,
@@ -250,11 +270,21 @@ async def backfill(request: Request, body: BackfillRequest) -> BackfillResponse:
         reviews_per_product=body.reviews_per_product,
         max_total_reviews=body.max_total_reviews,
         stages=stages,
-        max_retries=settings.max_job_retries,
+    )
+    await layer.stage_pipeline_document(
+        settings.extraction_pipeline_id,
+        job.id,
+        chunks=[
+            {
+                "id": EXTRACTION_JOB_CHUNK_ID,
+                "text": "",
+                "metadata": extraction_job_metadata(job),
+            }
+        ],
     )
 
     return BackfillResponse(
-        job_id=job_id,
+        job_id=job.id,
         pipeline_id=pipeline_id,
         namespace=namespace,
         category=category,
@@ -432,27 +462,38 @@ async def review_samples(
     layer: LayerClient = request.app.state.layer
     samples: list[ReviewSample] = []
     for review_id in review_ids[:50]:
+        namespace = review_namespace_for(
+            asin,
+            namespace_base=settings.reviews_namespace_base,
+            shard_count=settings.reviews_namespace_shard_count,
+        )
         try:
-            chunks = await layer.get_chunks(
-                settings.reviews_pipeline_id,
-                review_work_document_id("classify", review_id),
+            document = await layer.fetch_document(
+                namespace,
+                f"{review_id}:chunk:0000",
+                include_attributes=[
+                    "asin",
+                    "review_id",
+                    "text_chunk",
+                    "title",
+                    "rating",
+                ],
             )
         except Exception:
             continue
-        if not chunks:
+        attrs = document.get("attributes") or {}
+        if str(attrs.get("asin") or "") != asin:
             continue
-        chunk = chunks[0]
-        metadata = chunk.get("metadata") or {}
-        if str(metadata.get("asin") or "") != asin:
+        text = str(attrs.get("text_chunk") or "").strip()
+        if not text:
             continue
-        text = str(chunk.get("text") or "").strip()
         samples.append(
             ReviewSample(
                 review_id=review_id,
                 asin=asin,
-                title=metadata.get("title"),
+                title=attrs.get("title"),
                 text=text[:600],
-                rating=metadata.get("rating"),
+                rating=attrs.get("rating"),
             )
         )
     return ReviewSamplesResponse(asin=asin, samples=samples)
@@ -518,14 +559,36 @@ async def meta(request: Request, namespace: str | None = None) -> MetaResponse:
 @app.get("/status", response_model=StatusResponse)
 async def status(request: Request, pipeline_id: str | None = None) -> StatusResponse:
     settings = request.app.state.settings
-    database: Database = request.app.state.database
     layer: LayerClient = request.app.state.layer
     resolved_pipeline_id = pipeline_id or settings.default_pipeline_id
 
     layer_status = await layer.pipeline_status(resolved_pipeline_id)
-    jobs = await database.index_job_counts(resolved_pipeline_id)
+    try:
+        extraction_status = await layer.pipeline_status(settings.extraction_pipeline_id)
+    except Exception:
+        extraction_status = {}
+    jobs = stage_counts_from_status(extraction_status)
     return StatusResponse(
         pipeline_id=resolved_pipeline_id,
         layer=layer_status,
         jobs=jobs,
+        extraction=extraction_status,
     )
+
+
+def stage_counts_from_status(status: dict[str, Any]) -> dict[str, int]:
+    for key in ("stages", "stage_counts", "counts"):
+        value = status.get(key)
+        if isinstance(value, dict):
+            return {str(k): int(v) for k, v in value.items() if isinstance(v, int)}
+        if isinstance(value, list):
+            out: dict[str, int] = {}
+            for row in value:
+                if not isinstance(row, dict):
+                    continue
+                stage = row.get("stage")
+                count = row.get("count")
+                if stage is not None and isinstance(count, int):
+                    out[str(stage)] = count
+            return out
+    return {str(k): int(v) for k, v in status.items() if isinstance(v, int)}

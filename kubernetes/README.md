@@ -9,13 +9,13 @@ talks to platform services in the `layer` namespace by fully qualified service
 DNS names:
 
 - `hev-shop-api` exposes `POST /index`, `GET /status`, and `POST /search`
-- `hev-shop-cpu-worker` is KEDA-scaled from queued extraction jobs in PostgreSQL
+- `hev-shop-cpu-worker` is KEDA-scaled from queued extraction jobs in the Layer pipeline tables
 - `hev-shop-gpu-worker` is KEDA-scaled from pending layer pipeline documents and
   writes CLIP image vectors to Turbopuffer through layer-gateway
 - `hev-shop-review-embed-worker` chunks reviews and writes Qwen text vectors to
   `amazon-reviews-*` shards
 - `hev-shop-review-classify-worker` classifies reviews through OpenRouter and
-  writes `review_tags`
+  patches tags onto review-vector attributes
 - `hev-shop-review-aggregate-worker` rolls review tags back onto product attrs
 - `hev-shop-web` is the Next.js storefront. It reaches the API at
   `HEV_SHOP_API_BASE=http://hev-shop-api.hev-shop.svc.cluster.local:8080` and

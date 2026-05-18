@@ -18,12 +18,13 @@ spec:
   minReplicaCount: {{ $worker.autoscaling.minReplicaCount }}
   maxReplicaCount: {{ $worker.autoscaling.maxReplicaCount }}
   triggers:
-    - type: postgresql
+    - type: prometheus
       metadata:
-        connectionFromEnv: LAYER_DATABASE_URL
+        serverAddress: {{ $root.Values.autoscaling.prometheusServerAddress | quote }}
+        metricName: {{ $worker.autoscaling.metricName | quote }}
         query: {{ tpl $worker.autoscaling.query $root | quote }}
-        targetQueryValue: {{ $worker.autoscaling.targetQueryValue | quote }}
-        activationTargetQueryValue: {{ $worker.autoscaling.activationTargetQueryValue | quote }}
+        threshold: {{ $worker.autoscaling.threshold | quote }}
+        activationThreshold: {{ $worker.autoscaling.activationThreshold | quote }}
 {{- end }}
 {{- end }}
 {{- end }}

@@ -35,14 +35,14 @@ Reviews give hev-shop a second searchable surface (per-product review search) an
   │  GPU worker: review-embed  │                  │  CPU worker: review-classify │
   │  Qwen3-Embedding-8B        │                  │  Gemini 2.0 Flash Lite       │
   │  Naive 256-tok chunking    │                  │  via OpenRouter              │
-  │  → amazon-reviews-{shard}  │                  │  → review_tags table         │
+  │  → amazon-reviews-{shard}  │                  │  → review vector tag attrs   │
   │    Turbopuffer namespace   │                  │  + debounced trigger row     │
   └────────────────────────────┘                  └──────────────┬───────────────┘
                                                                  │
                                                                  ▼
                                             ┌──────────────────────────────────┐
                                             │  CPU worker: review-aggregate    │
-                                            │  Roll up review_tags per asin    │
+                                            │  Scan review tags per asin       │
                                             │  Threshold, pick samples         │
                                             │  → product attrs in              │
                                             │    amazon-products namespace     │
@@ -113,21 +113,10 @@ class ReviewRecord:
     timestamp: datetime
 ```
 
-New PostgreSQL table:
-
-```sql
-CREATE TABLE review_tags (
-    asin          TEXT NOT NULL,
-    review_id     TEXT NOT NULL,
-    tag           TEXT NOT NULL,
-    confidence    REAL NOT NULL,
-    classified_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (asin, review_id, tag)
-);
-CREATE INDEX review_tags_asin_classified_idx ON review_tags (asin, classified_at);
-```
-
-Trigger debouncing on `pipeline_documents`: unique constraint `(namespace, doc_id) WHERE status = 'pending'` so 50 classifications for the same product produce one aggregation job, not 50.
+Classification results live on the first review-vector chunk as Turbopuffer
+attributes (`tags`, `tag_confidences`, `review_classified_at`). Aggregation
+derives product-level tags by scanning the review namespace for an ASIN, so
+there is no hev-shop-owned table in the gateway database.
 
 ## Implementation plan
 
@@ -160,11 +149,11 @@ End-to-end vertical for the search path.
 
 End-to-end vertical for the tags path. Runs in parallel to PR 2's embed worker on the same reviews pipeline.
 
-- New CPU worker `review-classify`: claims documents from reviews pipeline, batches 5-10 reviews per OpenRouter call with structured-output prompt for the 11-tag schema, writes to `review_tags`, upserts debounced trigger row on `pipeline_documents` for `(amazon-products, asin)`
+- New CPU worker `review-classify`: claims documents from reviews pipeline, batches 5-10 reviews per OpenRouter call with structured-output prompt for the 11-tag schema, patches tags onto the review vector row, and upserts a debounced aggregate work item through the Layer pipeline API.
 - OpenRouter client: model id configurable, API key from k8s secret, retry/backoff
-- New CPU worker `review-aggregate`: claims asin jobs, rolls up `review_tags` (threshold `count ≥ max(3, 5% of reviews)`), picks 2-3 highest-confidence samples per tag, upserts product attrs in `amazon-products` namespace
+- New CPU worker `review-aggregate`: claims asin jobs, scans the ASIN's review shard (threshold `count ≥ max(3, 5% of reviews)`), picks 2-3 highest-confidence samples per tag, upserts product attrs in `amazon-products` namespace
 - `/search` accepts `tags` filter param
-- **Risk:** OpenRouter spend. Per-product cap (400) is the primary control; add a per-day spend cap as backstop.
+- **Risk:** OpenRouter spend. Per-product cap (400) is the primary control; any future global spend cap needs an app-owned control-plane service, not direct writes to the gateway database.
 
 ### PR 4 — UI surfacing
 
@@ -187,8 +176,8 @@ Implemented in this branch:
 - Review search embeds tokenizer chunks with Qwen and writes them to
   `amazon-reviews-{hash(asin) % N}` shards.
 - Review classification uses OpenRouter structured output for the Phase 1 tag
-  schema, writes `review_tags`, and debounces per-ASIN aggregate jobs through
-  `pipeline_documents`.
+  schema, patches tags onto review-vector attributes, and debounces per-ASIN
+  aggregate jobs through the Layer pipeline API.
 - Aggregation rolls tag counts/samples back onto product attributes in the
   `amazon-products` namespace.
 - The API exposes product tag filters, per-product review search, product fetch,

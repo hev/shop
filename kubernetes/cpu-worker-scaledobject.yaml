@@ -10,9 +10,10 @@ spec:
   minReplicaCount: 0
   maxReplicaCount: 8
   triggers:
-    - type: postgresql
+    - type: prometheus
       metadata:
-        connectionFromEnv: LAYER_DATABASE_URL
-        query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM hev_shop_index_jobs WHERE status IN ('queued', 'retry', 'running') LIMIT 1) THEN 16 ELSE 0 END"
-        targetQueryValue: "2"
-        activationTargetQueryValue: "0"
+        serverAddress: http://layer-gateway.layer.svc.cluster.local:8080/v2/metrics
+        metricName: hev_shop_extraction_jobs
+        query: 'sum(layer_pipeline_stage_count{pipeline_id="hev-shop-extraction-jobs",stage=~"pending|extracting"}) or vector(0)'
+        threshold: "2"
+        activationThreshold: "0"

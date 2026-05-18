@@ -9,8 +9,8 @@ from uuid import uuid4
 import httpx
 
 from .config import Settings
-from .database import Database, ExtractionJob
 from .dataset import AmazonProductDataset
+from .jobs import ExtractionJob, extraction_job_from_chunks
 from .layer_client import LayerClient
 from .records import ProductRecord, ReviewRecord
 
@@ -22,12 +22,10 @@ class ExtractionWorker:
         self,
         *,
         settings: Settings,
-        database: Database,
         layer: LayerClient,
         dataset: AmazonProductDataset,
     ) -> None:
         self.settings = settings
-        self.database = database
         self.layer = layer
         self.dataset = dataset
         self._http = httpx.AsyncClient(
@@ -66,39 +64,60 @@ class ExtractionWorker:
                     )
 
     async def process_once(self) -> int:
-        job = await self.database.claim_extraction_job(
-            self.settings.resolved_worker_id, self.settings.claim_lease_seconds
+        doc_ids = await self.layer.claim_pipeline_documents(
+            self.settings.extraction_pipeline_id,
+            limit=1,
+            worker_id=self.settings.resolved_worker_id,
+            claim_stage="extracting",
+            lease_seconds=self.settings.claim_lease_seconds,
         )
-        if job is None:
+        if not doc_ids:
             return 0
 
-        heartbeat = asyncio.create_task(self.heartbeat_job(job))
+        doc_id = doc_ids[0]
+        chunks = await self.layer.get_chunks(self.settings.extraction_pipeline_id, doc_id)
+        job = extraction_job_from_chunks(doc_id, chunks)
+        heartbeat = asyncio.create_task(self.heartbeat_job(doc_id))
         try:
             processed = await self.process_job(job)
         except asyncio.CancelledError:
-            await self.database.release_extraction_job(
-                job.id,
-                self.settings.resolved_worker_id,
-                "worker interrupted before extraction job completed",
+            await self.layer.release_pipeline_documents(
+                self.settings.extraction_pipeline_id,
+                [doc_id],
+                from_stage="extracting",
+                worker_id=self.settings.resolved_worker_id,
             )
             raise
         except Exception as exc:
             logger.exception("extraction job failed", extra={"job_id": job.id})
-            await self.database.fail_extraction_job(job.id, str(exc))
+            await self.layer.fail_pipeline_documents(
+                self.settings.extraction_pipeline_id,
+                [doc_id],
+                from_stage="extracting",
+                worker_id=self.settings.resolved_worker_id,
+            )
             return 0
         finally:
             heartbeat.cancel()
             with suppress(asyncio.CancelledError):
                 await heartbeat
 
-        await self.database.complete_extraction_job(job.id, processed)
+        await self.layer.complete_pipeline_documents(
+            self.settings.extraction_pipeline_id,
+            [doc_id],
+            from_stage="extracting",
+            worker_id=self.settings.resolved_worker_id,
+        )
         return processed
 
-    async def heartbeat_job(self, job: ExtractionJob) -> None:
+    async def heartbeat_job(self, document_id: str) -> None:
         while True:
             await asyncio.sleep(self.settings.claim_heartbeat_seconds)
-            await self.database.heartbeat_extraction_job(
-                job.id, self.settings.resolved_worker_id
+            await self.layer.heartbeat_pipeline_documents(
+                self.settings.extraction_pipeline_id,
+                [document_id],
+                stage="extracting",
+                worker_id=self.settings.resolved_worker_id,
             )
 
     async def process_job(self, job: ExtractionJob) -> int:
@@ -302,16 +321,25 @@ class ExtractionWorker:
                     if review is None:
                         return staged
                     try:
-                        await asyncio.gather(
-                            *(
+                        stage_calls = []
+                        if "embed" in work_items:
+                            stage_calls.append(
                                 self.layer.stage_review(
                                     self.settings.reviews_pipeline_id,
                                     review,
-                                    work_item=item,
+                                    work_item="embed",
+                                    enqueue_classify="classify" in work_items,
                                 )
-                                for item in work_items
                             )
-                        )
+                        elif "classify" in work_items:
+                            stage_calls.append(
+                                self.layer.stage_review(
+                                    self.settings.reviews_pipeline_id,
+                                    review,
+                                    work_item="classify",
+                                )
+                            )
+                        await asyncio.gather(*stage_calls)
                         staged += 1
                     except Exception:
                         logger.exception(

@@ -10,9 +10,10 @@ spec:
   minReplicaCount: 0
   maxReplicaCount: 4
   triggers:
-    - type: postgresql
+    - type: prometheus
       metadata:
-        connectionFromEnv: LAYER_DATABASE_URL
-        query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM pipeline_documents WHERE pipeline_id = 'amazon-products-review-tags' AND stage IN ('pending', 'aggregating') LIMIT 1) THEN 4 ELSE 0 END"
-        targetQueryValue: "1"
-        activationTargetQueryValue: "0"
+        serverAddress: http://layer-gateway.layer.svc.cluster.local:8080/v2/metrics
+        metricName: hev_shop_review_aggregation_docs
+        query: 'sum(layer_pipeline_stage_count{pipeline_id="amazon-products-review-tags",stage=~"pending|aggregating"}) or vector(0)'
+        threshold: "1"
+        activationThreshold: "0"
