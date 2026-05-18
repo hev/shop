@@ -3,15 +3,23 @@ from __future__ import annotations
 import heapq
 import hashlib
 import json
+import logging
+import os
+import time
+import urllib.error
 import urllib.request
 from collections.abc import Iterable, Iterator
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from .records import ProductRecord, ReviewRecord
 
 if TYPE_CHECKING:
     from .config import Settings
+
+logger = logging.getLogger("hev_shop.dataset")
 
 
 def dataset_config(category: str) -> str:
@@ -325,37 +333,102 @@ class AmazonProductDataset:
         return iter(ordered)
 
     def _iter_rows(self, category: str, cached_path: Any) -> Iterator[dict[str, Any]]:
-        if cached_path.exists():
-            with cached_path.open("r", encoding="utf-8") as file:
-                for line in file:
-                    yield json.loads(line)
-            return
-
-        request = urllib.request.Request(metadata_url(self.settings.hf_dataset, category))
-        if self.settings.hf_token:
-            request.add_header("Authorization", f"Bearer {self.settings.hf_token}")
-        with urllib.request.urlopen(request, timeout=self.settings.http_timeout_seconds) as response:
-            for raw_line in response:
-                if not raw_line.strip():
+        path = self._ensure_cached(
+            cached_path, metadata_url(self.settings.hf_dataset, category)
+        )
+        with path.open("r", encoding="utf-8") as file:
+            for line in file:
+                if not line.strip():
                     continue
-                yield json.loads(raw_line)
+                yield json.loads(line)
 
     def _iter_review_rows(
         self, category: str, cached_path: Any
     ) -> Iterator[dict[str, Any]]:
-        if cached_path.exists():
-            with cached_path.open("r", encoding="utf-8") as file:
-                for line in file:
-                    yield json.loads(line)
-            return
-
-        request = urllib.request.Request(reviews_url(self.settings.hf_dataset, category))
-        if self.settings.hf_token:
-            request.add_header("Authorization", f"Bearer {self.settings.hf_token}")
-        with urllib.request.urlopen(
-            request, timeout=self.settings.http_timeout_seconds
-        ) as response:
-            for raw_line in response:
-                if not raw_line.strip():
+        path = self._ensure_cached(
+            cached_path, reviews_url(self.settings.hf_dataset, category)
+        )
+        with path.open("r", encoding="utf-8") as file:
+            for line in file:
+                if not line.strip():
                     continue
-                yield json.loads(raw_line)
+                yield json.loads(line)
+
+    # ------------------------------------------------------------------
+    # Two-stage extraction: download HF JSONL to /data/dataset once
+    # (resumable, with retry), then every backfill reads from local disk.
+    # Eliminates the mid-stream JSON-decode crashes that happen when the
+    # urllib stream of a multi-GB file is truncated, and turns repeated
+    # backfills into local disk reads.
+    # ------------------------------------------------------------------
+
+    def _ensure_cached(self, cached_path: Path, source_url: str) -> Path:
+        if cached_path.exists():
+            return cached_path
+
+        cached_path.parent.mkdir(parents=True, exist_ok=True)
+        # Per-process tmp keeps concurrent workers from clobbering each other;
+        # the final replace() is atomic on POSIX.
+        tmp_path = cached_path.with_name(f".{cached_path.name}.{os.getpid()}.{uuid4().hex}.tmp")
+        self._download_with_resume(source_url, tmp_path)
+        # Another worker may have promoted its tmp first — keep theirs.
+        if cached_path.exists():
+            tmp_path.unlink(missing_ok=True)
+        else:
+            tmp_path.replace(cached_path)
+        return cached_path
+
+    def _download_with_resume(self, url: str, dest: Path) -> None:
+        """Download `url` to `dest`, resuming via HTTP Range on retry.
+
+        HF sometimes drops long-running connections, which previously
+        manifested as JSONDecodeError on a truncated line. Resuming
+        avoids re-downloading gigabytes after a hiccup.
+        """
+        max_attempts = max(1, getattr(self.settings, "dataset_download_max_attempts", 6))
+        backoff_seconds = 5.0
+        chunk_size = 1 << 20  # 1 MiB
+
+        for attempt in range(1, max_attempts + 1):
+            offset = dest.stat().st_size if dest.exists() else 0
+            request = urllib.request.Request(url)
+            if self.settings.hf_token:
+                request.add_header("Authorization", f"Bearer {self.settings.hf_token}")
+            if offset > 0:
+                request.add_header("Range", f"bytes={offset}-")
+            mode = "ab" if offset > 0 else "wb"
+
+            try:
+                with urllib.request.urlopen(
+                    request, timeout=self.settings.http_timeout_seconds
+                ) as response:
+                    if offset > 0 and response.status not in (206, 200):
+                        # Server rejected resume — start over.
+                        dest.unlink(missing_ok=True)
+                        raise urllib.error.HTTPError(
+                            url, response.status, "range not honored", response.headers, None
+                        )
+                    with dest.open(mode) as file:
+                        while True:
+                            chunk = response.read(chunk_size)
+                            if not chunk:
+                                break
+                            file.write(chunk)
+                logger.info(
+                    "downloaded %s to %s (%d bytes, attempt %d)",
+                    url, dest, dest.stat().st_size, attempt,
+                )
+                return
+            except (
+                urllib.error.URLError,
+                ConnectionError,
+                TimeoutError,
+            ) as err:
+                logger.warning(
+                    "download %s attempt %d/%d failed at %d bytes: %s",
+                    url, attempt, max_attempts,
+                    dest.stat().st_size if dest.exists() else 0, err,
+                )
+                if attempt >= max_attempts:
+                    raise
+                time.sleep(backoff_seconds * attempt)
