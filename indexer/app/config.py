@@ -98,6 +98,13 @@ class Settings(BaseSettings):
     review_chunk_overlap: int = Field(default=32, alias="REVIEW_CHUNK_OVERLAP")
 
     http_timeout_seconds: float = Field(default=300.0, alias="HTTP_TIMEOUT_SECONDS")
+    # Two-stage extraction: HF JSONL files are downloaded once to
+    # /data/dataset (PVC-shared across workers) with resumable retries,
+    # then every backfill reads from local disk. This setting caps the
+    # retry count on the download leg.
+    dataset_download_max_attempts: int = Field(
+        default=6, alias="DATASET_DOWNLOAD_MAX_ATTEMPTS"
+    )
     extraction_job_size: int = Field(default=10_000, alias="EXTRACTION_JOB_SIZE")
     image_download_concurrency: int = Field(default=8, alias="IMAGE_DOWNLOAD_CONCURRENCY")
     extraction_concurrency: int = Field(default=16, alias="EXTRACTION_CONCURRENCY")
@@ -116,6 +123,12 @@ class Settings(BaseSettings):
         default=10_000, alias="REVIEW_AGGREGATE_SCAN_PAGE_SIZE"
     )
     chunk_fetch_concurrency: int = Field(default=32, alias="CHUNK_FETCH_CONCURRENCY")
+    # Per-doc upsert calls in `process_embed_reviews` are issued in parallel
+    # via asyncio.gather under this semaphore. Sequential upserts dominated
+    # wall-clock time at ~200 ms/doc; 32 concurrent cuts a 2k-doc batch's
+    # upsert phase from ~7 min to ~30 s, which also keeps the claim lease
+    # from expiring mid-batch.
+    review_upsert_concurrency: int = Field(default=32, alias="REVIEW_UPSERT_CONCURRENCY")
     cleanup_embedded_images: bool = Field(default=True, alias="CLEANUP_EMBEDDED_IMAGES")
     worker_poll_seconds: float = Field(default=5.0, alias="WORKER_POLL_SECONDS")
     claim_lease_seconds: int = Field(default=900, alias="CLAIM_LEASE_SECONDS")

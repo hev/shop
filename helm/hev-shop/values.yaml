@@ -279,15 +279,17 @@ workers:
         effect: NoSchedule
     resources:
       requests:
-        cpu: 500m
-        memory: 1Gi
+        cpu: "1"
+        # Backfill buffers ~200 reviews × ~40k asins in heap memory per
+        # category before staging. 2 Gi was OOMKilled; 12 Gi gives headroom.
+        memory: 12Gi
         # Reserve enough ephemeral-storage so kubelet schedules at most
-        # one cpu-worker per 50 GiB Karpenter node. The indexer image
-        # unpacks to ~25 GiB and we leave headroom for OS + logs.
+        # one cpu-worker per 100 GiB Karpenter node. The indexer image
+        # unpacks to ~30 GiB; leave headroom for OS + logs.
         ephemeral-storage: 35Gi
       limits:
-        cpu: "2"
-        memory: 2Gi
+        cpu: "4"
+        memory: 16Gi
         ephemeral-storage: 40Gi
     autoscaling:
       enabled: true
