@@ -21,6 +21,15 @@ spec:
   metadataOptions:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+  # AL2023's default root volume is 20 GiB. The indexer image (with Qwen-8B
+  # baked) unpacks to ~25 GiB on disk, so we override with a 50 GiB volume.
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: {{ .Values.karpenter.cpu.rootVolumeSize | default "50Gi" }}
+        volumeType: gp3
+        deleteOnTermination: true
+        encrypted: true
   subnetSelectorTerms:
     - tags:
         karpenter.sh/discovery: {{ $clusterName }}
