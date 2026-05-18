@@ -274,6 +274,7 @@ def make_settings(**overrides) -> SimpleNamespace:
         vector_upsert_batch_size=10_000,
         review_aggregate_scan_page_size=10_000,
         chunk_fetch_concurrency=4,
+        review_upsert_concurrency=4,
         cleanup_embedded_images=False,
         worker_poll_seconds=5.0,
         review_tag_min_count=3,

@@ -326,24 +326,53 @@ async def process_embed_reviews(ctx: StageContext, doc_ids: list[str]) -> StageO
         for (_doc_id, item), vector in zip(batch, vectors, strict=True):
             item["vector"] = vector
 
-    for doc_id, namespace, items, classify_chunk in prepared:
-        if doc_id in release:
-            continue
-        if any("vector" not in item for item in items):
-            continue
-        try:
-            await ctx.layer.upsert_vectors(namespace, items)
-            if classify_chunk is not None:
-                review_id = str(classify_chunk["metadata"]["review_id"])
-                await ctx.layer.stage_pipeline_document(
-                    ctx.settings.reviews_pipeline_id,
-                    review_work_document_id("classify", review_id),
-                    chunks=[classify_chunk],
-                )
-            complete.append(doc_id)
-        except Exception:
-            logger.exception("failed to upsert review vector batch")
-            release.append(doc_id)
+    upsertable = [
+        (doc_id, namespace, items, classify_chunk)
+        for doc_id, namespace, items, classify_chunk in prepared
+        if doc_id not in release
+        and items
+        and not any("vector" not in item for item in items)
+    ]
+    if upsertable:
+        # Issue upserts in parallel under a bounded semaphore. The previous
+        # sequential await loop made the upsert phase the wall-clock
+        # bottleneck (~200 ms/doc → ~7 min for a 2000-doc claim batch),
+        # which routinely exceeded the claim lease and silently desynced
+        # the pipeline-stage counter from the vectors that actually landed.
+        sem = asyncio.Semaphore(ctx.settings.review_upsert_concurrency)
+
+        async def _upsert_one(
+            doc_id: str,
+            namespace: str,
+            items: list[dict[str, Any]],
+            classify_chunk: dict[str, Any] | None,
+        ) -> tuple[str, bool]:
+            async with sem:
+                try:
+                    await ctx.layer.upsert_vectors(namespace, items)
+                    if classify_chunk is not None:
+                        review_id = str(classify_chunk["metadata"]["review_id"])
+                        await ctx.layer.stage_pipeline_document(
+                            ctx.settings.reviews_pipeline_id,
+                            review_work_document_id("classify", review_id),
+                            chunks=[classify_chunk],
+                        )
+                    return doc_id, True
+                except Exception:
+                    logger.exception(
+                        "failed to upsert review vector batch",
+                        extra={"doc_id": doc_id, "namespace": namespace},
+                    )
+                    return doc_id, False
+
+        results = await asyncio.gather(
+            *(_upsert_one(*args) for args in upsertable)
+        )
+        for doc_id, ok in results:
+            if ok:
+                complete.append(doc_id)
+            else:
+                release.append(doc_id)
 
     return StageOutcome(complete=complete, fail=fail, release=release)
 
