@@ -47,6 +47,17 @@ app.kubernetes.io/name: {{ include "hev-shop.name" . }}
 {{- printf "%s:%s" .Values.indexerImage.repository (.Values.indexerImage.tag | default .Chart.AppVersion) -}}
 {{- end -}}
 
+{{- /*
+  API-only image. The API pod runs on the small infra node which can't hold
+  the full image with Qwen-8B baked in (~22 GB on disk). Set indexerImage.apiTag
+  to a slim variant (BAKE_QWEN=false at build time, ~5 GB). Falls back to
+  indexerImage.tag when apiTag is empty.
+*/ -}}
+{{- define "hev-shop.apiImage" -}}
+{{- $tag := .Values.indexerImage.apiTag | default .Values.indexerImage.tag | default .Chart.AppVersion -}}
+{{- printf "%s:%s" .Values.indexerImage.repository $tag -}}
+{{- end -}}
+
 {{- define "hev-shop.webImage" -}}
 {{- printf "%s:%s" .Values.webImage.repository (.Values.webImage.tag | default .Chart.AppVersion) -}}
 {{- end -}}

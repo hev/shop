@@ -3,7 +3,12 @@ namespace:
 
 indexerImage:
   repository: ghcr.io/hev/hev-shop-indexer
+  # `tag` is used by all worker deployments. `apiTag` (optional) overrides
+  # the image for the API pod — keep this set to a slim variant built with
+  # BAKE_QWEN=false so the image fits on the small infra node. Leave apiTag
+  # empty in environments where the infra node has room for the full image.
   tag: latest
+  apiTag: ""
   pullPolicy: Always
 
 webImage:

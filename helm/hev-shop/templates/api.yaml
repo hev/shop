@@ -36,7 +36,7 @@ spec:
       {{- end }}
       containers:
         - name: api
-          image: {{ include "hev-shop.indexerImage" . | quote }}
+          image: {{ include "hev-shop.apiImage" . | quote }}
           imagePullPolicy: {{ .Values.indexerImage.pullPolicy }}
           ports:
             - name: http
