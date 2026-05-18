@@ -10,6 +10,7 @@ import {
   type BackendMeta,
   type CategoryBucket,
 } from "@/lib/backend";
+import { warmOnce } from "@/lib/layer";
 import type { Product } from "@/lib/types";
 
 const FALLBACK_CATEGORIES: CategoryBucket[] = [
@@ -66,6 +67,7 @@ function formatStableAsOf(epochMs: number): string {
 }
 
 export default async function HomePage() {
+  warmOnce();
   const [featured, meta] = await Promise.all([getFeatured(), getMeta()]);
   const hero = featured.slice(0, 3);
   const categories = meta?.categories.length

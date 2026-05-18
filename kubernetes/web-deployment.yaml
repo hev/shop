@@ -34,6 +34,14 @@ spec:
           env:
             - name: HEV_SHOP_API_BASE
               value: http://hev-shop-api.hev-shop.svc.cluster.local:8080
+            - name: LAYER_GATEWAY_URL
+              value: http://layer-gateway.layer.svc.cluster.local:8080
+            - name: LAYER_PRODUCT_NAMESPACE
+              value: amazon-products
+            - name: LAYER_REVIEW_NAMESPACE_BASE
+              value: amazon-reviews
+            - name: LAYER_REVIEW_SHARD_COUNT
+              value: "16"
             - name: NODE_ENV
               value: production
             - name: NEXT_TELEMETRY_DISABLED

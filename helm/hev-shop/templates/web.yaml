@@ -39,6 +39,14 @@ spec:
           env:
             - name: HEV_SHOP_API_BASE
               value: {{ default (printf "http://%s-api.%s.svc.cluster.local:8080" (include "hev-shop.fullname" .) .Release.Namespace) .Values.web.apiBaseUrl | quote }}
+            - name: LAYER_GATEWAY_URL
+              value: {{ .Values.layer.gatewayUrl | quote }}
+            - name: LAYER_PRODUCT_NAMESPACE
+              value: {{ .Values.pipeline.product.namespace | quote }}
+            - name: LAYER_REVIEW_NAMESPACE_BASE
+              value: {{ .Values.pipeline.reviews.namespaceBase | quote }}
+            - name: LAYER_REVIEW_SHARD_COUNT
+              value: {{ .Values.pipeline.reviews.shardCount | quote }}
             - name: NODE_ENV
               value: production
             - name: NEXT_TELEMETRY_DISABLED
