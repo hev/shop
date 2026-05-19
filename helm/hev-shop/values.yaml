@@ -26,6 +26,11 @@ secrets:
   existingSecret: ""
   hfToken: ""
   openrouterApiKey: ""
+  # Required since layer#10 — bearer token the gateway accepts on /v1 + /v2.
+  # In our deploys this is the same value as the gateway's TURBOPUFFER_API_KEY
+  # (see layer's scripts/deploy-layer.sh). Leave blank for local dev against a
+  # gateway started without LAYER_GATEWAY_API_KEY (middleware is a no-op then).
+  layerApiKey: ""
 
 persistence:
   enabled: true
@@ -206,15 +211,15 @@ karpenter:
 
 api:
   replicaCount: 1
-  # Lands on the Karpenter `app` pool — the small `infra` m6a.large root
-  # disk can't hold the indexer image (torch unpacks to ~14 GB and the
-  # infra node has ~18 Gi total root, shared with the web pod).
+  # Demo-cost mode: keep the always-on API on the baseline infra node.
+  # The infra node root/image disk is intentionally sized large enough for the
+  # baked indexer image so the separate Karpenter app node can scale to zero.
   nodeSelector:
-    mesh-role: app
+    mesh-role: infra
   tolerations:
     - key: mesh-role
       operator: Equal
-      value: app
+      value: infra
       effect: NoSchedule
   # CLIP ViT-L/14 (~1.7 GB) is the only model the api pod loads — Qwen-8B
   # would need ~32 GB CPU and is gated off via API_REVIEW_SEARCH_ENABLED.

@@ -1,5 +1,20 @@
 {{- if .Values.autoscaling.enabled }}
 {{- $root := . -}}
+---
+# Layer's /v2/metrics endpoint (where these triggers scrape) requires a bearer
+# token since layer#10. Reuse the same key the indexer/web pods read from the
+# Secret. authModes=bearer on each prometheus trigger pulls this in.
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ include "hev-shop.fullname" $root }}-gateway-auth
+  labels:
+    {{- include "hev-shop.labels" $root | nindent 4 }}
+spec:
+  secretTargetRef:
+    - parameter: bearerToken
+      name: {{ include "hev-shop.secretName" $root }}
+      key: LAYER_GATEWAY_API_KEY
 {{- range $key, $worker := .Values.workers }}
 {{- if and $worker.enabled $worker.autoscaling.enabled }}
 ---
@@ -25,6 +40,9 @@ spec:
         query: {{ tpl $worker.autoscaling.query $root | quote }}
         threshold: {{ $worker.autoscaling.threshold | quote }}
         activationThreshold: {{ $worker.autoscaling.activationThreshold | quote }}
+        authModes: "bearer"
+      authenticationRef:
+        name: {{ include "hev-shop.fullname" $root }}-gateway-auth
 {{- end }}
 {{- end }}
 {{- end }}

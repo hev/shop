@@ -35,7 +35,11 @@ async def amain() -> None:
     settings = get_settings()
     stop_event = asyncio.Event()
     install_signal_handlers(stop_event)
-    layer = LayerClient(settings.layer_gateway_url, settings.http_timeout_seconds)
+    layer = LayerClient(
+        settings.layer_gateway_url,
+        settings.http_timeout_seconds,
+        api_key=settings.layer_api_key,
+    )
 
     try:
         if settings.worker_type == "cpu":

@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     layer_gateway_url: str = Field(
         default="http://localhost:8080", alias="LAYER_GATEWAY_URL"
     )
+    layer_api_key: str | None = Field(default=None, alias="LAYER_GATEWAY_API_KEY")
     namespace: str = Field(default="amazon-products", alias="TURBOPUFFER_NAMESPACE")
     default_pipeline_id: str = Field(
         default="hev-shop-product-images", alias="PIPELINE_ID"

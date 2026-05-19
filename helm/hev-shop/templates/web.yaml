@@ -41,6 +41,11 @@ spec:
               value: {{ default (printf "http://%s-api.%s.svc.cluster.local:8080" (include "hev-shop.fullname" .) .Release.Namespace) .Values.web.apiBaseUrl | quote }}
             - name: LAYER_GATEWAY_URL
               value: {{ .Values.layer.gatewayUrl | quote }}
+            - name: LAYER_GATEWAY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hev-shop.secretName" . }}
+                  key: LAYER_GATEWAY_API_KEY
             - name: LAYER_PRODUCT_NAMESPACE
               value: {{ .Values.pipeline.product.namespace | quote }}
             - name: LAYER_REVIEW_NAMESPACE_BASE

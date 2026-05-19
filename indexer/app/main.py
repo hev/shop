@@ -48,7 +48,11 @@ logger = logging.getLogger("hev_shop.indexer")
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    layer = LayerClient(settings.layer_gateway_url, settings.http_timeout_seconds)
+    layer = LayerClient(
+        settings.layer_gateway_url,
+        settings.http_timeout_seconds,
+        api_key=settings.layer_api_key,
+    )
     text_settings = (
         settings.model_copy(update={"model_cache_dir": settings.api_model_cache_dir})
         if settings.api_model_cache_dir is not None

@@ -14,11 +14,24 @@ type Client struct {
 	httpClient *http.Client
 }
 
-func New(baseURL string) *Client {
+type authTransport struct {
+	apiKey string
+	base   http.RoundTripper
+}
+
+func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+t.apiKey)
+	}
+	return t.base.RoundTrip(req)
+}
+
+func New(baseURL, apiKey string) *Client {
 	return &Client{
 		BaseURL: baseURL,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout:   30 * time.Second,
+			Transport: &authTransport{apiKey: apiKey, base: http.DefaultTransport},
 		},
 	}
 }

@@ -34,9 +34,16 @@ class LayerPerf:
 
 
 class LayerClient:
-    def __init__(self, base_url: str, timeout_seconds: float = 60.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        timeout_seconds: float = 60.0,
+        *,
+        api_key: str | None = None,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
-        self._client = httpx.AsyncClient(timeout=timeout_seconds)
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else None
+        self._client = httpx.AsyncClient(timeout=timeout_seconds, headers=headers)
 
     async def close(self) -> None:
         await self._client.aclose()

@@ -9,17 +9,18 @@ import (
 )
 
 var (
-	gatewayURL  string
-	indexerURL  string
-	namespace   string
-	layerClient *client.Client
+	gatewayURL    string
+	gatewayAPIKey string
+	indexerURL    string
+	namespace     string
+	layerClient   *client.Client
 )
 
 var rootCmd = &cobra.Command{
 	Use:   "hev-shop",
 	Short: "CLI for hev-layer demo with Amazon Reviews dataset",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		layerClient = client.New(gatewayURL)
+		layerClient = client.New(gatewayURL, gatewayAPIKey)
 	},
 }
 
@@ -32,6 +33,7 @@ func Execute() {
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&gatewayURL, "gateway-url", envOrDefault("LAYER_GATEWAY_URL", "http://localhost:8080"), "layer-gateway URL")
+	rootCmd.PersistentFlags().StringVar(&gatewayAPIKey, "gateway-api-key", envOrDefault("LAYER_GATEWAY_API_KEY", ""), "layer-gateway bearer token (required against any deployed gateway since layer#10)")
 	rootCmd.PersistentFlags().StringVar(&indexerURL, "indexer-url", envOrDefault("HEV_SHOP_INDEXER_URL", "http://localhost:8090"), "hev-shop indexer URL")
 	rootCmd.PersistentFlags().StringVar(&namespace, "namespace", envOrDefault("NAMESPACE", "amazon-products"), "target namespace")
 }
