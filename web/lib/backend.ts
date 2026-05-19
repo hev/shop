@@ -113,6 +113,16 @@ function asStringArrayRecord(v: unknown): Record<string, string[]> {
   );
 }
 
+// Log the upstream response body to the Node-side pod logs but never thread
+// it through to the thrown Error — Next.js server components surface
+// Error.message into rendered UI on the search/product pages, and upstream
+// 5xx bodies have been observed to carry sensitive bytes (auth headers,
+// secret URLs). The Error message we throw is intentionally body-free.
+async function logUpstreamFailure(label: string, res: Response): Promise<void> {
+  const body = await res.text().catch(() => "");
+  console.error(`[backend] ${label} upstream ${res.status}: ${body.slice(0, 500)}`);
+}
+
 async function fetchWithTimeout(
   input: Parameters<typeof fetch>[0],
   init: Parameters<typeof fetch>[1] = {},
@@ -188,8 +198,8 @@ export async function backendSearch(
     },
   );
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`search upstream ${res.status}: ${body.slice(0, 200)}`);
+    await logUpstreamFailure("search", res);
+    throw new Error(`search upstream ${res.status}`);
   }
   const json = (await res.json()) as BackendSearchResponse;
   const products = json.hits.map(hitToProduct);
@@ -209,8 +219,8 @@ export async function backendProduct(asin: string): Promise<ProductWithPerf | nu
   );
   if (res.status === 404) return null;
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`product upstream ${res.status}: ${body.slice(0, 200)}`);
+    await logUpstreamFailure("product", res);
+    throw new Error(`product upstream ${res.status}`);
   }
   const json = (await res.json()) as BackendProductResponse;
   const product = attributesToProduct(json.asin, json.attributes ?? {});
@@ -240,8 +250,8 @@ export async function backendMeta(): Promise<BackendMeta> {
     META_TIMEOUT_MS,
   );
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`meta upstream ${res.status}: ${body.slice(0, 200)}`);
+    await logUpstreamFailure("meta", res);
+    throw new Error(`meta upstream ${res.status}`);
   }
   const json = (await res.json()) as Omit<BackendMeta, "layer_perf"> & {
     layer_perf?: unknown;
@@ -287,8 +297,8 @@ export async function backendReviewSearch(
   url.searchParams.set("top_k", String(Math.min(topK, 200)));
   const res = await fetchWithTimeout(url, { cache: "no-store" });
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`review search upstream ${res.status}: ${body.slice(0, 200)}`);
+    await logUpstreamFailure("review search", res);
+    throw new Error(`review search upstream ${res.status}`);
   }
   const json = (await res.json()) as BackendSearchResponse;
   const reviews = json.hits.map((hit) => {

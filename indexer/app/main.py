@@ -324,7 +324,11 @@ async def search(request: Request, body: SearchRequest) -> SearchResponse:
             filters=combine_filters(filters),
         )
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        # Never embed str(exc) in detail — upstream exceptions can carry
+        # bearer tokens, secret URLs, or other sensitive bytes (see the
+        # 2026-05-19 incident where httpx echoed the gateway key).
+        logger.exception("search upstream failed: namespace=%s", namespace)
+        raise HTTPException(status_code=502, detail="search upstream failed") from exc
     hits = [
         SearchHit(
             id=result["id"],
@@ -367,7 +371,8 @@ async def product(request: Request, asin: str) -> ProductResponse:
             ],
         )
     except Exception as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        logger.exception("product fetch failed: asin=%s", asin)
+        raise HTTPException(status_code=404, detail="product not found") from exc
     return ProductResponse(
         asin=asin,
         namespace=settings.namespace,

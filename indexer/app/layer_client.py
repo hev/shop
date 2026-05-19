@@ -42,7 +42,13 @@ class LayerClient:
         api_key: str | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
-        headers = {"Authorization": f"Bearer {api_key}"} if api_key else None
+        # Strip whitespace defensively: secret values loaded from 1Password,
+        # `kubectl create --from-literal`, or YAML `|`-blocks sometimes carry
+        # a trailing newline. httpx rejects header values containing CR/LF
+        # with a verbose error that embeds the bytes — which would leak the
+        # key into any /detail/ surface that catches the exception.
+        cleaned = (api_key or "").strip()
+        headers = {"Authorization": f"Bearer {cleaned}"} if cleaned else None
         self._client = httpx.AsyncClient(timeout=timeout_seconds, headers=headers)
 
     async def close(self) -> None:
