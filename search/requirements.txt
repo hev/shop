@@ -1,0 +1,17 @@
+fastapi>=0.115
+# hevlayer ships from the layer repo; pinned via a sibling-checkout editable
+# install until clients/python lands on PyPI. The Docker/CI install path is
+# tracked alongside hev/layer#22.
+-e ../../layer/clients/python
+# hev_shop_common is the shared library both this service and indexer/ pull
+# Settings, records, and embedder wrappers from. Sibling-checkout editable
+# install, same pattern as the SDK above.
+-e ../common
+httpx>=0.27
+pydantic-settings>=2.6
+# torch + transformers cover CLIP-text query embedding (always loaded) and
+# Qwen review embedding (loaded only when API_REVIEW_SEARCH_ENABLED=true,
+# which requires a GPU pod — see config.py).
+torch>=2.5
+transformers>=4.46
+uvicorn[standard]>=0.32
