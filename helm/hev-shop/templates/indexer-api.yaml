@@ -33,7 +33,7 @@ spec:
       {{- end }}
       containers:
         - name: indexer-api
-          image: {{ include "hev-shop.indexerImage" . | quote }}
+          image: {{ include "hev-shop.indexerApiImage" . | quote }}
           imagePullPolicy: {{ .Values.indexerImage.pullPolicy }}
           # The control plane (/index, /backfill, /status) just enqueues
           # jobs into Layer pipelines — no model loads, no warm task.

@@ -51,6 +51,10 @@ app.kubernetes.io/name: {{ include "hev-shop.name" . }}
 {{- printf "%s:%s" .Values.indexerImage.repository (.Values.indexerImage.tag | default .Chart.AppVersion) -}}
 {{- end -}}
 
+{{- define "hev-shop.indexerApiImage" -}}
+{{- printf "%s:%s" .Values.indexerImage.repository (.Values.indexerImage.apiTag | default .Values.indexerImage.tag | default .Chart.AppVersion) -}}
+{{- end -}}
+
 {{- /*
   Search read-API image. CLIP-text only — Qwen-8B is off by default in the
   search Dockerfile because the search pod runs on the small infra node and

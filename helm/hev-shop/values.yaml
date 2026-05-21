@@ -6,6 +6,9 @@ indexerImage:
   # default — workers need both. Built from indexer/Dockerfile.
   repository: ghcr.io/hev/hev-shop-indexer
   tag: latest
+  # Optional slim image tag for the always-on indexer API. When unset, the API
+  # uses `tag`. Workers always use `tag`.
+  apiTag: ""
   pullPolicy: Always
 
 searchImage:
@@ -222,26 +225,25 @@ search:
     type: RollingUpdate
     rollingUpdate:
       maxSurge: 1
-      maxUnavailable: 0
-  # Demo-cost mode: keep the always-on search pod on the baseline infra
-  # node. The infra node root/image disk carries the baked search image so
-  # the separate Karpenter app node can scale to zero.
+      maxUnavailable: 1
+  # Search carries the baked CLIP image, so keep it on the Karpenter app
+  # nodepool with larger root volumes instead of the small shared infra node.
   nodeSelector:
-    mesh-role: infra
+    mesh-role: app
   tolerations:
     - key: mesh-role
       operator: Equal
-      value: infra
+      value: app
       effect: NoSchedule
   # CLIP ViT-L/14 (~1.7 GB) is the only model the search pod loads — Qwen-8B
   # would need ~32 GB CPU and is gated off via API_REVIEW_SEARCH_ENABLED.
-  # Keep the request below the observed working set headroom; the higher limit
-  # still allows model-load bursts.
+  # Request the full expected working set so Karpenter provisions a node large
+  # enough for CLIP startup and reserves image-disk headroom.
   resources:
     requests:
       cpu: 250m
-      memory: 1536Mi
-      ephemeral-storage: 2Gi
+      memory: 5Gi
+      ephemeral-storage: 15Gi
     limits:
       cpu: "4"
       memory: 5Gi
@@ -268,11 +270,11 @@ indexerApi:
       maxSurge: 1
       maxUnavailable: 0
   nodeSelector:
-    mesh-role: infra
+    mesh-role: app
   tolerations:
     - key: mesh-role
       operator: Equal
-      value: infra
+      value: app
       effect: NoSchedule
   resources:
     requests:
