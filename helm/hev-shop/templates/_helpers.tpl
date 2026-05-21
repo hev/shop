@@ -43,19 +43,22 @@ app.kubernetes.io/name: {{ include "hev-shop.name" . }}
 {{- default (printf "%s-data" (include "hev-shop.fullname" .)) .Values.persistence.existingClaim -}}
 {{- end -}}
 
+{{- /*
+  Worker + indexer control plane image. Bakes both CLIP-image and Qwen-8B
+  by default — workers need both. Built from indexer/Dockerfile.
+*/ -}}
 {{- define "hev-shop.indexerImage" -}}
 {{- printf "%s:%s" .Values.indexerImage.repository (.Values.indexerImage.tag | default .Chart.AppVersion) -}}
 {{- end -}}
 
 {{- /*
-  API-only image. The API pod runs on the small infra node which can't hold
-  the full image with Qwen-8B baked in (~22 GB on disk). Set indexerImage.apiTag
-  to a slim variant (BAKE_QWEN=false at build time, ~5 GB). Falls back to
-  indexerImage.tag when apiTag is empty.
+  Search read-API image. CLIP-text only — Qwen-8B is off by default in the
+  search Dockerfile because the search pod runs on the small infra node and
+  never loads Qwen on CPU (review search returns 503 unless the pod has a
+  GPU). Built from search/Dockerfile.
 */ -}}
-{{- define "hev-shop.apiImage" -}}
-{{- $tag := .Values.indexerImage.apiTag | default .Values.indexerImage.tag | default .Chart.AppVersion -}}
-{{- printf "%s:%s" .Values.indexerImage.repository $tag -}}
+{{- define "hev-shop.searchImage" -}}
+{{- printf "%s:%s" .Values.searchImage.repository (.Values.searchImage.tag | default .Chart.AppVersion) -}}
 {{- end -}}
 
 {{- define "hev-shop.webImage" -}}
