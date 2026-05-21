@@ -1,6 +1,6 @@
 import unittest
 
-from app.records import (
+from hev_shop_common.records import (
     product_vector_attributes,
     review_id_from_work_document,
     review_namespace_for,

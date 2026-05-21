@@ -1,6 +1,6 @@
 import unittest
 
-from app.config import Settings
+from hev_shop_common.config import Settings
 
 
 class SettingsTests(unittest.TestCase):

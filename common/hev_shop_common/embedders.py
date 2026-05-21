@@ -1,10 +1,10 @@
-"""Model wrappers used by the layer pipeline stages.
+"""Model wrappers shared across the hev-shop services.
 
 The CLIP/Qwen instantiation is heavy (torch + transformers), so each class
-imports those lazily inside `__init__`. Callers (pipeline.py for stage
-workers, main.py for the search API) construct one instance per process
-behind a lazy singleton — see `pipeline._clip_image` / `_qwen` and
-`main.get_text_embedder` / `get_review_text_embedder`.
+imports those lazily inside `__init__`. Callers construct one instance per
+process behind a lazy singleton — see `indexer/app/pipeline.py` (image +
+Qwen for stage workers) and `search/app/main.py` (CLIP-text + Qwen for
+the read API).
 """
 
 from __future__ import annotations

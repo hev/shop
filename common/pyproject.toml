@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hev-shop-common"
+version = "0.1.0"
+description = "Settings, records, and embedder wrappers shared by the hev-shop search API and indexer workers."
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.0",
+    "pydantic-settings>=2.6",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hev_shop_common*"]

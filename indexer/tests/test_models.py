@@ -2,7 +2,11 @@ import unittest
 from datetime import datetime, timezone
 
 from app.models import IndexRequest
-from app.records import ReviewRecord, dedupe_categories, normalize_review_tags
+from hev_shop_common.records import (
+    ReviewRecord,
+    dedupe_categories,
+    normalize_review_tags,
+)
 
 
 class ModelTests(unittest.TestCase):
