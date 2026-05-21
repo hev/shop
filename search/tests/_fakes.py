@@ -64,16 +64,19 @@ class FakeLayerClient:
             cursor = getattr(body, "cursor", None) or extra.get("cursor")
             payload = {
                 "namespace": namespace,
-                "vector": list(body.vector),
+                "vector": list(body.vector) if body.vector is not None else None,
+                "nearest_to_id": body.nearest_to_id,
                 "top_k": body.top_k,
                 "filters": body.filters,
                 "include_attributes": body.include_attributes,
                 "cursor": cursor,
             }
         else:
+            raw_vector = body.get("vector")
             payload = {
                 "namespace": namespace,
-                "vector": list(body.get("vector") or []),
+                "vector": list(raw_vector) if raw_vector is not None else None,
+                "nearest_to_id": body.get("nearest_to_id"),
                 "top_k": body.get("top_k"),
                 "filters": body.get("filters"),
                 "include_attributes": body.get("include_attributes"),

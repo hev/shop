@@ -44,6 +44,8 @@ from .models import (
     LayerPerf,
     MetaResponse,
     ProductResponse,
+    RecommendRequest,
+    RecommendResponse,
     ReviewSample,
     ReviewSamplesResponse,
     ReviewSearchResponse,
@@ -290,6 +292,66 @@ async def search(request: Request, body: SearchRequest) -> SearchResponse:
         ),
         next_cursor=_extract_next_cursor(response.data),
         count=count_info,
+    )
+
+
+@app.post("/recommend", response_model=RecommendResponse)
+async def recommend(request: Request, body: RecommendRequest) -> RecommendResponse:
+    """Visual-similarity recommendations seeded by an existing product ASIN.
+
+    Uses Layer's `nearest_to_id` query mode: the gateway looks up the seed
+    document's stored vector and runs the nearest-neighbor query in one call.
+    The seed ASIN itself is filtered out so callers don't get the seed back
+    as its own first hit.
+    """
+    settings = request.app.state.settings
+    layer: AsyncHevlayer = request.app.state.layer
+    namespace = body.namespace or settings.namespace
+    include_attributes: list[str] | bool = body.include_attributes or True
+    filters: list[list[object]] = [["id", "NotEq", body.asin]]
+    if body.category:
+        filters.append(["category", "Eq", body.category])
+    combined_filters = combine_filters(filters)
+
+    try:
+        response = await layer.query_namespace(
+            namespace,
+            QueryRequest(
+                nearest_to_id=body.asin,
+                top_k=body.top_k,
+                include_attributes=include_attributes,
+                filters=combined_filters,
+            ),
+            with_perf=True,
+        )
+    except Exception as exc:
+        # See /search note: never put str(exc) in detail — upstream errors
+        # can carry bearer tokens or signed URLs.
+        logger.exception(
+            "recommend upstream failed: namespace=%s asin=%s", namespace, body.asin
+        )
+        raise HTTPException(
+            status_code=502, detail="recommend upstream failed"
+        ) from exc
+
+    hits = [
+        SearchHit(
+            id=result.id,
+            dist=result.dist,
+            attributes=decode_dict_attrs(result.attributes),
+        )
+        for result in response.data.results
+    ]
+    return RecommendResponse(
+        asin=body.asin,
+        namespace=namespace,
+        hits=hits,
+        stable_as_of=response.data.stable_as_of,
+        layer_perf=LayerPerf(
+            latency_ms=int(response.perf.latency_ms),
+            cache_status=response.perf.cache_status,
+        ),
+        next_cursor=_extract_next_cursor(response.data),
     )
 
 

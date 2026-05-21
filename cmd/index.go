@@ -1,14 +1,10 @@
 package cmd
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"strings"
-	"time"
 
+	"github.com/hev/shop/client/indexerapi"
 	"github.com/spf13/cobra"
 )
 
@@ -18,82 +14,50 @@ var (
 	indexCategories []string
 	indexPipelineID string
 	indexJobSize    int
+	indexNamespace  string
 )
-
-type indexRequest struct {
-	Count      int      `json:"count"`
-	Category   string   `json:"category,omitempty"`
-	Categories []string `json:"categories,omitempty"`
-	PipelineID string   `json:"pipeline_id,omitempty"`
-	Namespace  string   `json:"namespace,omitempty"`
-	JobSize    int      `json:"job_size,omitempty"`
-}
 
 var indexCmd = &cobra.Command{
 	Use:   "index",
-	Short: "Queue Amazon product image indexing through the hev-shop indexer",
+	Short: "Queue Amazon product image indexing (POST /index)",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		body := indexerapi.IndexRequest{}
 		categories := normalizeCategories(indexCategories)
-		categoryFlagChanged := cmd.Flags().Changed("category")
-		if len(categories) > 0 && categoryFlagChanged {
+		if len(categories) > 0 && cmd.Flags().Changed("category") {
 			categories = normalizeCategories(append([]string{indexCategory}, categories...))
 		}
-
-		req := indexRequest{
-			Count:      indexCount,
-			PipelineID: indexPipelineID,
-			Namespace:  namespace,
-			JobSize:    indexJobSize,
-		}
 		if len(categories) > 0 {
-			req.Categories = categories
+			body.Categories = &categories
 		} else {
-			req.Category = indexCategory
+			cat := indexCategory
+			body.Category = &cat
 		}
-		body, err := json.Marshal(req)
-		if err != nil {
-			return fmt.Errorf("marshal index request: %w", err)
+		count := indexCount
+		body.Count = &count
+		jobSize := indexJobSize
+		body.JobSize = &jobSize
+		if indexPipelineID != "" {
+			pid := indexPipelineID
+			body.PipelineId = &pid
+		}
+		if indexNamespace != "" {
+			ns := indexNamespace
+			body.Namespace = &ns
 		}
 
-		client := &http.Client{Timeout: 30 * time.Second}
-		url := strings.TrimRight(indexerURL, "/") + "/index"
-		resp, err := client.Post(url, "application/json", bytes.NewReader(body))
+		c, err := newIndexerClient()
+		if err != nil {
+			return err
+		}
+		resp, err := c.IndexProductsIndexPostWithResponse(ctx(), body)
 		if err != nil {
 			return fmt.Errorf("indexer request failed: %w", err)
 		}
-		defer resp.Body.Close()
-
-		respBody, _ := io.ReadAll(resp.Body)
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return fmt.Errorf("indexer returned %d: %s", resp.StatusCode, string(respBody))
+		if resp.HTTPResponse.StatusCode != http.StatusOK {
+			return errorFromBody("indexer", resp.HTTPResponse.StatusCode, resp.Body)
 		}
-
-		var out any
-		if err := json.Unmarshal(respBody, &out); err != nil {
-			return fmt.Errorf("decode indexer response: %w", err)
-		}
-		pretty, _ := json.MarshalIndent(out, "", "  ")
-		fmt.Println(string(pretty))
-		return nil
+		return printJSON(resp.Body)
 	},
-}
-
-func normalizeCategories(categories []string) []string {
-	out := make([]string, 0, len(categories))
-	seen := make(map[string]struct{}, len(categories))
-	for _, category := range categories {
-		category = strings.TrimSpace(category)
-		if category == "" {
-			continue
-		}
-		key := strings.ToLower(category)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		out = append(out, category)
-		seen[key] = struct{}{}
-	}
-	return out
 }
 
 func init() {
@@ -107,5 +71,6 @@ func init() {
 	)
 	indexCmd.Flags().StringVar(&indexPipelineID, "pipeline-id", "", "pipeline id (defaults to indexer PIPELINE_ID)")
 	indexCmd.Flags().IntVar(&indexJobSize, "job-size", 10000, "products per extraction job")
+	indexCmd.Flags().StringVar(&indexNamespace, "namespace", "", "target namespace (defaults to indexer NAMESPACE)")
 	rootCmd.AddCommand(indexCmd)
 }

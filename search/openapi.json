@@ -1,0 +1,871 @@
+{
+  "components": {
+    "schemas": {
+      "CategoryBucket": {
+        "properties": {
+          "doc_count": {
+            "title": "Doc Count",
+            "type": "integer"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "doc_count"
+        ],
+        "title": "CategoryBucket",
+        "type": "object"
+      },
+      "CountInfo": {
+        "description": "Result of a /v2/namespaces/{ns}/count fan-out. `bounded=True` means\none or more shards saturated their top_k cap on this round, so `count`\nis a lower bound \u2014 render it as \"\u2265N\" rather than \"=N\".",
+        "properties": {
+          "bounded": {
+            "title": "Bounded",
+            "type": "boolean"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "layer_perf": {
+            "$ref": "#/components/schemas/LayerPerf",
+            "nullable": true
+          },
+          "max_distance": {
+            "title": "Max Distance",
+            "type": "number"
+          },
+          "shards_saturated": {
+            "default": 0,
+            "title": "Shards Saturated",
+            "type": "integer"
+          },
+          "shards_total": {
+            "default": 0,
+            "title": "Shards Total",
+            "type": "integer"
+          },
+          "timed_out": {
+            "default": false,
+            "title": "Timed Out",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "count",
+          "bounded",
+          "max_distance"
+        ],
+        "title": "CountInfo",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "LayerPerf": {
+        "description": "One Layer gateway round-trip's timing + cache disposition,\nsurfaced to the UI so the showcase can render `42ms \u00b7 cache hit`\ninline. `cache_status` is the gateway's `x-layer-cache` header\n(`\"hit\"`, `\"miss\"`, or `\"miss-on-error\"`); `None` when the gateway\ndidn't attach the header \u2014 the `query` endpoint doesn't go through\nthe document cache, so query perfs always have `cache_status=None`.",
+        "properties": {
+          "cache_status": {
+            "nullable": true,
+            "title": "Cache Status",
+            "type": "string"
+          },
+          "latency_ms": {
+            "title": "Latency Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "latency_ms"
+        ],
+        "title": "LayerPerf",
+        "type": "object"
+      },
+      "MetaResponse": {
+        "properties": {
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/CategoryBucket"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "is_stable": {
+            "default": false,
+            "title": "Is Stable",
+            "type": "boolean"
+          },
+          "layer_perf": {
+            "$ref": "#/components/schemas/LayerPerf",
+            "description": "Gateway round-trip timing for the namespace metadata fetch (not the category scan).",
+            "nullable": true
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "stable_as_of": {
+            "nullable": true,
+            "title": "Stable As Of",
+            "type": "integer"
+          },
+          "vectors": {
+            "title": "Vectors",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "namespace",
+          "vectors",
+          "categories"
+        ],
+        "title": "MetaResponse",
+        "type": "object"
+      },
+      "ProductResponse": {
+        "properties": {
+          "asin": {
+            "title": "Asin",
+            "type": "string"
+          },
+          "attributes": {
+            "additionalProperties": true,
+            "title": "Attributes",
+            "type": "object"
+          },
+          "layer_perf": {
+            "$ref": "#/components/schemas/LayerPerf",
+            "description": "Gateway round-trip timing for the document fetch. `cache_status` = 'hit' means Aerospike served the document without touching turbopuffer.",
+            "nullable": true
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asin",
+          "namespace"
+        ],
+        "title": "ProductResponse",
+        "type": "object"
+      },
+      "RecommendRequest": {
+        "properties": {
+          "asin": {
+            "description": "Seed product ASIN",
+            "minLength": 1,
+            "title": "Asin",
+            "type": "string"
+          },
+          "category": {
+            "nullable": true,
+            "title": "Category",
+            "type": "string"
+          },
+          "include_attributes": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "title": "Include Attributes",
+            "type": "array"
+          },
+          "namespace": {
+            "nullable": true,
+            "title": "Namespace",
+            "type": "string"
+          },
+          "top_k": {
+            "default": 10,
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Top K",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "asin"
+        ],
+        "title": "RecommendRequest",
+        "type": "object"
+      },
+      "RecommendResponse": {
+        "properties": {
+          "asin": {
+            "title": "Asin",
+            "type": "string"
+          },
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/SearchHit"
+            },
+            "title": "Hits",
+            "type": "array"
+          },
+          "layer_perf": {
+            "$ref": "#/components/schemas/LayerPerf",
+            "nullable": true
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "next_cursor": {
+            "nullable": true,
+            "title": "Next Cursor",
+            "type": "string"
+          },
+          "stable_as_of": {
+            "nullable": true,
+            "title": "Stable As Of",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "asin",
+          "namespace",
+          "hits"
+        ],
+        "title": "RecommendResponse",
+        "type": "object"
+      },
+      "ReviewSample": {
+        "properties": {
+          "asin": {
+            "title": "Asin",
+            "type": "string"
+          },
+          "rating": {
+            "nullable": true,
+            "title": "Rating",
+            "type": "integer"
+          },
+          "review_id": {
+            "title": "Review Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "title": {
+            "nullable": true,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "review_id",
+          "asin",
+          "text"
+        ],
+        "title": "ReviewSample",
+        "type": "object"
+      },
+      "ReviewSamplesResponse": {
+        "properties": {
+          "asin": {
+            "title": "Asin",
+            "type": "string"
+          },
+          "samples": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewSample"
+            },
+            "title": "Samples",
+            "type": "array"
+          }
+        },
+        "required": [
+          "asin",
+          "samples"
+        ],
+        "title": "ReviewSamplesResponse",
+        "type": "object"
+      },
+      "ReviewSearchResponse": {
+        "properties": {
+          "asin": {
+            "title": "Asin",
+            "type": "string"
+          },
+          "category": {
+            "nullable": true,
+            "title": "Category",
+            "type": "string"
+          },
+          "count": {
+            "$ref": "#/components/schemas/CountInfo",
+            "description": "Set when the caller requested with_count.",
+            "nullable": true
+          },
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/SearchHit"
+            },
+            "title": "Hits",
+            "type": "array"
+          },
+          "layer_perf": {
+            "$ref": "#/components/schemas/LayerPerf",
+            "description": "Gateway round-trip timing for the query call.",
+            "nullable": true
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "next_cursor": {
+            "description": "Opaque cursor for the next page. Present iff the gateway returned a full top_k (i.e. there may be more results). Pass it back as `cursor` on the next /search call alongside the same filters.",
+            "nullable": true,
+            "title": "Next Cursor",
+            "type": "string"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "stable_as_of": {
+            "description": "Epoch-ms watermark \u2014 results reflect everything indexed at or before this timestamp. None until the gateway's consistency watcher has observed a clean snapshot for the namespace.",
+            "nullable": true,
+            "title": "Stable As Of",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "query",
+          "namespace",
+          "hits",
+          "asin"
+        ],
+        "title": "ReviewSearchResponse",
+        "type": "object"
+      },
+      "SearchHit": {
+        "properties": {
+          "attributes": {
+            "additionalProperties": true,
+            "title": "Attributes",
+            "type": "object"
+          },
+          "dist": {
+            "nullable": true,
+            "title": "Dist",
+            "type": "number"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "SearchHit",
+        "type": "object"
+      },
+      "SearchRequest": {
+        "properties": {
+          "category": {
+            "nullable": true,
+            "title": "Category",
+            "type": "string"
+          },
+          "cursor": {
+            "description": "Opaque pagination cursor from a prior /search response's next_cursor. Re-send the same query/filters/top_k to keep paging consistent; the gateway re-applies the consistency watermark.",
+            "nullable": true,
+            "title": "Cursor",
+            "type": "string"
+          },
+          "include_attributes": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "title": "Include Attributes",
+            "type": "array"
+          },
+          "max_distance": {
+            "default": 0.4,
+            "description": "Cosine-distance ceiling for with_count. 0.4 is tight (\"results worth showing\"); raise toward 1.0 for looser totals.",
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Max Distance",
+            "type": "number"
+          },
+          "namespace": {
+            "nullable": true,
+            "title": "Namespace",
+            "type": "string"
+          },
+          "query": {
+            "description": "Free-text search query",
+            "minLength": 1,
+            "title": "Query",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "title": "Tags",
+            "type": "array"
+          },
+          "top_k": {
+            "default": 10,
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Top K",
+            "type": "integer"
+          },
+          "with_count": {
+            "default": false,
+            "description": "If true, fan out an extra /v2/namespaces/{ns}/count call against the same query vector + filters to estimate how many docs sit within max_distance. Costs one extra round-trip.",
+            "title": "With Count",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "SearchRequest",
+        "type": "object"
+      },
+      "SearchResponse": {
+        "properties": {
+          "count": {
+            "$ref": "#/components/schemas/CountInfo",
+            "description": "Set when the caller requested with_count.",
+            "nullable": true
+          },
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/SearchHit"
+            },
+            "title": "Hits",
+            "type": "array"
+          },
+          "layer_perf": {
+            "$ref": "#/components/schemas/LayerPerf",
+            "description": "Gateway round-trip timing for the query call.",
+            "nullable": true
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "next_cursor": {
+            "description": "Opaque cursor for the next page. Present iff the gateway returned a full top_k (i.e. there may be more results). Pass it back as `cursor` on the next /search call alongside the same filters.",
+            "nullable": true,
+            "title": "Next Cursor",
+            "type": "string"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "stable_as_of": {
+            "description": "Epoch-ms watermark \u2014 results reflect everything indexed at or before this timestamp. None until the gateway's consistency watcher has observed a clean snapshot for the namespace.",
+            "nullable": true,
+            "title": "Stable As Of",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "query",
+          "namespace",
+          "hits"
+        ],
+        "title": "SearchResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "hev-shop search",
+    "version": "0.1.0"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "healthz_healthz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Healthz Healthz Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Healthz"
+      }
+    },
+    "/meta": {
+      "get": {
+        "description": "Fan out to layer-gateway for namespace shape:\n- /v2/namespaces/{ns}/metadata \u2192 row count + freshness watermark\n- field_values scan on `category` \u2192 filterable category list",
+        "operationId": "meta_meta_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "nullable": true,
+              "title": "Namespace",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetaResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Meta"
+      }
+    },
+    "/product/{asin}": {
+      "get": {
+        "operationId": "product_product__asin__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asin",
+            "required": true,
+            "schema": {
+              "title": "Asin",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Product"
+      }
+    },
+    "/recommend": {
+      "post": {
+        "description": "Visual-similarity recommendations seeded by an existing product ASIN.\n\nUses Layer's `nearest_to_id` query mode: the gateway looks up the seed\ndocument's stored vector and runs the nearest-neighbor query in one call.\nThe seed ASIN itself is filtered out so callers don't get the seed back\nas its own first hit.",
+        "operationId": "recommend_recommend_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecommendRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecommendResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Recommend"
+      }
+    },
+    "/reviews/samples": {
+      "get": {
+        "operationId": "review_samples_reviews_samples_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "asin",
+            "required": true,
+            "schema": {
+              "title": "Asin",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ids",
+            "required": true,
+            "schema": {
+              "title": "Ids",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewSamplesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Samples"
+      }
+    },
+    "/search": {
+      "post": {
+        "operationId": "search_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search"
+      }
+    },
+    "/search/reviews": {
+      "get": {
+        "operationId": "search_reviews_search_reviews_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "asin",
+            "required": true,
+            "schema": {
+              "title": "Asin",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "top_k",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "title": "Top K",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "nullable": true,
+              "title": "Category",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "nullable": true,
+              "title": "Cursor",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "with_count",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "With Count",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_distance",
+            "required": false,
+            "schema": {
+              "default": 0.4,
+              "title": "Max Distance",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewSearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Reviews"
+      }
+    }
+  }
+}

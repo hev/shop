@@ -103,13 +103,46 @@ kubectl logs     -n hev-shop deploy/hev-shop-web          --tail=200
 kubectl exec -it -n hev-shop deploy/hev-shop-search -- sh
 ```
 
-The Go CLI takes two URL flags: `--gateway-url` points at layer-gateway,
-`--indexer-url` points at the indexer control plane.
+## `shop` CLI
+
+Every hev-shop endpoint has a matching subcommand. The binary is `shop`
+(installable with `go install github.com/hev/shop@latest`).
+
+| Command | Endpoint |
+|---|---|
+| `shop search "wireless headphones" --top-k 3` | `POST /search` |
+| `shop recommend B00FI7TCGI --top-k 3` | `POST /recommend` |
+| `shop product B00FI7TCGI` | `GET /product/{asin}` |
+| `shop meta` | `GET /meta` |
+| `shop search-reviews --asin B00FI7TCGI --query battery` | `GET /search/reviews` |
+| `shop review-samples --asin B00FI7TCGI --ids r1,r2` | `GET /reviews/samples` |
+| `shop index --category Electronics --count 1000` | `POST /index` |
+| `shop backfill --category Electronics --asins B0001,B0002` | `POST /backfill` |
+| `shop status --pipeline-id hev-shop-product-images` | `GET /status` |
+| `shop health` | search `/healthz` + indexer `/status` |
+
+The CLI talks to one host by default: `--api-base` (env `SHOP_API_BASE`,
+default `https://api.hev-shop.com`). For port-forward dev, override
+either service with `--search-url` / `--indexer-url`:
 
 ```sh
-go run . status --indexer-url https://api.hev-shop.com --pipeline-id hev-shop-product-images
-go run . health --gateway-url https://aws-us-east-1.hevlayer.com
+shop --search-url http://127.0.0.1:18080 meta
+shop --indexer-url http://127.0.0.1:18081 status
 ```
+
+## OpenAPI Specs
+
+The committed specs at `search/openapi.json` and `indexer/openapi.json`
+are the source of truth for the Go client. Regenerate after touching a
+route or Pydantic model:
+
+```sh
+make openapi    # dumps both specs deterministically
+make codegen    # regenerates client/searchapi + client/indexerapi
+```
+
+`tests/test_openapi_spec.py` in each service fails CI-like checks if the
+committed spec drifts from the FastAPI app.
 
 ## Search Service Layout
 

@@ -237,17 +237,33 @@ The API returns `{detail: ...}` for 422, plain `Internal Server Error`
 for 500 today. Worth handling both as "search unavailable" on the UI
 side rather than surfacing the raw status.
 
-## Similarity search (`/api/similar`)
+## Visual recommendations (`/recommend`)
 
-Not yet implemented on the backend. Two options when you need it:
+Returns the nearest CLIP-image neighbors for a seed product. The search
+service uses Layer's `nearest_to_id` query mode, so the seed's stored
+vector never leaves the gateway — one round-trip, no fetch-then-query
+dance. The seed ASIN is filtered out of the response so callers don't
+get the seed back as its own first hit.
 
-1. **Fetch-by-id then query**: add a "get vector by id" endpoint to the
-   indexer that pulls the vector from turbopuffer and re-queries with it.
-2. **Re-embed by title**: as a stopgap, look up the seed product's title
-   and POST it as a `/search` query. Cheap and good enough for a demo.
+```bash
+curl -sS -X POST http://127.0.0.1:8090/recommend \
+  -H 'content-type: application/json' \
+  -d '{"asin":"B00FI7TCGI","top_k":5}' | jq .
+```
 
-Flag this to the backend team (Adam) when you start on similar — option 1
-is the right long-term shape.
+Request fields (see `search/openapi.json` for the canonical schema):
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `asin` | string | required | Seed ASIN — must exist in the product namespace. |
+| `top_k` | int | 10 | 1–200. |
+| `category` | string | — | Optional category filter on neighbors. |
+| `namespace` | string | settings.namespace | Override the product namespace. |
+| `include_attributes` | list[str] \| true | true | Attributes returned per hit. |
+
+Response shape matches `SearchResponse` minus the `query` field: `hits`
+(with `id`, `dist`, `attributes`), `stable_as_of`, `layer_perf`, and a
+`next_cursor` for pagination.
 
 ## Sanity check
 

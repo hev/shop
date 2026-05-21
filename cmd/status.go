@@ -1,14 +1,10 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
-	"strings"
-	"time"
 
+	"github.com/hev/shop/client/indexerapi"
 	"github.com/spf13/cobra"
 )
 
@@ -16,34 +12,24 @@ var statusPipelineID string
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show hev-shop indexing status",
+	Short: "Show hev-shop indexing status (GET /status)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client := &http.Client{Timeout: 30 * time.Second}
-		endpoint := strings.TrimRight(indexerURL, "/") + "/status"
-		if statusPipelineID != "" {
-			values := url.Values{}
-			values.Set("pipeline_id", statusPipelineID)
-			endpoint += "?" + values.Encode()
+		c, err := newIndexerClient()
+		if err != nil {
+			return err
 		}
-
-		resp, err := client.Get(endpoint)
+		params := &indexerapi.StatusStatusGetParams{}
+		if statusPipelineID != "" {
+			params.PipelineId = &statusPipelineID
+		}
+		resp, err := c.StatusStatusGetWithResponse(ctx(), params)
 		if err != nil {
 			return fmt.Errorf("status request failed: %w", err)
 		}
-		defer resp.Body.Close()
-
-		respBody, _ := io.ReadAll(resp.Body)
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return fmt.Errorf("indexer returned %d: %s", resp.StatusCode, string(respBody))
+		if resp.HTTPResponse.StatusCode != http.StatusOK {
+			return errorFromBody("indexer", resp.HTTPResponse.StatusCode, resp.Body)
 		}
-
-		var out any
-		if err := json.Unmarshal(respBody, &out); err != nil {
-			return fmt.Errorf("decode status response: %w", err)
-		}
-		pretty, _ := json.MarshalIndent(out, "", "  ")
-		fmt.Println(string(pretty))
-		return nil
+		return printJSON(resp.Body)
 	},
 }
 

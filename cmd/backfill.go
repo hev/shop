@@ -1,14 +1,10 @@
 package cmd
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"strings"
-	"time"
 
+	"github.com/hev/shop/client/indexerapi"
 	"github.com/spf13/cobra"
 )
 
@@ -20,72 +16,58 @@ var (
 	backfillMaxTotalReviews   int
 	backfillStages            []string
 	backfillPipelineID        string
+	backfillNamespace         string
 )
-
-type backfillRequest struct {
-	Category          string   `json:"category"`
-	Asins             []string `json:"asins,omitempty"`
-	ProductLimit      int      `json:"product_limit"`
-	ReviewsPerProduct *int     `json:"reviews_per_product,omitempty"`
-	MaxTotalReviews   *int     `json:"max_total_reviews,omitempty"`
-	Stages            []string `json:"stages,omitempty"`
-	PipelineID        string   `json:"pipeline_id,omitempty"`
-	Namespace         string   `json:"namespace,omitempty"`
-}
 
 var backfillCmd = &cobra.Command{
 	Use:   "backfill",
-	Short: "Backfill reviews and classification for existing products",
+	Short: "Backfill reviews and classification for existing products (POST /backfill)",
 	Long: `Enqueue a backfill job that re-stages reviews (and optionally re-runs
 aggregation) for products already in the namespace. The extraction worker picks
 the job up and feeds the review-embed / review-classify / review-aggregate
 pipelines that the existing workers consume.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		asins := normalizeCategories(backfillAsins)
-		stages := normalizeCategories(backfillStages)
-
-		req := backfillRequest{
+		body := indexerapi.BackfillRequest{
 			Category:     backfillCategory,
-			Asins:        asins,
-			ProductLimit: backfillProductLimit,
-			Stages:       stages,
-			PipelineID:   backfillPipelineID,
-			Namespace:    namespace,
+			ProductLimit: &backfillProductLimit,
+		}
+		asins := normalizeCategories(backfillAsins)
+		if len(asins) > 0 {
+			body.Asins = &asins
+		}
+		stages := normalizeCategories(backfillStages)
+		if len(stages) > 0 {
+			body.Stages = &stages
 		}
 		if cmd.Flags().Changed("reviews-per-product") {
 			v := backfillReviewsPerProduct
-			req.ReviewsPerProduct = &v
+			body.ReviewsPerProduct = &v
 		}
 		if cmd.Flags().Changed("max-total-reviews") {
 			v := backfillMaxTotalReviews
-			req.MaxTotalReviews = &v
+			body.MaxTotalReviews = &v
+		}
+		if backfillPipelineID != "" {
+			pid := backfillPipelineID
+			body.PipelineId = &pid
+		}
+		if backfillNamespace != "" {
+			ns := backfillNamespace
+			body.Namespace = &ns
 		}
 
-		body, err := json.Marshal(req)
+		c, err := newIndexerClient()
 		if err != nil {
-			return fmt.Errorf("marshal backfill request: %w", err)
+			return err
 		}
-
-		client := &http.Client{Timeout: 30 * time.Second}
-		url := strings.TrimRight(indexerURL, "/") + "/backfill"
-		resp, err := client.Post(url, "application/json", bytes.NewReader(body))
+		resp, err := c.BackfillBackfillPostWithResponse(ctx(), body)
 		if err != nil {
 			return fmt.Errorf("indexer request failed: %w", err)
 		}
-		defer resp.Body.Close()
-
-		respBody, _ := io.ReadAll(resp.Body)
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return fmt.Errorf("indexer returned %d: %s", resp.StatusCode, string(respBody))
+		if resp.HTTPResponse.StatusCode != http.StatusOK {
+			return errorFromBody("indexer", resp.HTTPResponse.StatusCode, resp.Body)
 		}
-
-		var out any
-		if err := json.Unmarshal(respBody, &out); err != nil {
-			return fmt.Errorf("decode indexer response: %w", err)
-		}
-		pretty, _ := json.MarshalIndent(out, "", "  ")
-		fmt.Println(string(pretty))
-		return nil
+		return printJSON(resp.Body)
 	},
 }
 
@@ -97,5 +79,6 @@ func init() {
 	backfillCmd.Flags().IntVar(&backfillMaxTotalReviews, "max-total-reviews", 0, "Global cap on reviews staged across the job (omit for unlimited)")
 	backfillCmd.Flags().StringSliceVar(&backfillStages, "stages", nil, "Subset of embed,classify,aggregate (default: all three)")
 	backfillCmd.Flags().StringVar(&backfillPipelineID, "pipeline-id", "", "Product pipeline id (defaults to indexer PIPELINE_ID)")
+	backfillCmd.Flags().StringVar(&backfillNamespace, "namespace", "", "target namespace (defaults to indexer NAMESPACE)")
 	rootCmd.AddCommand(backfillCmd)
 }

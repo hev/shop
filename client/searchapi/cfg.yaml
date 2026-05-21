@@ -1,0 +1,7 @@
+package: searchapi
+output: oapi.gen.go
+generate:
+  models: true
+  client: true
+output-options:
+  skip-prune: true

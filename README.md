@@ -103,8 +103,9 @@ For the "what does Layer add over turbopuffer" framing, see
 ## Repo Layout
 
 ```
-cmd/                  Go CLI for health, indexing, status, scans, and direct gateway calls
-client/               Small Go client for the Layer namespace API
+cmd/                  Cobra subcommands for the `shop` CLI (one per hev-shop endpoint)
+client/searchapi/     oapi-codegen-generated Go client for search/openapi.json
+client/indexerapi/    oapi-codegen-generated Go client for indexer/openapi.json
 indexer/              FastAPI service plus CPU/GPU/review worker code
 kubernetes/           Raw Kubernetes manifests kept for low-level inspection
 helm/hev-shop/        Standalone Helm chart for deploys
@@ -118,12 +119,23 @@ SCALING.md            Scale-test notes
 
 ## Local Development
 
-Run the CLI:
+Install the CLI:
+
+```sh
+go install github.com/hev/shop@latest
+shop --help
+```
+
+Or run from a checkout:
 
 ```sh
 go run . --help
 go test ./...
 ```
+
+By default the CLI talks to `https://api.hev-shop.com`. Override with
+`--api-base` (or env `SHOP_API_BASE`), or point at individual services
+with `--search-url` / `--indexer-url` for port-forward dev.
 
 Run the indexer API:
 
@@ -150,11 +162,28 @@ cd web
 HEV_SHOP_API_BASE=http://127.0.0.1:8090 npm run dev
 ```
 
+Try the CLI against the deployed API:
+
+```sh
+shop meta
+shop search "wireless headphones" --top-k 3
+shop recommend B00FI7TCGI --top-k 3
+shop product B00FI7TCGI
+```
+
 Queue a small indexing job:
 
 ```sh
-go run . index --count 1000 --category Electronics
-go run . status --pipeline-id hev-shop-product-images
+shop index --count 1000 --category Electronics
+shop status --pipeline-id hev-shop-product-images
+```
+
+OpenAPI specs are committed at `search/openapi.json` and
+`indexer/openapi.json`; regenerate after editing a route or model:
+
+```sh
+make openapi   # dump from the FastAPI apps
+make codegen   # regenerate the Go clients in client/*api/
 ```
 
 ## Helm Deploy

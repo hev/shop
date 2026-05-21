@@ -114,6 +114,23 @@ class ReviewSearchResponse(SearchResponse):
     category: str | None = None
 
 
+class RecommendRequest(BaseModel):
+    asin: str = Field(..., min_length=1, description="Seed product ASIN")
+    top_k: int = Field(default=10, ge=1, le=200)
+    namespace: str | None = None
+    include_attributes: list[str] | None = None
+    category: str | None = None
+
+
+class RecommendResponse(BaseModel):
+    asin: str
+    namespace: str
+    hits: list[SearchHit]
+    stable_as_of: int | None = None
+    layer_perf: LayerPerf | None = None
+    next_cursor: str | None = None
+
+
 class ProductResponse(BaseModel):
     asin: str
     namespace: str
