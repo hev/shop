@@ -76,11 +76,12 @@ product vectors as filterable tags.
 
 ## What To Inspect
 
-- `indexer/app/layer_client.py` — the single HTTP path to the Layer gateway.
-  Every Layer call in the app goes through this file, including the
-  turbopuffer-compatible namespace surface (query/upsert/patch/fetch), the
-  pipeline state machine (create/claim/heartbeat/stage), and the
-  Layer-specific scan and document-cache APIs.
+- `hevlayer` (Python SDK) — the indexer talks to layer-gateway through the
+  official `hevlayer.AsyncHevlayer` client (see `clients/python` in the
+  layer repo). The SDK covers the turbopuffer-compatible namespace surface
+  (query/upsert/patch/fetch), the pipeline state machine
+  (create/claim/heartbeat/stage), and the Layer-specific scan and
+  document-cache APIs.
 - `indexer/app/pipeline.py` — the N-stage pipeline. One `STAGES` manifest plus
   a `run_stage` driver that owns the claim/heartbeat/release lifecycle, so
   each stage's `process_*` is just the work that's unique to that stage.

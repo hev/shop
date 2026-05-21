@@ -3,9 +3,10 @@
 > **Status: implemented.** This is the original design doc, kept for the
 > rationale, data model, and infra framing. Tasks L1–L12 and S1–S9 in the
 > work breakdown are all shipped. The current code lives in
-> `indexer/app/pipeline.py` (stages + driver), `indexer/app/extraction.py`
-> (raw ingest), and `indexer/app/layer_client.py` (Layer HTTP client). See
-> `CLAUDE.md` for the up-to-date module map.
+> `indexer/app/pipeline.py` (stages + driver) and `indexer/app/extraction.py`
+> (raw ingest); the Layer client is now the official `hevlayer` Python SDK
+> (`clients/python` in the layer repo). See `AGENTS.md` for the up-to-date
+> module map.
 
 ## Overview
 
@@ -215,7 +216,7 @@ heartbeat.
 | S4 | CPU extraction worker — parse metadata, download images, stage to layer | `indexer/app/extraction.py` |
 | S5 | GPU embedding worker — claim docs through layer, load images, CLIP encode, write vectors | `indexer/app/embedding.py` |
 | S6 | `GET /status` endpoint — proxy pipeline status from layer | `indexer/app/main.py` |
-| S7 | Layer pipeline client (Python) | `indexer/app/layer_client.py` |
+| S7 | Layer pipeline client (Python) | `hevlayer` SDK (`hev/layer/clients/python`) |
 | S8 | Kubernetes manifests for API, CPU workers, GPU workers, PVC | `kubernetes/` |
 | S9 | KEDA ScaledObjects for CPU and GPU workers | `kubernetes/` |
 

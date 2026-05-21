@@ -11,16 +11,16 @@ Layer's HTTP surface is wire-compatible with turbopuffer for the namespace
 APIs hev-shop uses for search and writes — same paths, same request and
 response shapes for `query`, `upserts`, `patch`, `fetch_document`, and the
 schema operations. Code that points at Layer instead of turbopuffer keeps
-working; nothing in this repo imports a turbopuffer SDK directly. The single
-HTTP entrypoint lives in
-[`indexer/app/layer_client.py`](../indexer/app/layer_client.py).
+working; nothing in this repo imports a turbopuffer SDK directly. Every
+Layer call goes through `hevlayer.AsyncHevlayer`, the official Python SDK
+that ships from `hev/layer/clients/python`.
 
 Layer adds four capabilities on top of that compatible surface, and hev-shop
 is structured to make each one visible:
 
 | Capability | Where in hev-shop |
 | ---------- | ----------------- |
-| **Document cache** — Aerospike pull-through on `fetch_document` / `fetch_many_documents`, populated by warm scans and read-through. Cache hits show `x-layer-cache: hit`. | Product detail pages call `LayerClient.fetch_document`; the storefront's `/product/[asin]` route reads from the cache without touching turbopuffer for the second hit. |
+| **Document cache** — Aerospike pull-through on `fetch_document` / `fetch_many_documents`, populated by warm scans and read-through. Cache hits show `x-layer-cache: hit`. | Product detail pages call `AsyncHevlayer.fetch_document`; the storefront's `/product/[asin]` route reads from the cache without touching turbopuffer for the second hit. |
 | **Scans** — `field_values`, full-document, auto-mode source selection (cache vs origin) gated on a freshness watermark, plus a `warm` operation that primes the cache. | `/meta` issues a `field_values` scan on `category` to drive the landing-page facets; the gateway picks cache or origin based on `stable_as_of`. |
 | **Pipeline state machine** — `pending → embedding → indexed/failed` per document, exposed through Layer's pipeline API with atomic claim, leases, heartbeats, and stale-claim recovery. | `pipeline.py` is the entire app-side contract: claim, heartbeat, complete/fail/release. KEDA scales workers from `layer_pipeline_stage_count` metrics. |
 | **Freshness watermark** — every query response carries `stable_as_of` (epoch ms) and namespaces expose `is_stable`, derived from a consistency watcher that tracks when `unindexed_bytes` reaches 0. | `/search`, `/search/reviews`, and `/meta` pass the watermark through to the UI; the homepage renders "last indexed at …" against it. |
@@ -46,7 +46,9 @@ which consistent snapshot a result set reflects.
 
 Relevant code:
 
-- `indexer/app/layer_client.py`
+- `hevlayer` SDK (`hev/layer/clients/python`) — `AsyncHevlayer` is the
+  client; the indexer imports it directly in `main.py`, `pipeline.py`,
+  `extraction.py`, and `worker.py`.
 - `indexer/app/pipeline.py` (`process_embed_products`, `process_embed_reviews`,
   `process_aggregate_tags` — namespace upserts and PATCH attribute rollup)
 - `web/app/api/search/route.ts`

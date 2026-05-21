@@ -6,7 +6,7 @@
 > end reflects the shipped state. For the current code layout, read
 > `indexer/app/pipeline.py` (stages + driver) and `indexer/app/extraction.py`
 > (raw ingest). The file references in the per-PR notes below predate the
-> consolidation — see the module map in `CLAUDE.md` for the current files.
+> consolidation — see the module map in `AGENTS.md` for the current files.
 
 Plan for adding product reviews to hev-shop. Designed to showcase hev layer's parallel fan-out pipelines: one review ingest produces a searchable review index, a per-review LLM classifier, and a tag rollup written back to the product index — all coordinated through the same job-queue primitives as the existing product pipeline.
 

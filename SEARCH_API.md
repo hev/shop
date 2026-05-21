@@ -19,7 +19,7 @@ by the shared `hev-public` ALB. Three ways to reach it:
 | Inside the cluster (Next.js pod, other services) | `http://hev-shop-api.hev-shop.svc.cluster.local:8080` |
 | Local laptop bypassing the ALB | `kubectl port-forward -n hev-shop svc/hev-shop-api 8090:8080` → `http://127.0.0.1:8090` |
 
-The web pod uses the in-cluster URL via `HEV_SHOP_API_BASE`. See `CLAUDE.md`
+The web pod uses the in-cluster URL via `HEV_SHOP_API_BASE`. See `AGENTS.md`
 for the canonical list of live endpoints and curl examples.
 
 ## Request
