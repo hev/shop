@@ -11,10 +11,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Sibling-checkout editable installs need the common package on disk
-# before pip runs. Copy common/ first so its layer caches independently
-# of search/app changes.
-COPY common ./common
+# Pass the sibling SDK with BuildKit:
+#   --build-context layer_client=../layer/clients/python
+COPY --from=layer_client . /layer/clients/python
+COPY common /common
 COPY search/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 

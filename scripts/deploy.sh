@@ -16,6 +16,7 @@ OPENROUTER_OP_VAULT="${OPENROUTER_OP_VAULT:-mesh-staging}"
 OPENROUTER_OP_ITEM="${OPENROUTER_OP_ITEM:-layer-openrouter}"
 OPENROUTER_OP_FIELD="${OPENROUTER_OP_FIELD:-credential}"
 OP_ACCOUNT="${OP_ACCOUNT:-}"
+LAYER_CLIENT_CONTEXT="${LAYER_CLIENT_CONTEXT:-../layer/clients/python}"
 
 log() { echo "==> $*"; }
 err() { echo "ERROR: $*" >&2; exit 1; }
@@ -91,11 +92,13 @@ if [[ "$BUILD_IMAGE" == "1" ]]; then
     depot)
       require_tool depot
       DEPOT_DISABLE_OTEL=1 depot build --platform linux/amd64 \
+        --build-context "layer_client=${LAYER_CLIENT_CONTEXT}" \
         -f indexer/Dockerfile -t "$IMAGE" --push .
       ;;
     docker)
       require_tool docker
       docker buildx build --platform linux/amd64 \
+        --build-context "layer_client=${LAYER_CLIENT_CONTEXT}" \
         -f indexer/Dockerfile -t "$IMAGE" --push .
       ;;
     *)
