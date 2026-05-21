@@ -24,12 +24,31 @@ export type LayerPerf = {
   cache_status: string | null;
 };
 
+type BackendCountInfo = {
+  count: number;
+  bounded: boolean;
+  timed_out?: boolean;
+  shards_saturated?: number;
+  shards_total?: number;
+  max_distance: number;
+  layer_perf?: LayerPerf | null;
+};
+
 type BackendSearchResponse = {
   query: string;
   namespace: string;
   hits: BackendHit[];
   stable_as_of?: number | null;
   layer_perf?: LayerPerf | null;
+  next_cursor?: string | null;
+  count?: BackendCountInfo | null;
+};
+
+export type CountInfo = {
+  count: number;
+  bounded: boolean;
+  max_distance: number;
+  layer_perf: LayerPerf | null;
 };
 
 type BackendProductResponse = {
@@ -48,12 +67,16 @@ export type SearchResult = {
   products: Product[];
   layer_perf: LayerPerf | null;
   stable_as_of: number | null;
+  next_cursor: string | null;
+  count: CountInfo | null;
 };
 
 export type ReviewSearchResult = {
   reviews: ReviewHit[];
   layer_perf: LayerPerf | null;
   stable_as_of: number | null;
+  next_cursor: string | null;
+  count: CountInfo | null;
 };
 
 function parsePerf(p: unknown): LayerPerf | null {
@@ -64,6 +87,18 @@ function parsePerf(p: unknown): LayerPerf | null {
   return {
     latency_ms: Math.round(obj.latency_ms),
     cache_status: typeof cache === "string" ? cache : null,
+  };
+}
+
+function parseCount(c: unknown): CountInfo | null {
+  if (!c || typeof c !== "object") return null;
+  const obj = c as Record<string, unknown>;
+  if (typeof obj.count !== "number") return null;
+  return {
+    count: obj.count,
+    bounded: Boolean(obj.bounded),
+    max_distance: typeof obj.max_distance === "number" ? obj.max_distance : 0,
+    layer_perf: parsePerf(obj.layer_perf),
   };
 }
 
@@ -175,28 +210,46 @@ export function attributesToProduct(asin: string, a: Record<string, unknown>): P
   };
 }
 
+export type SearchOptions = {
+  topK?: number;
+  tags?: string[];
+  cursor?: string | null;
+  withCount?: boolean;
+  maxDistance?: number;
+};
+
 export async function backendSearch(
   query: string,
-  topK = 24,
-  tags: string[] = [],
+  options: SearchOptions = {},
 ): Promise<SearchResult> {
   if (!API_BASE) throw new Error("HEV_SHOP_API_BASE not set");
   const trimmed = query.trim();
-  if (!trimmed) return { products: [], layer_perf: null, stable_as_of: null };
+  if (!trimmed) {
+    return {
+      products: [],
+      layer_perf: null,
+      stable_as_of: null,
+      next_cursor: null,
+      count: null,
+    };
+  }
+  const { topK = 24, tags = [], cursor, withCount, maxDistance } = options;
 
-  const res = await fetchWithTimeout(
-    `${API_BASE}/search`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        query: trimmed,
-        top_k: Math.min(topK, 200),
-        tags,
-      }),
-      cache: "no-store",
-    },
-  );
+  const payload: Record<string, unknown> = {
+    query: trimmed,
+    top_k: Math.min(topK, 200),
+    tags,
+  };
+  if (cursor) payload.cursor = cursor;
+  if (withCount) payload.with_count = true;
+  if (typeof maxDistance === "number") payload.max_distance = maxDistance;
+
+  const res = await fetchWithTimeout(`${API_BASE}/search`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+    cache: "no-store",
+  });
   if (!res.ok) {
     await logUpstreamFailure("search", res);
     throw new Error(`search upstream ${res.status}`);
@@ -208,6 +261,8 @@ export async function backendSearch(
     products,
     layer_perf: parsePerf(json.layer_perf),
     stable_as_of: json.stable_as_of ?? null,
+    next_cursor: json.next_cursor ?? null,
+    count: parseCount(json.count),
   };
 }
 
@@ -272,29 +327,44 @@ export async function backendSimilar(
 ): Promise<SearchResult> {
   const seed = getCachedProduct(asin);
   if (!seed || !seed.title) {
-    return { products: [], layer_perf: null, stable_as_of: null };
+    return {
+      products: [],
+      layer_perf: null,
+      stable_as_of: null,
+      next_cursor: null,
+      count: null,
+    };
   }
-  const { products, layer_perf, stable_as_of } = await backendSearch(
-    seed.title,
-    topK + 1,
-  );
+  const result = await backendSearch(seed.title, { topK: topK + 1 });
   return {
-    products: products.filter((p) => p.asin !== asin).slice(0, topK),
-    layer_perf,
-    stable_as_of,
+    ...result,
+    products: result.products.filter((p) => p.asin !== asin).slice(0, topK),
   };
 }
+
+export type ReviewSearchOptions = {
+  topK?: number;
+  cursor?: string | null;
+  withCount?: boolean;
+  maxDistance?: number;
+};
 
 export async function backendReviewSearch(
   asin: string,
   query: string,
-  topK = 8,
+  options: ReviewSearchOptions = {},
 ): Promise<ReviewSearchResult> {
   if (!API_BASE) throw new Error("HEV_SHOP_API_BASE not set");
+  const { topK = 8, cursor, withCount, maxDistance } = options;
   const url = new URL(`${API_BASE}/search/reviews`);
   url.searchParams.set("asin", asin);
   url.searchParams.set("q", query.trim() || "quality");
   url.searchParams.set("top_k", String(Math.min(topK, 200)));
+  if (cursor) url.searchParams.set("cursor", cursor);
+  if (withCount) url.searchParams.set("with_count", "true");
+  if (typeof maxDistance === "number") {
+    url.searchParams.set("max_distance", String(maxDistance));
+  }
   const res = await fetchWithTimeout(url, { cache: "no-store" });
   if (!res.ok) {
     await logUpstreamFailure("review search", res);
@@ -319,6 +389,8 @@ export async function backendReviewSearch(
     reviews,
     layer_perf: parsePerf(json.layer_perf),
     stable_as_of: json.stable_as_of ?? null,
+    next_cursor: json.next_cursor ?? null,
+    count: parseCount(json.count),
   };
 }
 

@@ -9,6 +9,7 @@ import {
   backendReviewSamples,
   backendReviewSearch,
   backendSimilar,
+  type CountInfo,
   type LayerPerf,
 } from "@/lib/backend";
 import { ProductGrid } from "@/components/ProductGrid";
@@ -32,6 +33,7 @@ type LoadedPage = {
     similarQuery: LayerPerf | null;      // /v2/namespaces/.../query (similar)
     reviewQuery: LayerPerf | null;       // /v2/namespaces/.../query (review)
     reviewStableAsOf: number | null;
+    reviewCount: CountInfo | null;       // /v2/namespaces/.../count fan-out
   };
 };
 
@@ -47,10 +49,15 @@ async function load(asin: string, reviewQuery: string): Promise<LoadedPage | nul
         layer_perf: null,
         stable_as_of: null,
       })),
-      backendReviewSearch(asin, reviewQuery || product.title, 8).catch(() => ({
+      backendReviewSearch(asin, reviewQuery || product.title, {
+        topK: 8,
+        withCount: true,
+      }).catch(() => ({
         reviews: [] as ReviewHit[],
         layer_perf: null,
         stable_as_of: null,
+        next_cursor: null,
+        count: null,
       })),
       backendReviewSamples(asin, sampleIds).catch(() => [] as ReviewSample[]),
     ]);
@@ -64,6 +71,7 @@ async function load(asin: string, reviewQuery: string): Promise<LoadedPage | nul
         similarQuery: similarRes.layer_perf,
         reviewQuery: reviewRes.layer_perf,
         reviewStableAsOf: reviewRes.stable_as_of,
+        reviewCount: reviewRes.count,
       },
     };
   }
@@ -100,6 +108,7 @@ async function load(asin: string, reviewQuery: string): Promise<LoadedPage | nul
       similarQuery: null,
       reviewQuery: null,
       reviewStableAsOf: null,
+      reviewCount: null,
     },
   };
 }
@@ -288,9 +297,26 @@ export default async function ProductPage({
             <h2 className="mt-1 font-display text-3xl tracking-tight">
               Search inside customer reviews
             </h2>
+            {perf.reviewCount ? (
+              <p className="mt-2 text-sm text-ink-500">
+                {perf.reviewCount.bounded ? "≥" : ""}
+                <span className="font-mono text-ink-900">
+                  {perf.reviewCount.count.toLocaleString()}
+                </span>{" "}
+                review chunks within cosine{" "}
+                <span className="font-mono">{perf.reviewCount.max_distance}</span>{" "}
+                of the query
+              </p>
+            ) : null}
             {(perf.reviewQuery || perf.reviewStableAsOf !== null) && (
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 <LayerPerfBadge perf={perf.reviewQuery} label="review query" />
+                {perf.reviewCount?.layer_perf ? (
+                  <LayerPerfBadge
+                    perf={perf.reviewCount.layer_perf}
+                    label="review count"
+                  />
+                ) : null}
                 <StableAsOfBadge stableAsOf={perf.reviewStableAsOf} />
               </div>
             )}

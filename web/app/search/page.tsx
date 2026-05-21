@@ -4,6 +4,7 @@ import { searchProducts } from "@/lib/search";
 import {
   backendEnabled,
   backendSearch,
+  type CountInfo,
   type LayerPerf,
 } from "@/lib/backend";
 import { LayerPerfBadge, StableAsOfBadge } from "@/components/LayerPerfBadge";
@@ -12,12 +13,18 @@ import { REVIEW_TAGS } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
+const PAGE_SIZE = 48;
+
 export default async function SearchPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; tag?: string | string[] }>;
+  searchParams: Promise<{
+    q?: string;
+    tag?: string | string[];
+    cursor?: string;
+  }>;
 }) {
-  const { q = "", tag } = await searchParams;
+  const { q = "", tag, cursor } = await searchParams;
   const selectedTags = (Array.isArray(tag) ? tag : tag ? [tag] : []).filter(
     (value): value is string => (REVIEW_TAGS as readonly string[]).includes(value),
   );
@@ -25,20 +32,41 @@ export default async function SearchPage({
   let results: Product[] = [];
   let layerPerf: LayerPerf | null = null;
   let stableAsOf: number | null = null;
+  let nextCursor: string | null = null;
+  let count: CountInfo | null = null;
   let error: string | null = null;
   if (backendEnabled() && q.trim()) {
     try {
-      const r = await backendSearch(q, 48, selectedTags);
+      // Only ask for a count on page 1 — the count is query-scoped, not
+      // page-scoped, so re-running it on every "load more" click is wasted
+      // gateway work.
+      const r = await backendSearch(q, {
+        topK: PAGE_SIZE,
+        tags: selectedTags,
+        cursor: cursor || null,
+        withCount: !cursor,
+      });
       results = r.products;
       layerPerf = r.layer_perf;
       stableAsOf = r.stable_as_of;
+      nextCursor = r.next_cursor;
+      count = r.count;
     } catch (e) {
       error = e instanceof Error ? e.message : "search failed";
     }
   } else {
-    results = searchProducts(q, 48, selectedTags);
+    results = searchProducts(q, PAGE_SIZE, selectedTags);
   }
   const took = Math.round(performance.now() - t0);
+
+  const loadMoreHref = (() => {
+    if (!nextCursor) return null;
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    for (const value of selectedTags) params.append("tag", value);
+    params.set("cursor", nextCursor);
+    return `/search?${params.toString()}`;
+  })();
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
@@ -62,8 +90,21 @@ export default async function SearchPage({
             {results.length} {results.length === 1 ? "match" : "matches"} · {took}ms
             <span className="ml-1 text-ink-400">page</span>
           </div>
+          {count ? (
+            <div className="text-xs text-ink-500">
+              {count.bounded ? "≥" : ""}
+              <span className="font-mono text-ink-900">
+                {count.count.toLocaleString()}
+              </span>{" "}
+              within cosine{" "}
+              <span className="font-mono">{count.max_distance}</span>
+            </div>
+          ) : null}
           <div className="flex flex-wrap items-center justify-end gap-1.5">
             <LayerPerfBadge perf={layerPerf} label="query" />
+            {count?.layer_perf ? (
+              <LayerPerfBadge perf={count.layer_perf} label="count" />
+            ) : null}
             <StableAsOfBadge stableAsOf={stableAsOf} />
           </div>
         </div>
@@ -111,7 +152,23 @@ export default async function SearchPage({
           </p>
         </div>
       ) : (
-        <ProductGrid products={results} priorityCount={4} />
+        <>
+          <ProductGrid products={results} priorityCount={4} />
+          {loadMoreHref ? (
+            <div className="mt-10 flex justify-center">
+              <Link
+                href={loadMoreHref}
+                className="rounded-full border border-ink-300 bg-white px-6 py-3 text-sm font-medium text-ink-900 transition hover:border-ink-900"
+              >
+                Load more — paginate via gateway cursor
+              </Link>
+            </div>
+          ) : cursor ? (
+            <p className="mt-10 text-center text-xs text-ink-500">
+              End of results.
+            </p>
+          ) : null}
+        </>
       )}
     </div>
   );

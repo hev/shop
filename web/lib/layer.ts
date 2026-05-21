@@ -1,5 +1,5 @@
 const GATEWAY_URL = process.env.LAYER_GATEWAY_URL ?? "";
-const GATEWAY_API_KEY = process.env.LAYER_GATEWAY_API_KEY ?? "";
+const GATEWAY_API_KEY = (process.env.LAYER_GATEWAY_API_KEY ?? "").trim();
 const PRODUCT_NAMESPACE = process.env.LAYER_PRODUCT_NAMESPACE ?? "amazon-products";
 const REVIEW_NAMESPACE_BASE = process.env.LAYER_REVIEW_NAMESPACE_BASE ?? "v2-amazon-reviews";
 // Read-side override — mirrors REVIEWS_QUERY_NAMESPACE_BASE on the indexer

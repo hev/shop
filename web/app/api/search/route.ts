@@ -14,13 +14,17 @@ export async function GET(req: Request) {
     .filter((tag) => (REVIEW_TAGS as readonly string[]).includes(tag));
   const t0 = performance.now();
 
+  const cursor = url.searchParams.get("cursor") || undefined;
+  const withCount = url.searchParams.get("with_count") === "true";
   if (backendEnabled() && q.trim()) {
     try {
-      const { products, layer_perf, stable_as_of } = await backendSearch(
-        q,
-        limit,
-        tags,
-      );
+      const {
+        products,
+        layer_perf,
+        stable_as_of,
+        next_cursor,
+        count,
+      } = await backendSearch(q, { topK: limit, tags, cursor, withCount });
       return NextResponse.json({
         query: q,
         results: products,
@@ -28,6 +32,8 @@ export async function GET(req: Request) {
         source: "backend",
         layer_perf,
         stable_as_of,
+        next_cursor,
+        count,
       });
     } catch (err) {
       return NextResponse.json(

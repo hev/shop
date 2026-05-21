@@ -37,7 +37,7 @@ async function getFeatured(): Promise<Product[]> {
     return fallbackFeatured();
   }
   const batches = await Promise.allSettled(
-    FEATURED_QUERIES.map((q) => backendSearch(q, 6)),
+    FEATURED_QUERIES.map((q) => backendSearch(q, { topK: 6 })),
   );
   const seen = new Set<string>();
   const out: Product[] = [];
