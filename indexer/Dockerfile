@@ -11,6 +11,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates libjpeg62-turbo \
     && rm -rf /var/lib/apt/lists/*
 
+# Sibling-checkout editable installs need the common package on disk
+# before pip runs. Copy common/ first so its layer caches independently
+# of indexer/app changes.
+COPY common ./common
 COPY indexer/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir --no-deps "accelerate>=1.0"

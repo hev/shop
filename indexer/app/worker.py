@@ -4,10 +4,12 @@ import asyncio
 import logging
 import signal
 
-from .config import get_settings
+from hevlayer import AsyncHevlayer, CreatePipelineRequest
+
+from hev_shop_common.config import get_settings
+
 from .dataset import AmazonProductDataset
 from .extraction import ExtractionWorker
-from .layer_client import LayerClient
 from .pipeline import STAGES, StageContext, run_stage
 
 
@@ -35,18 +37,20 @@ async def amain() -> None:
     settings = get_settings()
     stop_event = asyncio.Event()
     install_signal_handlers(stop_event)
-    layer = LayerClient(
-        settings.layer_gateway_url,
-        settings.http_timeout_seconds,
+    layer = AsyncHevlayer(
         api_key=settings.layer_api_key,
+        base_url=settings.layer_gateway_url,
+        timeout=settings.http_timeout_seconds,
     )
 
     try:
         if settings.worker_type == "cpu":
-            await layer.create_pipeline(
-                settings.extraction_pipeline_id,
-                settings.namespace,
-                settings.distance_metric,
+            await layer.ensure_pipeline(
+                CreatePipelineRequest(
+                    id=settings.extraction_pipeline_id,
+                    target_namespace=settings.namespace,
+                    distance_metric=settings.distance_metric,
+                )
             )
             worker = ExtractionWorker(
                 settings=settings,
@@ -74,7 +78,7 @@ async def amain() -> None:
                 + ", ".join(repr(name) for name in STAGE_FOR_WORKER_TYPE)
             )
     finally:
-        await layer.close()
+        await layer.aclose()
 
 
 def main() -> None:

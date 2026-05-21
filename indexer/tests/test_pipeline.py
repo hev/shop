@@ -210,7 +210,7 @@ class EmbedProductsStageTests(unittest.IsolatedAsyncioTestCase):
         layer = FakeLayerClient()
         ctx = make_ctx(layer=layer)
 
-        with patch("app.embedders.CLIPImageEmbedder", return_value=self.embedder) as ctor:
+        with patch("hev_shop_common.embedders.CLIPImageEmbedder", return_value=self.embedder) as ctor:
             await self.stage.setup(ctx)
 
         self.assertEqual(
@@ -318,7 +318,7 @@ class EmbedReviewsStageTests(unittest.IsolatedAsyncioTestCase):
         layer = FakeLayerClient()
         ctx = make_ctx(layer=layer)
 
-        with patch("app.embedders.QwenTextEmbedder", return_value=self.embedder) as ctor:
+        with patch("hev_shop_common.embedders.QwenTextEmbedder", return_value=self.embedder) as ctor:
             await self.stage.setup(ctx)
 
         self.assertEqual(
@@ -330,7 +330,7 @@ class EmbedReviewsStageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(layer.claim_calls, [])
 
     async def test_happy_path_upserts_to_sharded_namespace(self) -> None:
-        from app.records import REVIEW_EMBED_PREFIX, review_namespace_for
+        from hev_shop_common.records import REVIEW_EMBED_PREFIX, review_namespace_for
 
         doc_id = f"{REVIEW_EMBED_PREFIX}r-1"
         self.layer.next_claim = [doc_id]
@@ -452,7 +452,7 @@ class ClassifyReviewsStageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.layer.set_stage_calls, [])
 
     async def test_happy_path_patches_review_vector_and_hands_off_to_aggregate(self) -> None:
-        from app.records import review_namespace_for
+        from hev_shop_common.records import review_namespace_for
 
         doc_id = "review-classify:r-1"
         self.layer.next_claim = [doc_id]
@@ -523,7 +523,7 @@ class ClassifyReviewsStageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.layer.set_stage_calls, [])
 
     async def test_classifier_raises_releases_all_docs(self) -> None:
-        from app.records import review_namespace_for
+        from hev_shop_common.records import review_namespace_for
 
         self.classifier.raise_on_call = True
         doc_id = "review-classify:r-1"
@@ -554,7 +554,7 @@ class ClassifyReviewsStageTests(unittest.IsolatedAsyncioTestCase):
 
 class AggregateTagsStageTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
-        from app.records import review_namespace_for
+        from hev_shop_common.records import review_namespace_for
 
         self.layer = FakeLayerClient()
         ns_a1 = review_namespace_for(
@@ -614,10 +614,10 @@ class AggregateTagsStageTests(unittest.IsolatedAsyncioTestCase):
     async def test_patch_attributes_raises_releases_batch(self) -> None:
         self.layer.next_claim = ["A1"]
 
-        async def boom(_namespace, _patches):
+        async def boom(_namespace, _patches, *, with_perf=False):
             raise RuntimeError("turbopuffer down")
 
-        self.layer.patch_attributes = boom  # type: ignore[assignment]
+        self.layer.patch_documents = boom  # type: ignore[assignment]
 
         result = await _run_once(self.stage, self.ctx)
 

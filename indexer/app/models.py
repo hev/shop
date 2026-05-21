@@ -11,7 +11,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .records import dedupe_categories
+from hev_shop_common.records import dedupe_categories
 
 
 class IndexRequest(BaseModel):
@@ -123,6 +123,31 @@ class SearchRequest(BaseModel):
     include_attributes: list[str] | None = None
     category: str | None = None
     tags: list[str] | None = None
+    cursor: str | None = Field(
+        default=None,
+        description=(
+            "Opaque pagination cursor from a prior /search response's "
+            "next_cursor. Re-send the same query/filters/top_k to keep paging "
+            "consistent; the gateway re-applies the consistency watermark."
+        ),
+    )
+    with_count: bool = Field(
+        default=False,
+        description=(
+            "If true, fan out an extra /v2/namespaces/{ns}/count call against "
+            "the same query vector + filters to estimate how many docs sit "
+            "within max_distance. Costs one extra round-trip."
+        ),
+    )
+    max_distance: float = Field(
+        default=0.4,
+        ge=0.0,
+        le=2.0,
+        description=(
+            "Cosine-distance ceiling for with_count. 0.4 is tight (\"results "
+            "worth showing\"); raise toward 1.0 for looser totals."
+        ),
+    )
 
 
 class LayerPerf(BaseModel):
@@ -143,6 +168,20 @@ class SearchHit(BaseModel):
     attributes: dict[str, Any] = Field(default_factory=dict)
 
 
+class CountInfo(BaseModel):
+    """Result of a /v2/namespaces/{ns}/count fan-out. `bounded=True` means
+    one or more shards saturated their top_k cap on this round, so `count`
+    is a lower bound — render it as "≥N" rather than "=N"."""
+
+    count: int
+    bounded: bool
+    timed_out: bool = False
+    shards_saturated: int = 0
+    shards_total: int = 0
+    max_distance: float
+    layer_perf: LayerPerf | None = None
+
+
 class SearchResponse(BaseModel):
     query: str
     namespace: str
@@ -158,6 +197,18 @@ class SearchResponse(BaseModel):
     layer_perf: LayerPerf | None = Field(
         default=None,
         description="Gateway round-trip timing for the query call.",
+    )
+    next_cursor: str | None = Field(
+        default=None,
+        description=(
+            "Opaque cursor for the next page. Present iff the gateway returned "
+            "a full top_k (i.e. there may be more results). Pass it back as "
+            "`cursor` on the next /search call alongside the same filters."
+        ),
+    )
+    count: CountInfo | None = Field(
+        default=None,
+        description="Set when the caller requested with_count.",
     )
 
 

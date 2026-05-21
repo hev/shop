@@ -30,12 +30,25 @@ from math import ceil
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from .config import Settings, get_settings
-from .layer_client import LayerClient
+from hevlayer import (
+    AsyncHevlayer,
+    Chunk,
+    ClaimDocumentsRequest,
+    CreatePipelineRequest,
+    CreateScanRequest,
+    HeartbeatDocumentsRequest,
+    PatchDocument,
+    PatchRequest,
+    PutChunksRequest,
+    SetDocumentsStageRequest,
+    UpsertDocument,
+    UpsertRequest,
+)
+
 from datetime import datetime, timezone
 
-from .classifier import ReviewClassificationInput
-from .records import (
+from hev_shop_common.config import Settings, get_settings
+from hev_shop_common.records import (
     REVIEW_CLASSIFY_PREFIX,
     REVIEW_EMBED_PREFIX,
     REVIEW_TAGS,
@@ -45,6 +58,8 @@ from .records import (
     review_vector_attributes,
     review_work_document_id,
 )
+
+from .classifier import ReviewClassificationInput
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +72,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class StageContext:
     settings: Settings
-    layer: LayerClient
+    layer: AsyncHevlayer
     # Lazy singletons so stages that need a model don't pay for one they don't.
     _clip_image: Any = None
     _clip_text: Any = None
@@ -99,14 +114,17 @@ async def _run_once(stage: Stage, ctx: StageContext) -> int:
     claim_size = getattr(ctx.settings, stage.claim_size_attr)
     worker_id = ctx.settings.resolved_worker_id
 
-    doc_ids = await ctx.layer.claim_pipeline_documents(
+    claim = await ctx.layer.claim_documents(
         pipeline_id,
-        limit=claim_size,
-        worker_id=worker_id,
-        lease_seconds=ctx.settings.claim_lease_seconds,
-        claim_stage=stage.from_stage,
-        document_id_prefix=stage.prefix,
+        ClaimDocumentsRequest(
+            limit=claim_size,
+            worker_id=worker_id,
+            lease_seconds=ctx.settings.claim_lease_seconds,
+            claim_stage=stage.from_stage,
+            document_id_prefix=stage.prefix,
+        ),
     )
+    doc_ids = list(claim.documents)
     if not doc_ids:
         return 0
 
@@ -116,7 +134,7 @@ async def _run_once(stage: Stage, ctx: StageContext) -> int:
         outcome = await stage.process(ctx, doc_ids)
     except BaseException:
         if active:
-            await ctx.layer.release_pipeline_documents(
+            await ctx.layer.release_documents(
                 pipeline_id, sorted(active),
                 from_stage=stage.from_stage, worker_id=worker_id,
             )
@@ -144,15 +162,15 @@ async def _run_once(stage: Stage, ctx: StageContext) -> int:
         )
 
     if outcome.complete:
-        await ctx.layer.complete_pipeline_documents(
+        await ctx.layer.complete_documents(
             pipeline_id, outcome.complete, from_stage=stage.from_stage, worker_id=worker_id,
         )
     if outcome.fail:
-        await ctx.layer.fail_pipeline_documents(
+        await ctx.layer.fail_documents(
             pipeline_id, outcome.fail, from_stage=stage.from_stage, worker_id=worker_id,
         )
     if outcome.release:
-        await ctx.layer.release_pipeline_documents(
+        await ctx.layer.release_documents(
             pipeline_id, outcome.release, from_stage=stage.from_stage, worker_id=worker_id,
         )
     return len(outcome.complete)
@@ -162,9 +180,13 @@ async def _heartbeat(ctx: StageContext, pipeline_id: str, stage: str, active: se
     while True:
         await asyncio.sleep(ctx.settings.claim_heartbeat_seconds)
         if active:
-            await ctx.layer.heartbeat_pipeline_documents(
-                pipeline_id, sorted(active),
-                stage=stage, worker_id=ctx.settings.resolved_worker_id,
+            await ctx.layer.heartbeat_documents(
+                pipeline_id,
+                HeartbeatDocumentsRequest(
+                    document_ids=sorted(active),
+                    stage=stage,
+                    worker_id=ctx.settings.resolved_worker_id,
+                ),
             )
 
 
@@ -177,10 +199,12 @@ async def _heartbeat(ctx: StageContext, pipeline_id: str, stage: str, active: se
 
 
 async def setup_embed_products(ctx: StageContext) -> None:
-    await ctx.layer.create_pipeline(
-        ctx.settings.default_pipeline_id,
-        ctx.settings.namespace,
-        ctx.settings.distance_metric,
+    await ctx.layer.ensure_pipeline(
+        CreatePipelineRequest(
+            id=ctx.settings.default_pipeline_id,
+            target_namespace=ctx.settings.namespace,
+            distance_metric=ctx.settings.distance_metric,
+        )
     )
     _clip_image(ctx)
 
@@ -190,11 +214,13 @@ async def process_embed_products(ctx: StageContext, doc_ids: list[str]) -> Stage
     prepared: list[tuple[str, Path, dict[str, Any]]] = []  # (doc_id, image, attrs)
 
     for doc_id in doc_ids:
-        chunks = await ctx.layer.get_chunks(ctx.settings.default_pipeline_id, doc_id)
+        chunks = await ctx.layer.get_pipeline_document_chunks(
+            ctx.settings.default_pipeline_id, doc_id
+        )
         if not chunks:
             fail.append(doc_id)
             continue
-        meta = chunks[0].get("metadata") or {}
+        meta = chunks[0].metadata or {}
         image = Path(meta.get("image_path", ""))
         if not image.is_file():
             fail.append(doc_id)
@@ -220,10 +246,12 @@ async def process_embed_products(ctx: StageContext, doc_ids: list[str]) -> Stage
             release.extend(item[0] for item in window)
             continue
         upserts = [
-            {"id": doc_id, "vector": v, "attributes": attrs}
+            UpsertDocument(id=doc_id, vector=v, attributes=attrs)
             for (doc_id, _img, attrs), v in zip(window, vectors, strict=True)
         ]
-        await ctx.layer.upsert_vectors(ctx.settings.namespace, upserts)
+        await ctx.layer.upsert_documents(
+            ctx.settings.namespace, UpsertRequest(upserts=upserts)
+        )
         complete.extend(item[0] for item in window)
 
     return StageOutcome(complete=complete, fail=fail, release=release)
@@ -234,10 +262,12 @@ async def process_embed_products(ctx: StageContext, doc_ids: list[str]) -> Stage
 # ---------------------------------------------------------------------------
 
 async def setup_embed_reviews(ctx: StageContext) -> None:
-    await ctx.layer.create_pipeline(
-        ctx.settings.reviews_pipeline_id,
-        ctx.settings.reviews_namespace_base,
-        ctx.settings.distance_metric,
+    await ctx.layer.ensure_pipeline(
+        CreatePipelineRequest(
+            id=ctx.settings.reviews_pipeline_id,
+            target_namespace=ctx.settings.reviews_namespace_base,
+            distance_metric=ctx.settings.distance_metric,
+        )
     )
     _qwen(ctx)
 
@@ -254,7 +284,9 @@ async def process_embed_reviews(ctx: StageContext, doc_ids: list[str]) -> StageO
     ] = []
     for doc_id in doc_ids:
         try:
-            chunks = await ctx.layer.get_chunks(ctx.settings.reviews_pipeline_id, doc_id)
+            chunks = await ctx.layer.get_pipeline_document_chunks(
+                ctx.settings.reviews_pipeline_id, doc_id
+            )
         except Exception:
             logger.exception("failed to prepare review document", extra={"doc_id": doc_id})
             release.append(doc_id)
@@ -263,8 +295,8 @@ async def process_embed_reviews(ctx: StageContext, doc_ids: list[str]) -> StageO
             fail.append(doc_id)
             continue
         raw = chunks[0]
-        metadata = raw.get("metadata") or {}
-        text = raw.get("text") or ""
+        metadata = raw.metadata or {}
+        text = raw.text or ""
         asin = str(metadata.get("asin") or "")
         review_id = str(metadata.get("review_id") or doc_id)
         if not asin or not text.strip():
@@ -349,13 +381,31 @@ async def process_embed_reviews(ctx: StageContext, doc_ids: list[str]) -> StageO
         ) -> tuple[str, bool]:
             async with sem:
                 try:
-                    await ctx.layer.upsert_vectors(namespace, items)
+                    upserts = [
+                        UpsertDocument(
+                            id=item["id"],
+                            vector=item.get("vector"),
+                            attributes=item.get("attributes") or {},
+                        )
+                        for item in items
+                    ]
+                    await ctx.layer.upsert_documents(
+                        namespace, UpsertRequest(upserts=upserts)
+                    )
                     if classify_chunk is not None:
                         review_id = str(classify_chunk["metadata"]["review_id"])
-                        await ctx.layer.stage_pipeline_document(
+                        await ctx.layer.put_pipeline_document_chunks(
                             ctx.settings.reviews_pipeline_id,
                             review_work_document_id("classify", review_id),
-                            chunks=[classify_chunk],
+                            PutChunksRequest(
+                                chunks=[
+                                    Chunk(
+                                        id=classify_chunk["id"],
+                                        text=classify_chunk.get("text"),
+                                        metadata=classify_chunk.get("metadata") or {},
+                                    )
+                                ]
+                            ),
                         )
                     return doc_id, True
                 except Exception:
@@ -382,15 +432,19 @@ async def process_embed_reviews(ctx: StageContext, doc_ids: list[str]) -> StageO
 # ---------------------------------------------------------------------------
 
 async def setup_classify_reviews(ctx: StageContext) -> None:
-    await ctx.layer.create_pipeline(
-        ctx.settings.reviews_pipeline_id,
-        ctx.settings.reviews_namespace_base,
-        ctx.settings.distance_metric,
+    await ctx.layer.ensure_pipeline(
+        CreatePipelineRequest(
+            id=ctx.settings.reviews_pipeline_id,
+            target_namespace=ctx.settings.reviews_namespace_base,
+            distance_metric=ctx.settings.distance_metric,
+        )
     )
-    await ctx.layer.create_pipeline(
-        ctx.settings.review_aggregate_pipeline_id,
-        ctx.settings.namespace,
-        ctx.settings.distance_metric,
+    await ctx.layer.ensure_pipeline(
+        CreatePipelineRequest(
+            id=ctx.settings.review_aggregate_pipeline_id,
+            target_namespace=ctx.settings.namespace,
+            distance_metric=ctx.settings.distance_metric,
+        )
     )
 
 
@@ -411,7 +465,7 @@ async def process_classify_reviews(ctx: StageContext, doc_ids: list[str]) -> Sta
 
     for doc_id in doc_ids:
         try:
-            chunks = await ctx.layer.get_chunks(
+            chunks = await ctx.layer.get_pipeline_document_chunks(
                 ctx.settings.reviews_pipeline_id, doc_id
             )
         except Exception:
@@ -424,8 +478,8 @@ async def process_classify_reviews(ctx: StageContext, doc_ids: list[str]) -> Sta
             fail.append(doc_id)
             continue
         chunk = chunks[0]
-        metadata = chunk.get("metadata") or {}
-        text = str(chunk.get("text") or "").strip()
+        metadata = chunk.metadata or {}
+        text = str(chunk.text or "").strip()
         asin = str(metadata.get("asin") or "")
         review_id = str(metadata.get("review_id") or "")
         if not asin or not review_id or not text:
@@ -476,7 +530,7 @@ async def process_classify_reviews(ctx: StageContext, doc_ids: list[str]) -> Sta
 
     complete: list[str] = []
     aggregate_asins: list[str] = []
-    patches_by_namespace: dict[str, list[dict[str, Any]]] = {}
+    patches_by_namespace: dict[str, list[PatchDocument]] = {}
     classified_at = datetime.now(timezone.utc).isoformat()
     for review in reviews:
         tags = classified.get(review.review_id, [])
@@ -488,23 +542,23 @@ async def process_classify_reviews(ctx: StageContext, doc_ids: list[str]) -> Sta
             if tag.tag in REVIEW_TAGS
         }
         patches_by_namespace.setdefault(namespace, []).append(
-            {
-                "id": vector_id,
-                "attributes": {
+            PatchDocument(
+                id=vector_id,
+                attributes={
                     "tags": tag_names,
                     "tag_confidences": json.dumps(
                         confidences, separators=(",", ":")
                     ),
                     "review_classified_at": classified_at,
                 },
-            }
+            )
         )
         aggregate_asins.append(review.asin)
         complete.append(doc_id_by_review[review.review_id])
 
     try:
         for namespace, patches in patches_by_namespace.items():
-            await ctx.layer.patch_attributes(namespace, patches)
+            await ctx.layer.patch_documents(namespace, PatchRequest(patches=patches))
     except Exception:
         logger.exception("failed to patch review classification attrs")
         release.extend(doc_id_by_review[review.review_id] for review in reviews)
@@ -512,11 +566,13 @@ async def process_classify_reviews(ctx: StageContext, doc_ids: list[str]) -> Sta
 
     # The cross-stage hand-off: transition the touched ASINs to `pending`
     # on the aggregate pipeline so the next-stage worker can pick them up.
-    await ctx.layer.set_pipeline_documents_stage(
+    await ctx.layer.set_documents_stage(
         ctx.settings.review_aggregate_pipeline_id,
-        sorted(set(aggregate_asins)),
-        stage="pending",
-        create_missing=True,
+        SetDocumentsStageRequest(
+            document_ids=sorted(set(aggregate_asins)),
+            stage="pending",
+            create_missing=True,
+        ),
     )
 
     logger.info("classified %s reviews", len(reviews))
@@ -528,10 +584,12 @@ async def process_classify_reviews(ctx: StageContext, doc_ids: list[str]) -> Sta
 # ---------------------------------------------------------------------------
 
 async def setup_aggregate_tags(ctx: StageContext) -> None:
-    await ctx.layer.create_pipeline(
-        ctx.settings.review_aggregate_pipeline_id,
-        ctx.settings.namespace,
-        ctx.settings.distance_metric,
+    await ctx.layer.ensure_pipeline(
+        CreatePipelineRequest(
+            id=ctx.settings.review_aggregate_pipeline_id,
+            target_namespace=ctx.settings.namespace,
+            distance_metric=ctx.settings.distance_metric,
+        )
     )
 
 
@@ -539,7 +597,7 @@ async def process_aggregate_tags(ctx: StageContext, asins: list[str]) -> StageOu
     # `asins` are the claimed doc_ids — the aggregate pipeline indexes
     # rows by ASIN, so the driver abstraction doesn't notice the rename.
     try:
-        patches: list[dict[str, Any]] = []
+        patches: list[PatchDocument] = []
         for asin in asins:
             attrs = await aggregate_review_tag_attrs(
                 ctx,
@@ -548,8 +606,10 @@ async def process_aggregate_tags(ctx: StageContext, asins: list[str]) -> StageOu
                 min_fraction=ctx.settings.review_tag_min_fraction,
                 sample_count=ctx.settings.review_tag_sample_count,
             )
-            patches.append({"id": asin, "attributes": attrs})
-        await ctx.layer.patch_attributes(ctx.settings.namespace, patches)
+            patches.append(PatchDocument(id=asin, attributes=attrs))
+        await ctx.layer.patch_documents(
+            ctx.settings.namespace, PatchRequest(patches=patches)
+        )
     except Exception:
         logger.exception("failed to aggregate review tags")
         return StageOutcome(release=list(asins))
@@ -576,11 +636,13 @@ async def aggregate_review_tag_attrs(
     )
     scan = await ctx.layer.scan(
         namespace,
-        "full_document",
-        filters=["asin", "Eq", asin],
-        page_size=ctx.settings.review_aggregate_scan_page_size,
+        CreateScanRequest(
+            scan_type="full_document",
+            filters=["asin", "Eq", asin],
+            page_size=ctx.settings.review_aggregate_scan_page_size,
+        ),
     )
-    results = await ctx.layer.get_scan_results(namespace, scan["id"])
+    results = await ctx.layer.get_scan_results(namespace, scan.id)
 
     classified: dict[str, dict[str, Any]] = {}
     for row in scan_result_rows(results):
@@ -632,9 +694,14 @@ async def aggregate_review_tag_attrs(
     return attrs
 
 
-def scan_result_rows(results: dict[str, Any]) -> list[dict[str, Any]]:
-    rows = results.get("results")
-    if rows is None:
+def scan_result_rows(results: Any) -> list[dict[str, Any]]:
+    # SDK returns a ScanResults pydantic model; `full_document` scans put
+    # row dicts in `.results` rather than the typed FieldValueResult, so
+    # normalise either shape (model or plain dict) to a list of dicts.
+    if hasattr(results, "model_dump"):
+        results = results.model_dump()
+    rows = results.get("results") if isinstance(results, dict) else None
+    if rows is None and isinstance(results, dict):
         rows = results.get("data")
     if not isinstance(rows, list):
         return []
@@ -733,14 +800,14 @@ STAGES: dict[str, Stage] = {
 
 def _clip_image(ctx: StageContext):
     if ctx._clip_image is None:
-        from .embedders import CLIPImageEmbedder
+        from hev_shop_common.embedders import CLIPImageEmbedder
         ctx._clip_image = CLIPImageEmbedder(ctx.settings)
     return ctx._clip_image
 
 
 def _qwen(ctx: StageContext):
     if ctx._qwen is None:
-        from .embedders import QwenTextEmbedder
+        from hev_shop_common.embedders import QwenTextEmbedder
         ctx._qwen = QwenTextEmbedder(ctx.settings)
     return ctx._qwen
 
@@ -766,14 +833,18 @@ async def amain(stage_name: str) -> None:
     if stage_name not in STAGES:
         raise SystemExit(f"unknown stage {stage_name!r}; choose from {sorted(STAGES)}")
     settings = get_settings()
-    layer = LayerClient(settings.layer_gateway_url, settings.http_timeout_seconds)
+    layer = AsyncHevlayer(
+        api_key=settings.layer_api_key,
+        base_url=settings.layer_gateway_url,
+        timeout=settings.http_timeout_seconds,
+    )
     ctx = StageContext(settings=settings, layer=layer)
     stop = asyncio.Event()
     _install_signals(stop)
     try:
         await run_stage(STAGES[stage_name], ctx, stop)
     finally:
-        await layer.close()
+        await layer.aclose()
 
 
 def _install_signals(stop: asyncio.Event) -> None:

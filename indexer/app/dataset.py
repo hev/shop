@@ -14,10 +14,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from .records import ProductRecord, ReviewRecord
+from hev_shop_common.records import ProductRecord, ReviewRecord
 
 if TYPE_CHECKING:
-    from .config import Settings
+    from hev_shop_common.config import Settings
 
 logger = logging.getLogger("hev_shop.dataset")
 

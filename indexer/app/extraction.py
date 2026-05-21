@@ -7,14 +7,74 @@ from contextlib import suppress
 from uuid import uuid4
 
 import httpx
+from hevlayer import (
+    AsyncHevlayer,
+    Chunk,
+    ClaimDocumentsRequest,
+    CreatePipelineRequest,
+    HeartbeatDocumentsRequest,
+    PutChunksRequest,
+    SetDocumentsStageRequest,
+)
 
-from .config import Settings
+from hev_shop_common.config import Settings
+from hev_shop_common.records import (
+    ProductRecord,
+    ReviewRecord,
+    review_raw_chunk_id,
+    review_work_document_id,
+)
+
 from .dataset import AmazonProductDataset
 from .jobs import ExtractionJob, extraction_job_from_chunks
-from .layer_client import LayerClient
-from .records import ProductRecord, ReviewRecord
 
 logger = logging.getLogger(__name__)
+
+
+async def stage_product(
+    layer: AsyncHevlayer, pipeline_id: str, product: ProductRecord
+) -> None:
+    await layer.put_pipeline_document_chunks(
+        pipeline_id,
+        product.asin,
+        PutChunksRequest(
+            chunks=[
+                Chunk(
+                    id=product.asin,
+                    text=product.document_text(),
+                    metadata=product.attributes(),
+                )
+            ]
+        ),
+    )
+
+
+async def stage_review(
+    layer: AsyncHevlayer,
+    pipeline_id: str,
+    review: ReviewRecord,
+    *,
+    work_item: str,
+    enqueue_classify: bool = False,
+) -> None:
+    if work_item not in {"embed", "classify"}:
+        raise ValueError("work_item must be 'embed' or 'classify'")
+    metadata = review.attributes()
+    if work_item == "embed" and enqueue_classify:
+        metadata["enqueue_classify"] = True
+    await layer.put_pipeline_document_chunks(
+        pipeline_id,
+        review_work_document_id(work_item, review.review_id),
+        PutChunksRequest(
+            chunks=[
+                Chunk(
+                    id=review_raw_chunk_id(review.review_id),
+                    text=review.document_text(),
+                    metadata=metadata,
+                )
+            ]
+        ),
+    )
 
 
 class ExtractionWorker:
@@ -22,7 +82,7 @@ class ExtractionWorker:
         self,
         *,
         settings: Settings,
-        layer: LayerClient,
+        layer: AsyncHevlayer,
         dataset: AmazonProductDataset,
     ) -> None:
         self.settings = settings
@@ -64,24 +124,32 @@ class ExtractionWorker:
                     )
 
     async def process_once(self) -> int:
-        doc_ids = await self.layer.claim_pipeline_documents(
+        claim = await self.layer.claim_documents(
             self.settings.extraction_pipeline_id,
-            limit=1,
-            worker_id=self.settings.resolved_worker_id,
-            claim_stage="extracting",
-            lease_seconds=self.settings.claim_lease_seconds,
+            ClaimDocumentsRequest(
+                limit=1,
+                worker_id=self.settings.resolved_worker_id,
+                claim_stage="extracting",
+                lease_seconds=self.settings.claim_lease_seconds,
+            ),
         )
+        doc_ids = list(claim.documents)
         if not doc_ids:
             return 0
 
         doc_id = doc_ids[0]
-        chunks = await self.layer.get_chunks(self.settings.extraction_pipeline_id, doc_id)
-        job = extraction_job_from_chunks(doc_id, chunks)
+        chunks = await self.layer.get_pipeline_document_chunks(
+            self.settings.extraction_pipeline_id, doc_id
+        )
+        job = extraction_job_from_chunks(
+            doc_id,
+            [{"id": c.id, "text": c.text, "metadata": c.metadata} for c in chunks],
+        )
         heartbeat = asyncio.create_task(self.heartbeat_job(doc_id))
         try:
             processed = await self.process_job(job)
         except asyncio.CancelledError:
-            await self.layer.release_pipeline_documents(
+            await self.layer.release_documents(
                 self.settings.extraction_pipeline_id,
                 [doc_id],
                 from_stage="extracting",
@@ -90,7 +158,7 @@ class ExtractionWorker:
             raise
         except Exception as exc:
             logger.exception("extraction job failed", extra={"job_id": job.id})
-            await self.layer.fail_pipeline_documents(
+            await self.layer.fail_documents(
                 self.settings.extraction_pipeline_id,
                 [doc_id],
                 from_stage="extracting",
@@ -102,7 +170,7 @@ class ExtractionWorker:
             with suppress(asyncio.CancelledError):
                 await heartbeat
 
-        await self.layer.complete_pipeline_documents(
+        await self.layer.complete_documents(
             self.settings.extraction_pipeline_id,
             [doc_id],
             from_stage="extracting",
@@ -113,21 +181,29 @@ class ExtractionWorker:
     async def heartbeat_job(self, document_id: str) -> None:
         while True:
             await asyncio.sleep(self.settings.claim_heartbeat_seconds)
-            await self.layer.heartbeat_pipeline_documents(
+            await self.layer.heartbeat_documents(
                 self.settings.extraction_pipeline_id,
-                [document_id],
-                stage="extracting",
-                worker_id=self.settings.resolved_worker_id,
+                HeartbeatDocumentsRequest(
+                    document_ids=[document_id],
+                    stage="extracting",
+                    worker_id=self.settings.resolved_worker_id,
+                ),
             )
 
     async def process_job(self, job: ExtractionJob) -> int:
-        await self.layer.create_pipeline(
-            job.pipeline_id, job.namespace, self.settings.distance_metric
+        await self.layer.ensure_pipeline(
+            CreatePipelineRequest(
+                id=job.pipeline_id,
+                target_namespace=job.namespace,
+                distance_metric=self.settings.distance_metric,
+            )
         )
-        await self.layer.create_pipeline(
-            self.settings.reviews_pipeline_id,
-            self.settings.reviews_namespace_base,
-            self.settings.distance_metric,
+        await self.layer.ensure_pipeline(
+            CreatePipelineRequest(
+                id=self.settings.reviews_pipeline_id,
+                target_namespace=self.settings.reviews_namespace_base,
+                distance_metric=self.settings.distance_metric,
+            )
         )
         self.settings.image_dir.mkdir(parents=True, exist_ok=True)
 
@@ -202,17 +278,22 @@ class ExtractionWorker:
 
         aggregate_count = 0
         if "aggregate" in stages and staged_asins:
-            await self.layer.create_pipeline(
-                self.settings.review_aggregate_pipeline_id,
-                self.settings.namespace,
-                self.settings.distance_metric,
+            await self.layer.ensure_pipeline(
+                CreatePipelineRequest(
+                    id=self.settings.review_aggregate_pipeline_id,
+                    target_namespace=self.settings.namespace,
+                    distance_metric=self.settings.distance_metric,
+                )
             )
-            aggregate_count = await self.layer.set_pipeline_documents_stage(
+            response = await self.layer.set_documents_stage(
                 self.settings.review_aggregate_pipeline_id,
-                sorted(staged_asins),
-                stage="pending",
-                create_missing=True,
+                SetDocumentsStageRequest(
+                    document_ids=sorted(staged_asins),
+                    stage="pending",
+                    create_missing=True,
+                ),
             )
+            aggregate_count = response.updated
 
         logger.info(
             "completed backfill job",
@@ -248,8 +329,8 @@ class ExtractionWorker:
                     break
                 try:
                     image_path = await self.download_image(product.asin, product.image_url)
-                    await self.layer.stage_product(
-                        job.pipeline_id, product.with_image_path(image_path)
+                    await stage_product(
+                        self.layer, job.pipeline_id, product.with_image_path(image_path)
                     )
                     processed += 1
                     staged_asins.add(product.asin)
@@ -324,7 +405,8 @@ class ExtractionWorker:
                         stage_calls = []
                         if "embed" in work_items:
                             stage_calls.append(
-                                self.layer.stage_review(
+                                stage_review(
+                                    self.layer,
                                     self.settings.reviews_pipeline_id,
                                     review,
                                     work_item="embed",
@@ -333,7 +415,8 @@ class ExtractionWorker:
                             )
                         elif "classify" in work_items:
                             stage_calls.append(
-                                self.layer.stage_review(
+                                stage_review(
+                                    self.layer,
                                     self.settings.reviews_pipeline_id,
                                     review,
                                     work_item="classify",

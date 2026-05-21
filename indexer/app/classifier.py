@@ -8,8 +8,8 @@ from typing import Any
 
 import httpx
 
-from .config import Settings
-from .records import REVIEW_TAGS
+from hev_shop_common.config import Settings
+from hev_shop_common.records import REVIEW_TAGS
 
 logger = logging.getLogger(__name__)
 

@@ -4,9 +4,12 @@ Lives outside the `test_*.py` collection pattern so pytest doesn't try
 to run it. Both `test_workers_characterization.py` (phase-0) and
 `test_pipeline.py` (phase-1) import from here.
 
-Empty-list short-circuits in FakeLayerClient mirror the real
-LayerClient: those calls never become HTTP requests in production, so
-they shouldn't show up as recorded calls in tests either.
+`FakeLayerClient` duck-types the slice of `hevlayer.HevlayerProtocol`
+that the indexer actually exercises. Each call is recorded into flat
+dicts so tests can assert payload fields without unwrapping Pydantic
+models. Empty-list short-circuits mirror the SDK helpers in
+`AsyncHevlayer`: those calls never become HTTP requests in production,
+so they shouldn't show up as recorded calls in tests either.
 """
 
 from __future__ import annotations
@@ -15,7 +18,39 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from hevlayer import (
+    ClaimDocumentsRequest,
+    ClaimDocumentsResponse,
+    CountRequest,
+    CountResponse,
+    CreatePipelineRequest,
+    CreateScanRequest,
+    Chunk,
+    Document,
+    DocumentsStageResponse,
+    HeartbeatDocumentsRequest,
+    LayerPerf,
+    LayerResponse,
+    PatchRequest,
+    Pipeline,
+    PutChunksRequest,
+    QueryRequest,
+    QueryResponse,
+    QueryResult,
+    Scan,
+    SetDocumentsStageRequest,
+    StageDocumentResponse,
+    StatusResponse,
+    UpsertRequest,
+)
+
 from app.classifier import ReviewTag
+
+
+def _attach_perf(data: Any, with_perf: bool) -> Any:
+    if not with_perf:
+        return data
+    return LayerResponse(data=data, perf=LayerPerf(latency_ms=0.0, cache_status=None))
 
 
 class FakeLayerClient:
@@ -39,20 +74,48 @@ class FakeLayerClient:
         self.set_stage_calls: list[dict[str, Any]] = []
         self.scan_calls: list[dict[str, Any]] = []
         self.stage_document_calls: list[dict[str, Any]] = []
+        self.query_calls: list[dict[str, Any]] = []
+        self.count_calls: list[dict[str, Any]] = []
+        # Scripted responses for query_namespace / count_ranked. When None,
+        # the fake returns a sensible default (empty results / count=0).
+        self.next_query_response: QueryResponse | None = None
+        self.next_count_response: CountResponse | None = None
+        self.count_raises: bool = False
 
-    async def create_pipeline(self, pipeline_id, namespace, distance_metric):
-        self.create_pipeline_calls.append((pipeline_id, namespace, distance_metric))
+    async def ensure_pipeline(self, body: CreatePipelineRequest | dict[str, Any]) -> Pipeline:
+        if isinstance(body, CreatePipelineRequest):
+            pid, ns, metric = body.id, body.target_namespace, body.distance_metric or "cosine_distance"
+        else:
+            pid = body["id"]
+            ns = body["target_namespace"]
+            metric = body.get("distance_metric") or "cosine_distance"
+        self.create_pipeline_calls.append((pid, ns, metric))
+        return Pipeline(
+            id=pid,
+            target_namespace=ns,
+            distance_metric=metric,
+            created_at="2026-05-20T00:00:00Z",
+        )
 
-    async def claim_pipeline_documents(
+    async def claim_documents(
         self,
-        pipeline_id,
+        pipeline_id: str,
+        body: ClaimDocumentsRequest | dict[str, Any],
         *,
-        limit,
-        worker_id,
-        lease_seconds,
-        claim_stage,
-        document_id_prefix=None,
-    ):
+        with_perf: bool = False,
+    ) -> ClaimDocumentsResponse | LayerResponse[ClaimDocumentsResponse]:
+        if isinstance(body, ClaimDocumentsRequest):
+            limit = body.limit
+            worker_id = body.worker_id
+            lease_seconds = body.lease_seconds
+            claim_stage = body.claim_stage
+            prefix = body.document_id_prefix
+        else:
+            limit = body.get("limit")
+            worker_id = body.get("worker_id")
+            lease_seconds = body.get("lease_seconds")
+            claim_stage = body.get("claim_stage")
+            prefix = body.get("document_id_prefix")
         self.claim_calls.append(
             {
                 "pipeline_id": pipeline_id,
@@ -60,129 +123,345 @@ class FakeLayerClient:
                 "worker_id": worker_id,
                 "lease_seconds": lease_seconds,
                 "claim_stage": claim_stage,
-                "prefix": document_id_prefix,
+                "prefix": prefix,
             }
         )
-        head, self.next_claim = self.next_claim[:limit], self.next_claim[limit:]
-        return list(head)
-
-    async def heartbeat_pipeline_documents(
-        self, pipeline_id, document_ids, *, stage, worker_id
-    ):
-        if not document_ids:
-            return 0
-        self.heartbeat_calls.append(
-            {"pipeline_id": pipeline_id, "doc_ids": list(document_ids), "stage": stage}
+        n = limit if isinstance(limit, int) and limit > 0 else len(self.next_claim)
+        head, self.next_claim = self.next_claim[:n], self.next_claim[n:]
+        response = ClaimDocumentsResponse(
+            pipeline_id=pipeline_id,
+            stage="pending",
+            claim_stage=claim_stage or "embedding",
+            worker_id=worker_id or "test-worker",
+            documents=list(head),
         )
-        return len(document_ids)
+        return _attach_perf(response, with_perf)
 
-    async def set_pipeline_documents_stage(
+    async def heartbeat_documents(
         self,
-        pipeline_id,
-        document_ids,
+        pipeline_id: str,
+        body: HeartbeatDocumentsRequest | dict[str, Any],
         *,
-        stage,
-        from_stage=None,
-        worker_id=None,
-        create_missing=False,
-    ):
-        if not document_ids:
-            return 0
+        with_perf: bool = False,
+    ) -> DocumentsStageResponse | LayerResponse[DocumentsStageResponse]:
+        if isinstance(body, HeartbeatDocumentsRequest):
+            doc_ids = list(body.document_ids)
+            stage = body.stage
+        else:
+            doc_ids = list(body["document_ids"])
+            stage = body.get("stage")
+        if not doc_ids:
+            return _attach_perf(
+                DocumentsStageResponse(pipeline_id=pipeline_id, stage=stage or "pending", updated=0),
+                with_perf,
+            )
+        self.heartbeat_calls.append(
+            {"pipeline_id": pipeline_id, "doc_ids": doc_ids, "stage": stage}
+        )
+        return _attach_perf(
+            DocumentsStageResponse(pipeline_id=pipeline_id, stage=stage or "pending", updated=len(doc_ids)),
+            with_perf,
+        )
+
+    async def set_documents_stage(
+        self,
+        pipeline_id: str,
+        body: SetDocumentsStageRequest | dict[str, Any],
+        *,
+        with_perf: bool = False,
+    ) -> DocumentsStageResponse | LayerResponse[DocumentsStageResponse]:
+        if isinstance(body, SetDocumentsStageRequest):
+            doc_ids = list(body.document_ids)
+            stage = body.stage
+            from_stage = body.from_stage
+            create_missing = bool(body.create_missing)
+        else:
+            doc_ids = list(body["document_ids"])
+            stage = body["stage"]
+            from_stage = body.get("from_stage")
+            create_missing = bool(body.get("create_missing", False))
+        if not doc_ids:
+            return _attach_perf(
+                DocumentsStageResponse(pipeline_id=pipeline_id, stage=stage, updated=0),
+                with_perf,
+            )
         self.set_stage_calls.append(
             {
                 "pipeline_id": pipeline_id,
-                "doc_ids": list(document_ids),
+                "doc_ids": doc_ids,
                 "stage": stage,
                 "from_stage": from_stage,
                 "create_missing": create_missing,
             }
         )
-        return len(document_ids)
+        return _attach_perf(
+            DocumentsStageResponse(pipeline_id=pipeline_id, stage=stage, updated=len(doc_ids)),
+            with_perf,
+        )
 
-    async def release_pipeline_documents(
-        self, pipeline_id, document_ids, *, from_stage, worker_id
-    ):
-        if not document_ids:
-            return 0
+    async def release_documents(
+        self,
+        pipeline_id: str,
+        document_ids: list[str],
+        *,
+        from_stage: str | None = None,
+        worker_id: str | None = None,
+        with_perf: bool = False,
+    ) -> DocumentsStageResponse | LayerResponse[DocumentsStageResponse]:
+        doc_ids = list(document_ids)
+        if not doc_ids:
+            return _attach_perf(
+                DocumentsStageResponse(pipeline_id=pipeline_id, stage="pending", updated=0),
+                with_perf,
+            )
         self.release_calls.append(
-            {
-                "pipeline_id": pipeline_id,
-                "doc_ids": list(document_ids),
-                "from_stage": from_stage,
-            }
+            {"pipeline_id": pipeline_id, "doc_ids": doc_ids, "from_stage": from_stage}
         )
-        return len(document_ids)
+        return _attach_perf(
+            DocumentsStageResponse(pipeline_id=pipeline_id, stage="pending", updated=len(doc_ids)),
+            with_perf,
+        )
 
-    async def fail_pipeline_documents(
-        self, pipeline_id, document_ids, *, from_stage, worker_id
-    ):
-        if not document_ids:
-            return 0
+    async def fail_documents(
+        self,
+        pipeline_id: str,
+        document_ids: list[str],
+        *,
+        from_stage: str | None = None,
+        worker_id: str | None = None,
+        with_perf: bool = False,
+    ) -> DocumentsStageResponse | LayerResponse[DocumentsStageResponse]:
+        doc_ids = list(document_ids)
+        if not doc_ids:
+            return _attach_perf(
+                DocumentsStageResponse(pipeline_id=pipeline_id, stage="failed", updated=0),
+                with_perf,
+            )
         self.fail_calls.append(
-            {
-                "pipeline_id": pipeline_id,
-                "doc_ids": list(document_ids),
-                "from_stage": from_stage,
-            }
+            {"pipeline_id": pipeline_id, "doc_ids": doc_ids, "from_stage": from_stage}
         )
-        return len(document_ids)
+        return _attach_perf(
+            DocumentsStageResponse(pipeline_id=pipeline_id, stage="failed", updated=len(doc_ids)),
+            with_perf,
+        )
 
-    async def complete_pipeline_documents(
-        self, pipeline_id, document_ids, *, from_stage, worker_id
-    ):
-        if not document_ids:
-            return 0
+    async def complete_documents(
+        self,
+        pipeline_id: str,
+        document_ids: list[str],
+        *,
+        from_stage: str | None = None,
+        worker_id: str | None = None,
+        with_perf: bool = False,
+    ) -> DocumentsStageResponse | LayerResponse[DocumentsStageResponse]:
+        doc_ids = list(document_ids)
+        if not doc_ids:
+            return _attach_perf(
+                DocumentsStageResponse(pipeline_id=pipeline_id, stage="indexed", updated=0),
+                with_perf,
+            )
         self.complete_calls.append(
-            {
-                "pipeline_id": pipeline_id,
-                "doc_ids": list(document_ids),
-                "from_stage": from_stage,
-            }
+            {"pipeline_id": pipeline_id, "doc_ids": doc_ids, "from_stage": from_stage}
         )
-        return len(document_ids)
+        return _attach_perf(
+            DocumentsStageResponse(pipeline_id=pipeline_id, stage="indexed", updated=len(doc_ids)),
+            with_perf,
+        )
 
-    async def get_chunks(self, pipeline_id, document_id):
-        return self.chunks_by_doc_id.get(document_id, [])
+    async def get_pipeline_document_chunks(
+        self, pipeline_id: str, doc_id: str, *, with_perf: bool = False
+    ) -> list[Chunk] | LayerResponse[list[Chunk]]:
+        raw = self.chunks_by_doc_id.get(doc_id, [])
+        chunks = [
+            Chunk(id=c["id"], text=c.get("text"), metadata=c.get("metadata"))
+            for c in raw
+        ]
+        return _attach_perf(chunks, with_perf)
 
-    async def stage_pipeline_document(self, pipeline_id, document_id, *, chunks):
+    async def put_pipeline_document_chunks(
+        self,
+        pipeline_id: str,
+        doc_id: str,
+        body: PutChunksRequest | dict[str, Any],
+        *,
+        with_perf: bool = False,
+    ) -> StageDocumentResponse | LayerResponse[StageDocumentResponse]:
+        chunks_in = body.chunks if isinstance(body, PutChunksRequest) else body["chunks"]
+        chunk_dicts: list[dict[str, Any]] = []
+        for c in chunks_in:
+            if isinstance(c, Chunk):
+                chunk_dicts.append({"id": c.id, "text": c.text, "metadata": c.metadata})
+            else:
+                chunk_dicts.append(dict(c))
         self.stage_document_calls.append(
             {
                 "pipeline_id": pipeline_id,
-                "document_id": document_id,
-                "chunks": list(chunks),
+                "document_id": doc_id,
+                "chunks": chunk_dicts,
             }
         )
-        self.chunks_by_doc_id[document_id] = list(chunks)
+        self.chunks_by_doc_id[doc_id] = chunk_dicts
+        return _attach_perf(
+            StageDocumentResponse(
+                pipeline_id=pipeline_id,
+                document_id=doc_id,
+                stage="pending",
+                chunk_count=len(chunk_dicts),
+                chunk_ids=[c["id"] for c in chunk_dicts],
+            ),
+            with_perf,
+        )
 
-    async def fetch_document(self, namespace, document_id, include_attributes=None):
-        key = (namespace, document_id)
+    async def fetch_document(
+        self,
+        namespace: str,
+        doc_id: str,
+        *,
+        include_attributes: list[str] | None = None,
+        with_perf: bool = False,
+    ) -> Document | LayerResponse[Document]:
+        key = (namespace, doc_id)
         if key not in self.documents_by_namespace:
             raise RuntimeError("not found")
-        return self.documents_by_namespace[key]
+        record = self.documents_by_namespace[key]
+        document = Document(id=doc_id, attributes=record.get("attributes") or {})
+        return _attach_perf(document, with_perf)
 
-    async def upsert_vectors(self, namespace, vectors):
-        self.upsert_calls.append({"namespace": namespace, "vectors": list(vectors)})
+    async def upsert_documents(
+        self,
+        namespace: str,
+        body: UpsertRequest | dict[str, Any],
+        *,
+        with_perf: bool = False,
+    ) -> StatusResponse | LayerResponse[StatusResponse]:
+        if isinstance(body, UpsertRequest):
+            upserts = body.upserts or []
+        else:
+            upserts = body.get("upserts") or []
+        vector_dicts: list[dict[str, Any]] = []
+        for u in upserts:
+            if hasattr(u, "model_dump"):
+                vector_dicts.append(u.model_dump(exclude_none=True))
+            else:
+                vector_dicts.append(dict(u))
+        self.upsert_calls.append({"namespace": namespace, "vectors": vector_dicts})
+        return _attach_perf(StatusResponse(status="ok"), with_perf)
 
-    async def patch_attributes(self, namespace, patches):
-        self.patch_calls.append({"namespace": namespace, "patches": list(patches)})
-        for patch in patches:
+    async def patch_documents(
+        self,
+        namespace: str,
+        body: PatchRequest | dict[str, Any],
+        *,
+        with_perf: bool = False,
+    ) -> StatusResponse | LayerResponse[StatusResponse]:
+        if isinstance(body, PatchRequest):
+            patches = body.patches or []
+        else:
+            patches = body.get("patches") or []
+        patch_dicts: list[dict[str, Any]] = []
+        for p in patches:
+            if hasattr(p, "model_dump"):
+                patch_dicts.append(p.model_dump(exclude_none=True))
+            else:
+                patch_dicts.append(dict(p))
+        self.patch_calls.append({"namespace": namespace, "patches": patch_dicts})
+        for patch in patch_dicts:
             key = (namespace, patch["id"])
-            document = self.documents_by_namespace.setdefault(key, {"attributes": {}})
-            attrs = document.setdefault("attributes", {})
+            doc = self.documents_by_namespace.setdefault(key, {"attributes": {}})
+            attrs = doc.setdefault("attributes", {})
             attrs.update(patch.get("attributes") or {})
+        return _attach_perf(StatusResponse(status="ok"), with_perf)
+
+    async def query_namespace(
+        self,
+        namespace: str,
+        body: QueryRequest | dict[str, Any],
+        *,
+        with_perf: bool = False,
+    ) -> QueryResponse | LayerResponse[QueryResponse]:
+        if isinstance(body, QueryRequest):
+            # cursor is a real field on QueryRequest in current SDK versions;
+            # older SDKs accepted it via extra=allow and surfaced it in
+            # model_extra. Read both for forward/back compatibility.
+            extra = body.model_extra or {}
+            cursor = getattr(body, "cursor", None) or extra.get("cursor")
+            payload = {
+                "namespace": namespace,
+                "vector": list(body.vector),
+                "top_k": body.top_k,
+                "filters": body.filters,
+                "include_attributes": body.include_attributes,
+                "cursor": cursor,
+            }
+        else:
+            payload = {
+                "namespace": namespace,
+                "vector": list(body.get("vector") or []),
+                "top_k": body.get("top_k"),
+                "filters": body.get("filters"),
+                "include_attributes": body.get("include_attributes"),
+                "cursor": body.get("cursor"),
+            }
+        self.query_calls.append(payload)
+        response = self.next_query_response or QueryResponse(
+            results=[], stable_as_of=None
+        )
+        return _attach_perf(response, with_perf)
+
+    async def count_ranked(
+        self,
+        namespace: str,
+        body: CountRequest | dict[str, Any],
+        *,
+        with_perf: bool = False,
+    ) -> CountResponse | LayerResponse[CountResponse]:
+        if self.count_raises:
+            raise RuntimeError("count upstream failure")
+        if isinstance(body, CountRequest):
+            query = body.query.model_dump(exclude_none=True)
+            filters = body.filters
+            mode = body.mode
+        else:
+            query = dict(body.get("query") or {})
+            filters = body.get("filters")
+            mode = body.get("mode")
+        self.count_calls.append(
+            {
+                "namespace": namespace,
+                "query": query,
+                "filters": filters,
+                "mode": mode,
+            }
+        )
+        response = self.next_count_response or CountResponse(
+            count=0,
+            bounded=False,
+            timed_out=False,
+            shards_saturated=0,
+            shards_total=1,
+            elapsed_ms=0,
+        )
+        return _attach_perf(response, with_perf)
 
     async def scan(
         self,
-        namespace,
-        scan_type,
+        namespace: str,
+        body: CreateScanRequest | dict[str, Any],
         *,
-        field=None,
-        source=None,
-        filters=None,
-        page_size=None,
-        poll_interval=1.0,
-        timeout=None,
-    ):
+        initial_delay: float = 0.05,
+        max_delay: float = 2.0,
+        timeout: float | None = None,
+    ) -> Scan:
+        if isinstance(body, CreateScanRequest):
+            scan_type = body.scan_type
+            field = body.field
+            filters = body.filters
+            page_size = body.page_size
+        else:
+            scan_type = body["scan_type"]
+            field = body.get("field")
+            filters = body.get("filters")
+            page_size = body.get("page_size")
         self.scan_calls.append(
             {
                 "namespace": namespace,
@@ -194,9 +473,30 @@ class FakeLayerClient:
         )
         scan_id = f"scan-{len(self.scan_calls)}"
         self.scan_filters_by_id[scan_id] = filters
-        return {"id": scan_id, "status": "completed"}
+        return Scan(
+            id=scan_id,
+            namespace=namespace,
+            scan_type=scan_type,
+            source="auto",
+            effective_source="cache",
+            status="completed",
+            progress=1.0,
+            documents_scanned=0,
+            created_at="2026-05-20T00:00:00Z",
+        )
 
-    async def get_scan_results(self, namespace, scan_id):
+    async def get_scan_results(
+        self,
+        namespace: str,
+        scan_id: str,
+        *,
+        limit: int | None = None,
+        offset: int | None = None,
+        with_perf: bool = False,
+    ) -> dict[str, Any] | LayerResponse[dict[str, Any]]:
+        # `full_document` scans return row dicts that don't match the SDK's
+        # typed FieldValueResult list; consumers run them through
+        # `pipeline.scan_result_rows`, which normalises either shape.
         rows = list(self.scan_results_by_namespace.get(namespace, []))
         filters = self.scan_filters_by_id.get(scan_id)
         if isinstance(filters, list) and len(filters) == 3 and filters[1] == "Eq":
@@ -206,7 +506,7 @@ class FakeLayerClient:
                 for row in rows
                 if (row.get("attributes") or row).get(field) == expected
             ]
-        return {"results": rows}
+        return _attach_perf({"results": rows, "total": len(rows)}, with_perf)
 
 
 class FakeClipImageEmbedder:
