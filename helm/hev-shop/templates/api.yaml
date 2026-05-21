@@ -8,10 +8,7 @@ metadata:
 spec:
   replicas: {{ .Values.api.replicaCount }}
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 0
-      maxUnavailable: 1
+    {{- toYaml .Values.api.strategy | nindent 4 }}
   selector:
     matchLabels:
       {{- include "hev-shop.selectorLabels" . | nindent 6 }}
