@@ -3,6 +3,33 @@
 This file is for engineering and operations work in `hev-shop`. For product,
 design, and strategic context, read `CLAUDE.md`.
 
+## Repo Layout
+
+Three Python services + one Next.js app, organized so each can be forked
+independently:
+
+```
+hev-shop/
+  search/                 # read API: /search, /product, /meta, /reviews/...
+    app/{main,models}.py
+    tests/                # pytest, see search/conftest.py
+    Dockerfile, requirements.txt
+  indexer/                # control plane + workers
+    app/                  # /index, /backfill, /status + pipeline stages
+    tests/                # pytest, see indexer/conftest.py
+    Dockerfile, requirements.txt
+  common/                 # shared library — Settings, records, embedders
+    hev_shop_common/{config,records,embedders}.py
+    tests/                # pytest, see common/conftest.py
+    pyproject.toml
+  web/                    # Next.js storefront
+  helm/hev-shop/          # one chart, four deploys (search, indexer-api, web, workers)
+```
+
+Search and indexer both pull `hev_shop_common` via `pip install -e ../common`
+(see each `requirements.txt`). The same pattern is used for the hevlayer SDK
+in `../../layer/clients/python`.
+
 ## Live Endpoints
 
 The app runs on EKS in namespace `hev-shop`, fronted by a shared ALB
@@ -13,11 +40,17 @@ The app runs on EKS in namespace `hev-shop`, fronted by a shared ALB
 |---|---|---|
 | Storefront | https://hev-shop.com | `hev-shop-web` (port 80 to pod 3000) |
 | Storefront (www) | https://www.hev-shop.com redirects to apex | LBC `redirect-to-apex` action |
-| Indexer API | https://api.hev-shop.com | `hev-shop-api` (port 8080) |
+| Read API | https://api.hev-shop.com/{search,product,meta,...} | `hev-shop-search` (port 8080) |
+| Indexer API | https://api.hev-shop.com/{index,backfill,status} | `hev-shop-indexer-api` (port 8080) |
 | Layer gateway | https://aws-us-east-1.hevlayer.com | `layer-gateway` in namespace `layer` (port 8080) |
 
-The web pod talks to the API in-cluster via
-`HEV_SHOP_API_BASE=http://hev-shop-api.hev-shop.svc.cluster.local:8080`
+`api.hev-shop.com` is path-routed by the ALB: `/search*`, `/product*`,
+`/meta*`, and `/reviews/*` go to `hev-shop-search`; `/index`, `/backfill`,
+`/status` go to `hev-shop-indexer-api`. Update the ingress under
+`../layer/infra/ingress/hev-shop/` when adding new routes.
+
+The web pod only calls read endpoints, so it talks to search in-cluster:
+`HEV_SHOP_API_BASE=http://hev-shop-search.hev-shop.svc.cluster.local:8080`
 (see `helm/hev-shop/templates/web.yaml`). Use the public URL above when
 calling from a laptop.
 
@@ -31,10 +64,14 @@ curl -s -X POST -H 'content-type: application/json' \
   -d '{"query":"wireless headphones","top_k":3}' \
   https://api.hev-shop.com/search | jq .
 curl -s "https://api.hev-shop.com/search/reviews?asin=B00FI7TCGI&q=battery&top_k=4" | jq .
+
+# Indexer control plane
+curl -s "https://api.hev-shop.com/status?pipeline_id=hev-shop-product-images" | jq .
 ```
 
-The full request/response contract is in `indexer/app/main.py` and mirrored on
-the web side in `web/lib/backend.ts`.
+The read-API request/response contract is in `search/app/main.py` (mirrored
+on the storefront in `web/lib/backend.ts`); the indexer control-plane
+contract is in `indexer/app/main.py`.
 
 Layer gateway checks:
 
@@ -48,9 +85,11 @@ curl -s https://aws-us-east-1.hevlayer.com/v2/namespaces/amazon-products/metadat
 Use port-forward only when bypassing the ALB is necessary:
 
 ```sh
-kubectl port-forward -n hev-shop  svc/hev-shop-api  18080:8080
-kubectl port-forward -n layer     svc/layer-gateway 18180:8080
+kubectl port-forward -n hev-shop  svc/hev-shop-search        18080:8080
+kubectl port-forward -n hev-shop  svc/hev-shop-indexer-api   18081:8080
+kubectl port-forward -n layer     svc/layer-gateway          18180:8080
 curl -s http://127.0.0.1:18080/meta
+curl -s http://127.0.0.1:18081/status
 curl -s http://127.0.0.1:18180/v2/namespaces/amazon-products/metadata
 ```
 
@@ -58,36 +97,58 @@ Pod and log access:
 
 ```sh
 kubectl get pods -n hev-shop
-kubectl logs     -n hev-shop deploy/hev-shop-api --tail=200
-kubectl logs     -n hev-shop deploy/hev-shop-web --tail=200
-kubectl exec -it -n hev-shop deploy/hev-shop-api -- sh
+kubectl logs     -n hev-shop deploy/hev-shop-search       --tail=200
+kubectl logs     -n hev-shop deploy/hev-shop-indexer-api  --tail=200
+kubectl logs     -n hev-shop deploy/hev-shop-web          --tail=200
+kubectl exec -it -n hev-shop deploy/hev-shop-search -- sh
 ```
 
 The Go CLI takes two URL flags: `--gateway-url` points at layer-gateway,
-`--indexer-url` points at the hev-shop indexer API.
+`--indexer-url` points at the indexer control plane.
 
 ```sh
 go run . status --indexer-url https://api.hev-shop.com --pipeline-id hev-shop-product-images
 go run . health --gateway-url https://aws-us-east-1.hevlayer.com
 ```
 
-## Indexer Layout
+## Search Service Layout
+
+`search/app/`:
+
+| File | Purpose |
+|---|---|
+| `main.py` | FastAPI app: `/search`, `/search/reviews`, `/product/{asin}`, `/meta`, `/reviews/samples`, `/healthz` |
+| `models.py` | Pydantic HTTP contracts for the read API |
+
+Heavy lifting (Settings, embedder wrappers, namespace helpers) is in
+`hev_shop_common`. The search pod loads `CLIPTextEmbedder` at boot to
+embed query strings; review search uses `QwenTextEmbedder` and is gated
+behind `API_REVIEW_SEARCH_ENABLED` (off by default — Qwen-8B needs a GPU).
+
+## Indexer Service Layout
 
 `indexer/app/`:
 
 | File | Purpose |
 |---|---|
-| `main.py` | FastAPI app: `/search`, `/product/{asin}`, `/meta`, `/index`, `/backfill` |
+| `main.py` | FastAPI control plane: `/index`, `/backfill`, `/status`, `/healthz` |
 | `worker.py` | Process entrypoint; reads `WORKER_TYPE` and dispatches to a stage |
 | `pipeline.py` | N-stage pipeline manifest and driver |
 | `extraction.py` | CPU worker for extraction jobs, product staging, and raw review staging |
-| `embedders.py` | `CLIPImageEmbedder`, `CLIPTextEmbedder`, `QwenTextEmbedder` wrappers |
 | `classifier.py` | OpenRouter client for review tag classification |
 | `jobs.py` | Extraction/backfill job document shapes |
 | `dataset.py` | HuggingFace `McAuley-Lab/Amazon-Reviews-2023` reader |
-| `records.py` | Internal product/review data shapes and vector attrs |
-| `models.py` | Pydantic HTTP request/response contracts |
-| `config.py` | `pydantic_settings.BaseSettings` env-var config |
+| `models.py` | Pydantic HTTP contracts for /index, /backfill, /status |
+
+## Common Library
+
+`common/hev_shop_common/`:
+
+| File | Purpose |
+|---|---|
+| `config.py` | `pydantic_settings.BaseSettings` env-var config used by both services |
+| `records.py` | `ProductRecord` / `ReviewRecord`, namespace + shard helpers, input normalizers, review-tag enum |
+| `embedders.py` | `CLIPImageEmbedder`, `CLIPTextEmbedder`, `QwenTextEmbedder` lazy-init wrappers |
 
 ## Pipeline Model
 
@@ -113,24 +174,31 @@ To add a stage:
 2. Add a `STAGES` entry with `pipeline_attr`, `from_stage`, `claim_size_attr`,
    optional `prefix`, and optional `setup`.
 3. Map a `WORKER_TYPE` value to it in `worker.STAGE_FOR_WORKER_TYPE`.
-4. Add focused tests in `tests/test_pipeline.py`.
+4. Add focused tests in `indexer/tests/test_pipeline.py`.
 
 ## Tests
 
+Each service has its own pytest tree. Run the narrowest meaningful one for
+the code you touched:
+
 ```sh
-cd indexer
-python3 -m pytest tests/ --tb=short
+cd common  && python3 -m pytest tests/ --tb=short   # Settings + records
+cd search  && python3 -m pytest tests/ --tb=short   # /search, /search/reviews
+cd indexer && python3 -m pytest tests/ --tb=short   # pipeline stages, /index, /backfill
 ```
 
-The test suite covers pure helpers, the `STAGES` manifest, driver behavior, and
-per-stage contracts against fakes in `tests/_fakes.py`.
+Each `conftest.py` puts the sibling `common/` and the local hevlayer SDK
+checkout on `sys.path` so tests don't need pip installs.
 
 ## Agent Rules
 
 - Prefer public DNS for laptop checks unless the task specifically needs an
   in-cluster bypass.
-- Keep the `indexer/app/` module boundary intact; avoid moving pipeline logic
-  into API models or web code.
+- Keep the three Python service boundaries intact:
+  - Read-API HTTP contracts live in `search/app/`.
+  - Indexer HTTP contracts and pipeline code live in `indexer/app/`.
+  - Anything shared (Settings, records, embedders) goes in `common/hev_shop_common/`.
+  Don't import indexer modules from search or vice versa.
 - Run the narrowest meaningful tests for code changes, or explain why they
   were not run.
 - Do not revert unrelated user changes.
