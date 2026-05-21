@@ -9,6 +9,7 @@ fastapi>=0.115
 # install, same pattern as the SDK above.
 -e ../common
 httpx>=0.27
+numpy>=2.0
 pillow>=11.0
 pydantic-settings>=2.6
 torch>=2.5
