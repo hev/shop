@@ -25,6 +25,7 @@ from hevlayer import (
     AsyncHevlayer,
     Chunk,
     CreatePipelineRequest,
+    HevlayerError,
     PutChunksRequest,
 )
 
@@ -238,11 +239,11 @@ async def status(request: Request, pipeline_id: str | None = None) -> StatusResp
     layer: AsyncHevlayer = request.app.state.layer
     resolved_pipeline_id = pipeline_id or settings.default_pipeline_id
 
-    layer_status = (await layer.get_pipeline_status(resolved_pipeline_id)).model_dump()
+    layer_status = await pipeline_status_or_empty(layer, resolved_pipeline_id)
     try:
-        extraction_status = (
-            await layer.get_pipeline_status(settings.extraction_pipeline_id)
-        ).model_dump()
+        extraction_status = await pipeline_status_or_empty(
+            layer, settings.extraction_pipeline_id
+        )
     except Exception:
         extraction_status = {}
     jobs = stage_counts_from_status(extraction_status)
@@ -252,6 +253,25 @@ async def status(request: Request, pipeline_id: str | None = None) -> StatusResp
         jobs=jobs,
         extraction=extraction_status,
     )
+
+
+async def pipeline_status_or_empty(
+    layer: AsyncHevlayer, pipeline_id: str
+) -> dict[str, Any]:
+    try:
+        return (await layer.get_pipeline_status(pipeline_id)).model_dump()
+    except HevlayerError as exc:
+        if exc.status_code != 404:
+            raise
+        return {
+            "pipeline_id": pipeline_id,
+            "counts": {},
+            "pending_count": 0,
+            "processing_count": 0,
+            "failed_count": 0,
+            "indexed_rate_per_min": 0.0,
+            "rate_window_seconds": 0,
+        }
 
 
 def stage_counts_from_status(status: dict[str, Any]) -> dict[str, int]:
