@@ -131,6 +131,10 @@ class Settings(BaseSettings):
     # from expiring mid-batch.
     review_upsert_concurrency: int = Field(default=32, alias="REVIEW_UPSERT_CONCURRENCY")
     cleanup_embedded_images: bool = Field(default=True, alias="CLEANUP_EMBEDDED_IMAGES")
+    # Per-blob ceiling for the doc cache. Aerospike's default write-block
+    # is 1 MB and the layer-gateway hard-caps at 512 KB, so we drop the
+    # blob (still write the vector) above this threshold.
+    blob_max_bytes: int = Field(default=512 * 1024, alias="BLOB_MAX_BYTES")
     worker_poll_seconds: float = Field(default=5.0, alias="WORKER_POLL_SECONDS")
     claim_lease_seconds: int = Field(default=900, alias="CLAIM_LEASE_SECONDS")
     claim_heartbeat_seconds: float = Field(default=60.0, alias="CLAIM_HEARTBEAT_SECONDS")

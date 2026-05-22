@@ -586,6 +586,8 @@ def make_settings(**overrides) -> SimpleNamespace:
         review_classification_batch_size=4,
         review_aggregate_batch_size=10,
         openrouter_api_key="test-key",
+        blob_max_bytes=512 * 1024,
+        layer_gateway_public_url="https://aws-us-east-1.hevlayer.com",
     )
     for key, value in overrides.items():
         setattr(s, key, value)

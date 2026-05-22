@@ -30,8 +30,11 @@ from math import ceil
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+from base64 import b64encode
+
 from hevlayer import (
     AsyncHevlayer,
+    BlobRequest,
     Chunk,
     ClaimDocumentsRequest,
     CreatePipelineRequest,
@@ -235,6 +238,7 @@ async def process_embed_products(ctx: StageContext, doc_ids: list[str]) -> Stage
     complete: list[str] = []
     release: list[str] = []
     batch = ctx.settings.embedding_batch_size
+    blob_max = ctx.settings.blob_max_bytes
     for i in range(0, len(prepared), batch):
         window = prepared[i : i + batch]
         try:
@@ -245,16 +249,56 @@ async def process_embed_products(ctx: StageContext, doc_ids: list[str]) -> Stage
             logger.exception("CLIP batch failed")
             release.extend(item[0] for item in window)
             continue
-        upserts = [
-            UpsertDocument(id=doc_id, vector=v, attributes=attrs)
-            for (doc_id, _img, attrs), v in zip(window, vectors, strict=True)
-        ]
+        upserts = []
+        for (doc_id, image_path, attrs), vector in zip(window, vectors, strict=True):
+            blob = _load_image_blob(doc_id, image_path, blob_max)
+            blobs = {"image": blob} if blob is not None else {}
+            upserts.append(
+                UpsertDocument(
+                    id=doc_id, vector=vector, attributes=attrs, blobs=blobs
+                )
+            )
         await ctx.layer.upsert_documents(
             ctx.settings.namespace, UpsertRequest(upserts=upserts)
         )
         complete.extend(item[0] for item in window)
 
     return StageOutcome(complete=complete, fail=fail, release=release)
+
+
+_IMAGE_CONTENT_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+
+
+def _load_image_blob(
+    doc_id: str, path: Path, max_bytes: int
+) -> BlobRequest | None:
+    """Read a product image into a BlobRequest. Returns None (and logs) on
+    oversize or read failure so the vector write still wins.
+    """
+    content_type = _IMAGE_CONTENT_TYPES.get(path.suffix.lower())
+    if content_type is None:
+        logger.info(
+            "blob_unknown_suffix",
+            extra={"doc_id": doc_id, "suffix": path.suffix},
+        )
+        return None
+    try:
+        data = path.read_bytes()
+    except OSError:
+        logger.exception("blob_read_failed", extra={"doc_id": doc_id})
+        return None
+    if len(data) > max_bytes:
+        logger.info(
+            "blob_oversize",
+            extra={"doc_id": doc_id, "bytes": len(data), "limit": max_bytes},
+        )
+        return None
+    return BlobRequest(data=b64encode(data).decode("ascii"), content_type=content_type)
 
 
 # ---------------------------------------------------------------------------
