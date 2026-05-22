@@ -1,0 +1,4 @@
+# Slim deps for the backfill-images UDF worker. No torch / transformers /
+# datasets — the UDF only fetches HTTP and hands bytes back to the gateway.
+-e /layer/clients/python
+httpx>=0.27

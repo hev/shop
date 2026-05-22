@@ -5,6 +5,10 @@
       "context": ".",
       "dockerfile": "indexer/Dockerfile"
     },
+    "udf-backfill-images": {
+      "context": ".",
+      "dockerfile": "indexer/Dockerfile.udf"
+    },
     "web": {
       "context": "web",
       "dockerfile": "web/Dockerfile"

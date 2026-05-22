@@ -528,3 +528,19 @@ workers:
       query: 'sum(layer_pipeline_stage_count{pipeline_id="{{ .Values.pipeline.reviewAggregate.id }}",stage=~"pending|aggregating"}) or vector(0)'
       threshold: "1"
       activationThreshold: "0"
+
+# UDFs are now first-class CRDs (RFC 0008). The layer-operator emits the
+# worker Deployment + AutoscalingPolicy from a `kind: UDF` CR — shop only
+# needs to apply the CR (see indexer/udfs/<name>.yaml) and make sure the
+# operator can find the gateway API key (operatorGatewaySecret below).
+
+# Shadow secret so the layer-operator can inject LAYER_GATEWAY_API_KEY into
+# UDF worker pods it emits in this namespace. The operator hardcodes secret
+# key `layer-gateway-api-key` and reads the secret name from its own env
+# (GATEWAY_API_SECRET_NAME, default `layer`). Shop's existing secret uses
+# the env-style `LAYER_GATEWAY_API_KEY` key — different shape — so we mirror
+# the value into the operator-expected name/key here.
+operatorGatewaySecret:
+  create: true
+  name: layer
+  key: layer-gateway-api-key
