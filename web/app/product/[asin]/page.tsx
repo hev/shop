@@ -1,5 +1,4 @@
 import { notFound } from "next/navigation";
-import Image from "next/image";
 import Link from "next/link";
 import { findByAsin, MOCK_REVIEW_TEXT, PRODUCTS } from "@/lib/mock-data";
 import { similarProducts } from "@/lib/search";
@@ -13,6 +12,7 @@ import {
   type LayerPerf,
 } from "@/lib/backend";
 import { ProductGrid } from "@/components/ProductGrid";
+import { ProductImage } from "@/components/ProductImage";
 import { LayerPerfBadge, StableAsOfBadge } from "@/components/LayerPerfBadge";
 import type { Product, ReviewHit, ReviewSample } from "@/lib/types";
 
@@ -146,16 +146,13 @@ export default async function ProductPage({
 
       <div className="grid grid-cols-1 gap-10 lg:grid-cols-2">
         <div className="relative aspect-square w-full overflow-hidden rounded-3xl bg-ink-100">
-          {product.image_url ? (
-            <Image
-              src={product.image_url}
-              alt={product.title}
-              fill
-              sizes="(max-width: 1024px) 100vw, 50vw"
-              priority
-              className="object-cover"
-            />
-          ) : null}
+          <ProductImage
+            product={product}
+            fill
+            sizes="(max-width: 1024px) 100vw, 50vw"
+            priority
+            className="object-cover"
+          />
         </div>
 
         <div className="flex flex-col">

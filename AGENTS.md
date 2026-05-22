@@ -60,6 +60,8 @@ calling from a laptop.
 curl -s https://api.hev-shop.com/healthz
 curl -s https://api.hev-shop.com/meta | jq .
 curl -s "https://api.hev-shop.com/product/B00FI7TCGI" | jq .
+# Image blob redirect — should 302 to the gateway blob route.
+curl -sI "https://api.hev-shop.com/product/B00FI7TCGI/image"
 curl -s -X POST -H 'content-type: application/json' \
   -d '{"query":"wireless headphones","top_k":3}' \
   https://api.hev-shop.com/search | jq .

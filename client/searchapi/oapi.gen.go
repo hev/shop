@@ -405,6 +405,9 @@ type ClientInterface interface {
 	// ProductProductAsinGet request
 	ProductProductAsinGet(ctx context.Context, asin string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ProductImageProductAsinImageGet request
+	ProductImageProductAsinImageGet(ctx context.Context, asin string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// RecommendRecommendPostWithBody request with any body
 	RecommendRecommendPostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -448,6 +451,18 @@ func (c *Client) MetaMetaGet(ctx context.Context, params *MetaMetaGetParams, req
 
 func (c *Client) ProductProductAsinGet(ctx context.Context, asin string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewProductProductAsinGetRequest(c.Server, asin)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ProductImageProductAsinImageGet(ctx context.Context, asin string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewProductImageProductAsinImageGetRequest(c.Server, asin)
 	if err != nil {
 		return nil, err
 	}
@@ -628,6 +643,40 @@ func NewProductProductAsinGetRequest(server string, asin string) (*http.Request,
 	}
 
 	operationPath := fmt.Sprintf("/product/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewProductImageProductAsinImageGetRequest generates requests for ProductImageProductAsinImageGet
+func NewProductImageProductAsinImageGetRequest(server string, asin string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "asin", asin, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/product/%s/image", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -953,6 +1002,9 @@ type ClientWithResponsesInterface interface {
 	// ProductProductAsinGetWithResponse request
 	ProductProductAsinGetWithResponse(ctx context.Context, asin string, reqEditors ...RequestEditorFn) (*ProductProductAsinGetResponse, error)
 
+	// ProductImageProductAsinImageGetWithResponse request
+	ProductImageProductAsinImageGetWithResponse(ctx context.Context, asin string, reqEditors ...RequestEditorFn) (*ProductImageProductAsinImageGetResponse, error)
+
 	// RecommendRecommendPostWithBodyWithResponse request with any body
 	RecommendRecommendPostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RecommendRecommendPostResponse, error)
 
@@ -1056,6 +1108,37 @@ func (r ProductProductAsinGetResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ProductProductAsinGetResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ProductImageProductAsinImageGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *interface{}
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r ProductImageProductAsinImageGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ProductImageProductAsinImageGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ProductImageProductAsinImageGetResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -1213,6 +1296,15 @@ func (c *ClientWithResponses) ProductProductAsinGetWithResponse(ctx context.Cont
 	return ParseProductProductAsinGetResponse(rsp)
 }
 
+// ProductImageProductAsinImageGetWithResponse request returning *ProductImageProductAsinImageGetResponse
+func (c *ClientWithResponses) ProductImageProductAsinImageGetWithResponse(ctx context.Context, asin string, reqEditors ...RequestEditorFn) (*ProductImageProductAsinImageGetResponse, error) {
+	rsp, err := c.ProductImageProductAsinImageGet(ctx, asin, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseProductImageProductAsinImageGetResponse(rsp)
+}
+
 // RecommendRecommendPostWithBodyWithResponse request with arbitrary body returning *RecommendRecommendPostResponse
 func (c *ClientWithResponses) RecommendRecommendPostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RecommendRecommendPostResponse, error) {
 	rsp, err := c.RecommendRecommendPostWithBody(ctx, contentType, body, reqEditors...)
@@ -1340,6 +1432,39 @@ func ParseProductProductAsinGetResponse(rsp *http.Response) (*ProductProductAsin
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest ProductResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseProductImageProductAsinImageGetResponse parses an HTTP response from a ProductImageProductAsinImageGetWithResponse call
+func ParseProductImageProductAsinImageGetResponse(rsp *http.Response) (*ProductImageProductAsinImageGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ProductImageProductAsinImageGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest interface{}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

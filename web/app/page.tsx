@@ -1,6 +1,6 @@
 import Link from "next/link";
-import Image from "next/image";
 import { ProductGrid } from "@/components/ProductGrid";
+import { ProductImage } from "@/components/ProductImage";
 import { LayerPerfBadge } from "@/components/LayerPerfBadge";
 import { PRODUCTS } from "@/lib/mock-data";
 import {
@@ -125,16 +125,13 @@ export default async function HomePage() {
                   i === 0 ? "col-span-2 row-span-2 aspect-square" : "aspect-square"
                 }`}
               >
-                {p.image_url ? (
-                  <Image
-                    src={p.image_url}
-                    alt={p.title}
-                    fill
-                    sizes="(max-width: 1024px) 50vw, 33vw"
-                    priority
-                    className="object-cover transition duration-700 hover:scale-105"
-                  />
-                ) : null}
+                <ProductImage
+                  product={p}
+                  fill
+                  sizes="(max-width: 1024px) 50vw, 33vw"
+                  priority
+                  className="object-cover transition duration-700 hover:scale-105"
+                />
               </Link>
             ))}
           </div>

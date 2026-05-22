@@ -1,6 +1,6 @@
 import Link from "next/link";
-import Image from "next/image";
 import type { Product } from "@/lib/types";
+import { ProductImage } from "./ProductImage";
 
 export function ProductCard({ product, priority = false }: { product: Product; priority?: boolean }) {
   return (
@@ -9,9 +9,8 @@ export function ProductCard({ product, priority = false }: { product: Product; p
       className="group block"
     >
       <div className="relative aspect-square w-full overflow-hidden rounded-2xl bg-ink-100">
-        <Image
-          src={product.image_url}
-          alt={product.title}
+        <ProductImage
+          product={product}
           fill
           sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
           priority={priority}
