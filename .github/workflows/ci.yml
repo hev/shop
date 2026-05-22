@@ -1,0 +1,107 @@
+name: CI
+
+# Push CI: fast hermetic checks on every PR and main push. Heavy stuff
+# (live API, hermetic Layer stack) lives in nightly.yml + layer-e2e.yml.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python (common + search + indexer)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout shop
+        uses: actions/checkout@v4
+        with:
+          path: shop
+
+      # The conftests in search/ and indexer/ expect the hevlayer SDK at
+      # ../layer/clients/python/src and put it on sys.path. Mirror the
+      # sibling-checkout layout that ../layer/.github/workflows/shop-e2e.yml
+      # uses in the opposite direction.
+      - name: Checkout layer (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: hev/layer
+          path: layer
+          ssh-key: ${{ secrets.LAYER_DEPLOY_KEY }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      # Light deps only. The conftests add hevlayer + hev_shop_common to
+      # sys.path so we skip the editable installs from requirements.txt,
+      # and the embedder wrappers lazy-import torch (tests use _fakes.py).
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install \
+            fastapi 'httpx>=0.27' pytest \
+            'pydantic>=2' 'pydantic-settings>=2.6' \
+            numpy pillow datasets
+
+      - name: pytest common
+        working-directory: shop/common
+        run: python -m pytest tests/ --tb=short
+
+      - name: pytest search
+        working-directory: shop/search
+        run: python -m pytest tests/ --tb=short
+
+      - name: pytest indexer
+        working-directory: shop/indexer
+        run: python -m pytest tests/ --tb=short
+
+  go:
+    name: Go (CLI + generated clients)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: gofmt
+        run: |
+          fmtout=$(gofmt -l .)
+          if [ -n "$fmtout" ]; then
+            echo "::error::gofmt would change these files:"
+            echo "$fmtout"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test
+        run: go test ./... -count=1
+
+      # client/searchapi and client/indexerapi are regenerated from the
+      # committed OpenAPI specs (search/openapi.json, indexer/openapi.json).
+      # Fail if someone edited a spec without re-running `make codegen`.
+      - name: Install oapi-codegen
+        run: go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest
+
+      - name: codegen drift
+        run: |
+          go generate ./...
+          if ! git diff --exit-code; then
+            echo "::error::generated Go client is stale. Run 'make codegen' and commit."
+            exit 1
+          fi

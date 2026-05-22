@@ -1,0 +1,75 @@
+name: Nightly
+
+# Read-only e2e against the deployed stack at api.hev-shop.com. The `shop`
+# CLI is the test harness: every endpoint has a matching subcommand
+# (see AGENTS.md), so the script below mirrors what an operator would
+# do from a laptop.
+#
+# We do NOT exercise /index or /backfill here — those mutate prod data.
+# Hermetic write-path coverage lives in layer-e2e.yml.
+
+on:
+  schedule:
+    # 07:00 UTC daily. Matches ../layer/.github/workflows/nightly.yml so
+    # cross-repo failures show up in the same window.
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+
+jobs:
+  cli-e2e-live:
+    name: shop CLI -> api.hev-shop.com
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SHOP_API_BASE: https://api.hev-shop.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Build shop CLI
+        run: |
+          go build -o "$RUNNER_TEMP/shop" .
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: shop health
+        run: shop health
+
+      - name: shop meta
+        run: |
+          out=$(shop meta)
+          echo "$out"
+          # Just confirm we got a structured response with the headline
+          # counters; the exact field set is asserted by search/tests.
+          echo "$out" | jq -e 'has("products") and has("reviews")' >/dev/null
+
+      - name: shop search (text query)
+        run: |
+          out=$(shop search "wireless headphones" --top-k 3)
+          echo "$out"
+          echo "$out" | jq -e '.results | length >= 1' >/dev/null
+
+      - name: shop product (canonical fixture)
+        run: |
+          # B00FI7TCGI is the sample asin used throughout AGENTS.md.
+          out=$(shop product B00FI7TCGI)
+          echo "$out"
+          echo "$out" | jq -e '.asin == "B00FI7TCGI"' >/dev/null
+
+      - name: shop recommend
+        run: |
+          out=$(shop recommend B00FI7TCGI --top-k 3)
+          echo "$out"
+          echo "$out" | jq -e '.results | length >= 1' >/dev/null
+
+      - name: shop search-reviews (best-effort)
+        # API_REVIEW_SEARCH_ENABLED gates this behind a GPU pod; don't fail
+        # nightly if review search isn't currently scheduled.
+        continue-on-error: true
+        run: shop search-reviews --asin B00FI7TCGI --query battery --top-k 3
+
+      - name: shop status (read-only pipeline check)
+        run: shop status --pipeline-id hev-shop-product-images

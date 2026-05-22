@@ -1,0 +1,153 @@
+name: layer-e2e
+
+# Hermetic mirror of ../layer/.github/workflows/shop-e2e.yml — that one
+# runs shop tests against a freshly regenerated Python SDK; this one
+# runs the shop CLI against a freshly built layer-gateway, so SDK or
+# gateway changes that would break the storefront fail here before they
+# ship.
+#
+# Status: workflow_dispatch only until the compose+gateway boot is
+# proven stable on a runner. Once green for a week or so, uncomment
+# the `schedule` block to promote to nightly.
+
+on:
+  workflow_dispatch:
+    inputs:
+      layer_ref:
+        description: 'Branch or SHA of hev/layer to validate against'
+        required: false
+        default: 'main'
+  # schedule:
+  #   - cron: '0 8 * * *'  # 1h after nightly.yml so prod check lands first
+
+jobs:
+  layer-e2e:
+    name: shop CLI -> local layer-gateway
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout shop
+        uses: actions/checkout@v4
+        with:
+          path: shop
+
+      - name: Checkout layer (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: hev/layer
+          ref: ${{ inputs.layer_ref }}
+          path: layer
+          ssh-key: ${{ secrets.LAYER_DEPLOY_KEY }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+          cache-dependency-path: shop/go.sum
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: layer
+
+      # ---- Bring up the Layer stack ----
+      - name: docker compose up (postgres + aerospike + minio)
+        working-directory: layer
+        run: docker compose up -d --wait
+
+      - name: Build layer-gateway
+        working-directory: layer
+        run: cargo build -p layer-gateway --release
+
+      - name: Run layer-gateway
+        working-directory: layer
+        env:
+          # Adjust env to whatever apps/layer-gateway expects locally;
+          # the values below are placeholders matching the compose ports.
+          DATABASE_URL: postgres://hevlayer:hevlayer@localhost:5432/hevlayer
+          AEROSPIKE_HOSTS: localhost:3000
+          S3_ENDPOINT: http://localhost:9000
+          S3_ACCESS_KEY: minioadmin
+          S3_SECRET_KEY: minioadmin
+        run: |
+          ./target/release/layer-gateway &
+          echo $! > "$RUNNER_TEMP/gateway.pid"
+          # Wait for /v2/pipelines to respond. 60s should be plenty.
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8080/v2/pipelines >/dev/null; then
+              echo "gateway up"; break
+            fi
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8080/v2/pipelines >/dev/null
+
+      # ---- Bring up the shop services pointed at the local gateway ----
+      - name: Install shop service deps
+        working-directory: shop
+        run: |
+          python -m pip install --upgrade pip
+          # Editable installs in requirements.txt resolve sibling layer +
+          # common automatically. Skip torch on the test pod by pinning
+          # CPU-only wheels.
+          pip install --extra-index-url https://download.pytorch.org/whl/cpu \
+              torch
+          pip install -r search/requirements.txt
+          pip install -r indexer/requirements.txt
+
+      - name: Run search + indexer
+        working-directory: shop
+        env:
+          # Point the shop services at the local gateway. The exact env
+          # name comes from common/hev_shop_common/config.py — adjust if
+          # the Settings field is renamed.
+          HEVLAYER_GATEWAY_URL: http://127.0.0.1:8080
+          API_REVIEW_SEARCH_ENABLED: 'false'
+        run: |
+          (cd search  && uvicorn app.main:app --host 127.0.0.1 --port 8081) &
+          echo $! > "$RUNNER_TEMP/search.pid"
+          (cd indexer && uvicorn app.main:app --host 127.0.0.1 --port 8082) &
+          echo $! > "$RUNNER_TEMP/indexer.pid"
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8081/healthz >/dev/null && \
+            curl -sf http://127.0.0.1:8082/status  >/dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8081/healthz
+          curl -sf http://127.0.0.1:8082/status
+
+      # ---- Drive the shop CLI ----
+      - name: Build shop CLI
+        working-directory: shop
+        run: go build -o "$RUNNER_TEMP/shop" .
+
+      - name: shop CLI smoke
+        env:
+          PATH: ${{ runner.temp }}:${{ env.PATH }}
+        run: |
+          shop --search-url  http://127.0.0.1:8081 health
+          shop --indexer-url http://127.0.0.1:8082 status \
+            --pipeline-id hev-shop-product-images
+          shop --search-url  http://127.0.0.1:8081 meta
+
+      # ---- Teardown (best-effort; runner is ephemeral but be tidy) ----
+      - name: Tail logs on failure
+        if: failure()
+        working-directory: layer
+        run: docker compose logs --tail=200 || true
+
+      - name: Stop background processes
+        if: always()
+        run: |
+          for f in "$RUNNER_TEMP"/gateway.pid "$RUNNER_TEMP"/search.pid "$RUNNER_TEMP"/indexer.pid; do
+            [ -f "$f" ] && kill "$(cat "$f")" 2>/dev/null || true
+          done
+
+      - name: docker compose down
+        if: always()
+        working-directory: layer
+        run: docker compose down -v
