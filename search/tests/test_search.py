@@ -9,11 +9,17 @@ gateway or model.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from hevlayer import CountResponse, QueryResponse, QueryResult
+from hevlayer import (
+    CountResponse,
+    NamespaceMetadata,
+    QueryResponse,
+    QueryResult,
+)
 
 from app.main import app
 from tests._fakes import (
@@ -35,6 +41,8 @@ def client_with_fakes():
         "layer": app.state.__dict__.get("layer"),
         "text_embedder": app.state.__dict__.get("text_embedder"),
         "review_text_embedder": app.state.__dict__.get("review_text_embedder"),
+        "meta_cache": app.state.__dict__.get("meta_cache"),
+        "meta_cache_lock": app.state.__dict__.get("meta_cache_lock"),
     }
     app.state.settings = make_settings(
         API_REVIEW_SEARCH_ENABLED=True,
@@ -43,6 +51,8 @@ def client_with_fakes():
     app.state.layer = layer
     app.state.text_embedder = clip
     app.state.review_text_embedder = qwen
+    app.state.meta_cache = {}
+    app.state.meta_cache_lock = asyncio.Lock()
 
     client = TestClient(app)
     try:
@@ -207,3 +217,39 @@ class TestReviewSearchCursorAndCount:
         # span the whole shard.
         count_call = layer.count_calls[0]
         assert count_call["filters"] == ["asin", "Eq", "B00FI7TCGI"]
+
+
+class TestMeta:
+    def test_category_buckets_come_from_snapshot(self, client_with_fakes):
+        client, layer, _, _ = client_with_fakes
+        layer.namespace_metadata_data = NamespaceMetadata(
+            id="amazon-products",
+            schema={},
+            approx_logical_bytes=0,
+            approx_row_count=12,
+            created_at="2026-05-20T00:00:00Z",
+            updated_at="2026-05-20T00:00:00Z",
+            layer={"stable_as_of": 12345, "is_stable": True},
+        )
+        layer.snapshot_values_by_namespace["amazon-products"] = {
+            "category": [
+                {"value": "Audio", "doc_count": 7},
+                {"value": "Cameras", "doc_count": 5},
+            ]
+        }
+
+        resp = client.get("/meta")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["vectors"] == 12
+        assert body["stable_as_of"] == 12345
+        assert body["is_stable"] is True
+        assert body["categories"] == [
+            {"value": "Audio", "doc_count": 7},
+            {"value": "Cameras", "doc_count": 5},
+        ]
+        assert layer.snapshot_calls[-1] == {
+            "namespace": "amazon-products",
+            "field": "category",
+        }

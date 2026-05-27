@@ -16,14 +16,17 @@ from typing import Any
 from hevlayer import (
     CountRequest,
     CountResponse,
-    CreateScanRequest,
+    CreateSnapshotRequest,
     Document,
     LayerPerf,
     LayerResponse,
     QueryRequest,
     QueryResponse,
     QueryResult,
-    Scan,
+    SnapshotBody,
+    SnapshotField,
+    SnapshotJob,
+    SnapshotValueCount,
 )
 
 
@@ -40,13 +43,13 @@ class FakeLayerClient:
         self.query_calls: list[dict[str, Any]] = []
         self.count_calls: list[dict[str, Any]] = []
         self.fetch_document_calls: list[dict[str, Any]] = []
-        self.scan_calls: list[dict[str, Any]] = []
+        self.snapshot_calls: list[dict[str, Any]] = []
         self.namespace_metadata_calls: list[str] = []
 
         self.next_query_response: QueryResponse | None = None
         self.next_count_response: CountResponse | None = None
         self.documents_by_namespace: dict[tuple[str, str], dict[str, Any]] = {}
-        self.scan_results_by_namespace: dict[str, list[dict[str, Any]]] = {}
+        self.snapshot_values_by_namespace: dict[str, dict[str, list[dict[str, Any]]]] = {}
         self.namespace_metadata_data: Any = None
         self.count_raises: bool = False
 
@@ -157,52 +160,94 @@ class FakeLayerClient:
             raise RuntimeError("no metadata scripted")
         return _attach_perf(data, with_perf)
 
-    async def scan(
+    async def create_snapshot(
         self,
         namespace: str,
-        body: CreateScanRequest | dict[str, Any],
+        body: CreateSnapshotRequest | dict[str, Any],
         *,
-        initial_delay: float = 0.05,
-        max_delay: float = 2.0,
-        timeout: float | None = None,
-    ) -> Scan:
-        if isinstance(body, CreateScanRequest):
-            scan_type = body.scan_type
+        with_perf: bool = False,
+    ) -> SnapshotJob | LayerResponse[SnapshotJob]:
+        if isinstance(body, CreateSnapshotRequest):
             field = body.field
         else:
-            scan_type = body["scan_type"]
             field = body.get("field")
-        self.scan_calls.append(
+        self.snapshot_calls.append(
             {
                 "namespace": namespace,
-                "scan_type": scan_type,
                 "field": field,
             }
         )
-        scan_id = f"scan-{len(self.scan_calls)}"
-        return Scan(
-            id=scan_id,
+        job = SnapshotJob(
+            id=f"snapshot-{len(self.snapshot_calls)}",
             namespace=namespace,
-            scan_type=scan_type,
+            field=field or "",
             source="auto",
             effective_source="cache",
             status="completed",
             progress=1.0,
             documents_scanned=0,
+            stable_as_of=None,
             created_at="2026-05-20T00:00:00Z",
+            completed_at="2026-05-20T00:00:00Z",
+            error=None,
+            sha=f"sha-{len(self.snapshot_calls)}",
         )
+        return _attach_perf(job, with_perf)
 
-    async def get_scan_results(
+    async def get_snapshot_job(
         self,
         namespace: str,
-        scan_id: str,
+        job_id: str,
         *,
-        limit: int | None = None,
-        offset: int | None = None,
         with_perf: bool = False,
-    ) -> Any:
-        rows = list(self.scan_results_by_namespace.get(namespace, []))
-        return _attach_perf({"results": rows, "total": len(rows)}, with_perf)
+    ) -> SnapshotJob | LayerResponse[SnapshotJob]:
+        index = int(job_id.rsplit("-", 1)[-1])
+        call = self.snapshot_calls[index - 1]
+        job = SnapshotJob(
+            id=job_id,
+            namespace=namespace,
+            field=call.get("field") or "",
+            source="auto",
+            effective_source="cache",
+            status="completed",
+            progress=1.0,
+            documents_scanned=0,
+            stable_as_of=None,
+            created_at="2026-05-20T00:00:00Z",
+            completed_at="2026-05-20T00:00:00Z",
+            error=None,
+            sha=f"sha-{index}",
+        )
+        return _attach_perf(job, with_perf)
+
+    async def get_namespace_snapshot(
+        self,
+        namespace: str,
+        sha: str,
+        *,
+        with_perf: bool = False,
+    ) -> SnapshotBody | LayerResponse[SnapshotBody]:
+        index = int(sha.rsplit("-", 1)[-1])
+        field = self.snapshot_calls[index - 1].get("field") or ""
+        rows = self.snapshot_values_by_namespace.get(namespace, {}).get(field, [])
+        body = SnapshotBody(
+            namespace=namespace,
+            watermark_ms=0,
+            sha=sha,
+            fields=[
+                SnapshotField(
+                    name=field,
+                    values=[
+                        SnapshotValueCount(
+                            v=str(row["value"]), n=int(row["doc_count"])
+                        )
+                        for row in rows
+                    ],
+                    truncated=False,
+                )
+            ],
+        )
+        return _attach_perf(body, with_perf)
 
 
 class FakeClipTextEmbedder:

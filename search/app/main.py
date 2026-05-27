@@ -29,7 +29,7 @@ from fastapi.responses import RedirectResponse
 from hevlayer import (
     AsyncHevlayer,
     CountRequest,
-    CreateScanRequest,
+    CreateSnapshotRequest,
     QueryRequest,
     VectorCountQuery,
 )
@@ -131,6 +131,54 @@ async def get_review_text_embedder(app: FastAPI):
                 QwenTextEmbedder, app.state.settings
             )
         return app.state.review_text_embedder
+
+
+async def wait_for_snapshot_job(
+    layer: AsyncHevlayer,
+    namespace: str,
+    job_id: str,
+    *,
+    timeout: float | None,
+    initial_delay: float = 0.05,
+    max_delay: float = 2.0,
+):
+    started = time.monotonic()
+    delay = initial_delay
+    while True:
+        job = await layer.get_snapshot_job(namespace, job_id)
+        if job.status == "completed":
+            return job
+        if job.status == "failed":
+            raise RuntimeError(
+                f"snapshot job {job_id!r} failed: {job.error or 'unknown error'}"
+            )
+        if timeout is not None and time.monotonic() - started >= timeout:
+            raise TimeoutError(f"snapshot job {job_id!r} did not finish")
+        await asyncio.sleep(delay)
+        delay = min(delay * 2, max_delay)
+
+
+async def get_field_snapshot(
+    layer: AsyncHevlayer,
+    namespace: str,
+    field: str,
+    *,
+    timeout: float | None,
+):
+    job = await layer.create_snapshot(
+        namespace,
+        CreateSnapshotRequest(field=field),
+    )
+    if job.status != "completed":
+        job = await wait_for_snapshot_job(
+            layer,
+            namespace,
+            job.id,
+            timeout=timeout,
+        )
+    if not job.sha:
+        raise RuntimeError(f"snapshot job {job.id!r} completed without a sha")
+    return await layer.get_namespace_snapshot(namespace, job.sha)
 
 
 def combine_filters(filters: list[list[object]]) -> list[object] | None:
@@ -570,7 +618,7 @@ async def review_samples(
 async def meta(request: Request, namespace: str | None = None) -> MetaResponse:
     """Fan out to layer-gateway for namespace shape:
       - /v2/namespaces/{ns}/metadata → row count + freshness watermark
-      - field_values scan on `category` → filterable category list
+      - on-demand snapshot on `category` → filterable category list
     """
     settings = request.app.state.settings
     layer: AsyncHevlayer = request.app.state.layer
@@ -593,20 +641,21 @@ async def meta(request: Request, namespace: str | None = None) -> MetaResponse:
                 if time.monotonic() - cached_at < cache_ttl:
                     return cached_response
 
-        metadata_response, category_scan = await asyncio.gather(
+        metadata_response, category_snapshot = await asyncio.gather(
             layer.get_namespace_metadata(resolved_namespace, with_perf=True),
-            layer.scan(
+            get_field_snapshot(
+                layer,
                 resolved_namespace,
-                CreateScanRequest(scan_type="field_values", field="category"),
+                "category",
+                timeout=settings.http_timeout_seconds,
             ),
         )
 
-        category_results = await layer.get_scan_results(
-            resolved_namespace, category_scan.id
-        )
         categories = [
-            CategoryBucket(value=row.value, doc_count=row.doc_count)
-            for row in category_results.results
+            CategoryBucket(value=value.v, doc_count=value.n)
+            for field in category_snapshot.fields
+            if field.name == "category"
+            for value in field.values
         ]
 
         metadata = metadata_response.data

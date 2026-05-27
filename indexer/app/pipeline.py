@@ -14,7 +14,7 @@ Stages, top-down:
     classify-reviews: pending  → indexed   (OpenRouter tag classification,
                                             prefix=classify:) — fans out
                                             ASINs into the aggregate pipeline
-    aggregate-tags:   pending  → indexed   (review namespace scan → PATCH
+    aggregate-tags:   pending  → indexed   (review namespace listing → PATCH
                                             product rows with tag_counts/samples)
 """
 
@@ -37,8 +37,9 @@ from hevlayer import (
     BlobRequest,
     Chunk,
     ClaimDocumentsRequest,
+    CreateListingRequest,
     CreatePipelineRequest,
-    CreateScanRequest,
+    FetchDocumentsRequest,
     HeartbeatDocumentsRequest,
     PatchDocument,
     PatchRequest,
@@ -678,19 +679,40 @@ async def aggregate_review_tag_attrs(
         namespace_base=ctx.settings.reviews_namespace_base,
         shard_count=ctx.settings.reviews_namespace_shard_count,
     )
-    scan = await ctx.layer.scan(
+    page_size = max(1, min(int(ctx.settings.review_aggregate_scan_page_size), 10_000))
+    listing = await ctx.layer.listing(
         namespace,
-        CreateScanRequest(
-            scan_type="full_document",
+        CreateListingRequest(
             filters=["asin", "Eq", asin],
-            page_size=ctx.settings.review_aggregate_scan_page_size,
+            page_size=page_size,
         ),
+        timeout=getattr(ctx.settings, "http_timeout_seconds", 300.0),
     )
-    results = await ctx.layer.get_scan_results(namespace, scan.id)
+    if listing.status == "failed":
+        raise RuntimeError(
+            f"review listing {listing.id!r} failed: {listing.error or 'unknown error'}"
+        )
+
+    ids: list[str] = []
+    offset = 0
+    while True:
+        results = await ctx.layer.get_listing_results(
+            namespace,
+            listing.id,
+            limit=page_size,
+            offset=offset,
+        )
+        ids.extend(results.ids)
+        offset += len(results.ids)
+        if offset >= results.total or not results.ids:
+            break
+
+    rows = await fetch_review_documents_for_aggregation(
+        ctx, namespace, ids, page_size
+    )
 
     classified: dict[str, dict[str, Any]] = {}
-    for row in scan_result_rows(results):
-        attrs = row_attrs(row)
+    for attrs in rows:
         review_id = str(attrs.get("review_id") or "").strip()
         if not review_id:
             continue
@@ -724,7 +746,9 @@ async def aggregate_review_tag_attrs(
             sample_candidates.get(tag, []),
             key=lambda item: (-item[0], item[1], item[2]),
         )
-        tag_samples[tag] = [review_id for _conf, _at, review_id in candidates[:sample_count]]
+        tag_samples[tag] = [
+            review_id for _conf, _at, review_id in candidates[:sample_count]
+        ]
 
     attrs: dict[str, Any] = {
         "tags": tags,
@@ -738,25 +762,36 @@ async def aggregate_review_tag_attrs(
     return attrs
 
 
-def scan_result_rows(results: Any) -> list[dict[str, Any]]:
-    # SDK returns a ScanResults pydantic model; `full_document` scans put
-    # row dicts in `.results` rather than the typed FieldValueResult, so
-    # normalise either shape (model or plain dict) to a list of dicts.
-    if hasattr(results, "model_dump"):
-        results = results.model_dump()
-    rows = results.get("results") if isinstance(results, dict) else None
-    if rows is None and isinstance(results, dict):
-        rows = results.get("data")
-    if not isinstance(rows, list):
+async def fetch_review_documents_for_aggregation(
+    ctx: StageContext,
+    namespace: str,
+    ids: list[str],
+    page_size: int,
+) -> list[dict[str, Any]]:
+    if not ids:
         return []
-    return [row for row in rows if isinstance(row, dict)]
-
-
-def row_attrs(row: dict[str, Any]) -> dict[str, Any]:
-    attrs = row.get("attributes")
-    if isinstance(attrs, dict):
-        return attrs
-    return row
+    include_attributes = [
+        "asin",
+        "review_id",
+        "tags",
+        "tag_confidences",
+        "review_classified_at",
+    ]
+    rows: list[dict[str, Any]] = []
+    for start in range(0, len(ids), page_size):
+        chunk = ids[start : start + page_size]
+        response = await ctx.layer.fetch_documents(
+            namespace,
+            FetchDocumentsRequest(
+                ids=chunk,
+                include_attributes=include_attributes,
+            ),
+        )
+        for document in response.documents:
+            attrs = getattr(document, "attributes", None)
+            if isinstance(attrs, dict):
+                rows.append(attrs)
+    return rows
 
 
 def parse_tag_confidences(value: Any) -> dict[str, float]:

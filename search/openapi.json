@@ -110,7 +110,7 @@
           },
           "layer_perf": {
             "$ref": "#/components/schemas/LayerPerf",
-            "description": "Gateway round-trip timing for the namespace metadata fetch (not the category scan).",
+            "description": "Gateway round-trip timing for the namespace metadata fetch (not the category snapshot).",
             "nullable": true
           },
           "namespace": {
@@ -566,7 +566,7 @@
     },
     "/meta": {
       "get": {
-        "description": "Fan out to layer-gateway for namespace shape:\n- /v2/namespaces/{ns}/metadata \u2192 row count + freshness watermark\n- field_values scan on `category` \u2192 filterable category list",
+        "description": "Fan out to layer-gateway for namespace shape:\n- /v2/namespaces/{ns}/metadata \u2192 row count + freshness watermark\n- on-demand snapshot on `category` \u2192 filterable category list",
         "operationId": "meta_meta_get",
         "parameters": [
           {

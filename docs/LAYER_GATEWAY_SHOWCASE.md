@@ -20,8 +20,8 @@ is structured to make each one visible:
 
 | Capability | Where in hev-shop |
 | ---------- | ----------------- |
-| **Document cache** — Aerospike pull-through on `fetch_document` / `fetch_many_documents`, populated by warm scans and read-through. Cache hits show `x-layer-cache: hit`. | Product detail pages call `AsyncHevlayer.fetch_document`; the storefront's `/product/[asin]` route reads from the cache without touching turbopuffer for the second hit. |
-| **Scans** — `field_values`, full-document, auto-mode source selection (cache vs origin) gated on a freshness watermark, plus a `warm` operation that primes the cache. | `/meta` issues a `field_values` scan on `category` to drive the landing-page facets; the gateway picks cache or origin based on `stable_as_of`. |
+| **Document cache** — Aerospike pull-through on `fetch_document` / `fetch_many_documents`, populated by warm jobs and read-through. Cache hits show `x-layer-cache: hit`. | Product detail pages call `AsyncHevlayer.fetch_document`; the storefront's `/product/[asin]` route reads from the cache without touching turbopuffer for the second hit. |
+| **Snapshots and listings** — field-value snapshots, ID listings, auto-mode source selection (cache vs origin) gated on a freshness watermark, plus a `warm` operation that primes the cache. | `/meta` materializes a `category` snapshot to drive the landing-page facets; review aggregation creates an ID listing and fetches the matching review documents. |
 | **Pipeline state machine** — `pending → embedding → indexed/failed` per document, exposed through Layer's pipeline API with atomic claim, leases, heartbeats, and stale-claim recovery. | `pipeline.py` is the entire app-side contract: claim, heartbeat, complete/fail/release. KEDA scales workers from `layer_pipeline_stage_count` metrics. |
 | **Freshness watermark** — every query response carries `stable_as_of` (epoch ms) and namespaces expose `is_stable`, derived from a consistency watcher that tracks when `unindexed_bytes` reaches 0. | `/search`, `/search/reviews`, and `/meta` pass the watermark through to the UI; the homepage renders "last indexed at …" against it. |
 
@@ -38,7 +38,7 @@ path:
 - product vectors are upserted into `amazon-products`
 - review vectors are written to `amazon-reviews-*` shards
 - product search uses `/v2/namespaces/{namespace}/query`
-- product pages and similar-item paths can use fetch/query/scan surfaces
+- product pages and similar-item paths can use fetch/query/listing/snapshot surfaces
 
 The gateway adds Aerospike pull-through caching and a hidden `_upserted_at`
 watermark. The web app passes `stable_as_of` through to the UI so users can see

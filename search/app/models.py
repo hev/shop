@@ -173,6 +173,6 @@ class MetaResponse(BaseModel):
         default=None,
         description=(
             "Gateway round-trip timing for the namespace metadata fetch "
-            "(not the category scan)."
+            "(not the category snapshot)."
         ),
     )

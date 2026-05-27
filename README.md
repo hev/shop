@@ -34,8 +34,8 @@ query with freshness signals, and let the gateway own the Turbopuffer edge.
   images with [CLIP ViT-L/14](https://huggingface.co/openai/clip-vit-large-patch14)
   and stores one product vector per ASIN. This is an app-level retrieval feature
   that gives the Layer/Turbopuffer path a real visual-search workload.
-- **Facet scans through Layer.** Category and attribute exploration can be
-  driven through Layer's namespace scan API, so the app can inspect indexed
+- **Facet snapshots through Layer.** Category and attribute exploration can be
+  driven through Layer's namespace snapshot API, so the app can inspect indexed
   product state without building a separate warehouse path for every facet.
 - **Multi-stage autoscaling Kubernetes pipeline.** CPU extraction, GPU image
   embedding, GPU review embedding, LLM classification, and tag aggregation run
@@ -80,13 +80,13 @@ product vectors as filterable tags.
   official `hevlayer.AsyncHevlayer` client (see `clients/python` in the
   layer repo). The SDK covers the turbopuffer-compatible namespace surface
   (query/upsert/patch/fetch), the pipeline state machine
-  (create/claim/heartbeat/stage), and the Layer-specific scan and
+  (create/claim/heartbeat/stage), and the Layer-specific snapshot/listing and
   document-cache APIs.
 - `indexer/app/pipeline.py` — the N-stage pipeline. One `STAGES` manifest plus
   a `run_stage` driver that owns the claim/heartbeat/release lifecycle, so
   each stage's `process_*` is just the work that's unique to that stage.
   Stages: `embed-products` (CLIP), `embed-reviews` (Qwen), `classify-reviews`
-  (OpenRouter), `aggregate-tags` (review scan → PATCH product rows).
+  (OpenRouter), `aggregate-tags` (review listing + fetch → PATCH product rows).
 - `indexer/app/extraction.py` — the CPU extraction worker that drains the
   Layer extraction pipeline and stages products + raw reviews into the layer
   pipelines.

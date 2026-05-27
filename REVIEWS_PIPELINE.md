@@ -42,7 +42,7 @@ Reviews give hev-shop a second searchable surface (per-product review search) an
                                                                  ▼
                                             ┌──────────────────────────────────┐
                                             │  CPU worker: review-aggregate    │
-                                            │  Scan review tags per asin       │
+                                            │  List/fetch tags per asin        │
                                             │  Threshold, pick samples         │
                                             │  → product attrs in              │
                                             │    amazon-products namespace     │
@@ -115,7 +115,7 @@ class ReviewRecord:
 
 Classification results live on the first review-vector chunk as Turbopuffer
 attributes (`tags`, `tag_confidences`, `review_classified_at`). Aggregation
-derives product-level tags by scanning the review namespace for an ASIN, so
+derives product-level tags by listing and fetching review documents for an ASIN, so
 there is no hev-shop-owned table in the gateway database.
 
 ## Implementation plan
@@ -151,7 +151,7 @@ End-to-end vertical for the tags path. Runs in parallel to PR 2's embed worker o
 
 - New CPU worker `review-classify`: claims documents from reviews pipeline, batches 5-10 reviews per OpenRouter call with structured-output prompt for the 11-tag schema, patches tags onto the review vector row, and upserts a debounced aggregate work item through the Layer pipeline API.
 - OpenRouter client: model id configurable, API key from k8s secret, retry/backoff
-- New CPU worker `review-aggregate`: claims asin jobs, scans the ASIN's review shard (threshold `count ≥ max(3, 5% of reviews)`), picks 2-3 highest-confidence samples per tag, upserts product attrs in `amazon-products` namespace
+- New CPU worker `review-aggregate`: claims asin jobs, lists IDs in the ASIN's review shard and fetches those documents (threshold `count ≥ max(3, 5% of reviews)`), picks 2-3 highest-confidence samples per tag, upserts product attrs in `amazon-products` namespace
 - `/search` accepts `tags` filter param
 - **Risk:** OpenRouter spend. Per-product cap (400) is the primary control; any future global spend cap needs an app-owned control-plane service, not direct writes to the gateway database.
 

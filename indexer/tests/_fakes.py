@@ -23,21 +23,24 @@ from hevlayer import (
     ClaimDocumentsResponse,
     CountRequest,
     CountResponse,
+    CreateListingRequest,
     CreatePipelineRequest,
-    CreateScanRequest,
     Chunk,
     Document,
     DocumentsStageResponse,
+    FetchDocumentsRequest,
+    FetchDocumentsResponse,
     HeartbeatDocumentsRequest,
     LayerPerf,
     LayerResponse,
+    ListingJob,
+    ListingResults,
     PatchRequest,
     Pipeline,
     PutChunksRequest,
     QueryRequest,
     QueryResponse,
     QueryResult,
-    Scan,
     SetDocumentsStageRequest,
     StageDocumentResponse,
     StatusResponse,
@@ -61,7 +64,7 @@ class FakeLayerClient:
         self.chunks_by_doc_id: dict[str, list[dict[str, Any]]] = {}
         self.documents_by_namespace: dict[tuple[str, str], dict[str, Any]] = {}
         self.scan_results_by_namespace: dict[str, list[dict[str, Any]]] = {}
-        self.scan_filters_by_id: dict[str, Any] = {}
+        self.listing_filters_by_id: dict[str, Any] = {}
 
         self.create_pipeline_calls: list[tuple[str, str, str]] = []
         self.claim_calls: list[dict[str, Any]] = []
@@ -72,7 +75,7 @@ class FakeLayerClient:
         self.patch_calls: list[dict[str, Any]] = []
         self.heartbeat_calls: list[dict[str, Any]] = []
         self.set_stage_calls: list[dict[str, Any]] = []
-        self.scan_calls: list[dict[str, Any]] = []
+        self.listing_calls: list[dict[str, Any]] = []
         self.stage_document_calls: list[dict[str, Any]] = []
         self.query_calls: list[dict[str, Any]] = []
         self.count_calls: list[dict[str, Any]] = []
@@ -327,6 +330,28 @@ class FakeLayerClient:
         document = Document(id=doc_id, attributes=record.get("attributes") or {})
         return _attach_perf(document, with_perf)
 
+    async def fetch_documents(
+        self,
+        namespace: str,
+        body: FetchDocumentsRequest | dict[str, Any],
+        *,
+        with_perf: bool = False,
+    ) -> FetchDocumentsResponse | LayerResponse[FetchDocumentsResponse]:
+        if isinstance(body, FetchDocumentsRequest):
+            ids = list(body.ids)
+        else:
+            ids = list(body.get("ids") or [])
+        documents: list[Document] = []
+        missing: list[str] = []
+        for doc_id in ids:
+            row = self._find_document_row(namespace, doc_id)
+            if row is None:
+                missing.append(doc_id)
+                continue
+            documents.append(Document(id=doc_id, attributes=dict(row.get("attributes") or row)))
+        response = FetchDocumentsResponse(documents=documents, missing=missing)
+        return _attach_perf(response, with_perf)
+
     async def upsert_documents(
         self,
         namespace: str,
@@ -443,62 +468,62 @@ class FakeLayerClient:
         )
         return _attach_perf(response, with_perf)
 
-    async def scan(
+    async def listing(
         self,
         namespace: str,
-        body: CreateScanRequest | dict[str, Any],
+        body: CreateListingRequest | dict[str, Any],
         *,
         initial_delay: float = 0.05,
         max_delay: float = 2.0,
         timeout: float | None = None,
-    ) -> Scan:
-        if isinstance(body, CreateScanRequest):
-            scan_type = body.scan_type
-            field = body.field
+    ) -> ListingJob:
+        if isinstance(body, CreateListingRequest):
             filters = body.filters
             page_size = body.page_size
         else:
-            scan_type = body["scan_type"]
-            field = body.get("field")
             filters = body.get("filters")
             page_size = body.get("page_size")
-        self.scan_calls.append(
+        self.listing_calls.append(
             {
                 "namespace": namespace,
-                "scan_type": scan_type,
-                "field": field,
                 "filters": filters,
                 "page_size": page_size,
             }
         )
-        scan_id = f"scan-{len(self.scan_calls)}"
-        self.scan_filters_by_id[scan_id] = filters
-        return Scan(
-            id=scan_id,
+        listing_id = f"listing-{len(self.listing_calls)}"
+        self.listing_filters_by_id[listing_id] = filters
+        return ListingJob(
+            id=listing_id,
             namespace=namespace,
-            scan_type=scan_type,
             source="auto",
             effective_source="cache",
             status="completed",
             progress=1.0,
             documents_scanned=0,
             created_at="2026-05-20T00:00:00Z",
+            completed_at="2026-05-20T00:00:00Z",
+            error=None,
         )
 
-    async def get_scan_results(
+    async def get_listing_results(
         self,
         namespace: str,
-        scan_id: str,
+        listing_id: str,
         *,
         limit: int | None = None,
         offset: int | None = None,
         with_perf: bool = False,
-    ) -> dict[str, Any] | LayerResponse[dict[str, Any]]:
-        # `full_document` scans return row dicts that don't match the SDK's
-        # typed FieldValueResult list; consumers run them through
-        # `pipeline.scan_result_rows`, which normalises either shape.
+    ) -> ListingResults | LayerResponse[ListingResults]:
+        rows = self._listing_rows(namespace, listing_id)
+        total = len(rows)
+        start = offset or 0
+        end = start + limit if limit is not None else total
+        ids = [self._row_doc_id(row, idx) for idx, row in enumerate(rows[start:end], start)]
+        return _attach_perf(ListingResults(ids=ids, total=total), with_perf)
+
+    def _listing_rows(self, namespace: str, listing_id: str) -> list[dict[str, Any]]:
         rows = list(self.scan_results_by_namespace.get(namespace, []))
-        filters = self.scan_filters_by_id.get(scan_id)
+        filters = self.listing_filters_by_id.get(listing_id)
         if isinstance(filters, list) and len(filters) == 3 and filters[1] == "Eq":
             field, _op, expected = filters
             rows = [
@@ -506,7 +531,28 @@ class FakeLayerClient:
                 for row in rows
                 if (row.get("attributes") or row).get(field) == expected
             ]
-        return _attach_perf({"results": rows, "total": len(rows)}, with_perf)
+        return rows
+
+    def _find_document_row(self, namespace: str, doc_id: str) -> dict[str, Any] | None:
+        key = (namespace, doc_id)
+        if key in self.documents_by_namespace:
+            return self.documents_by_namespace[key]
+        for idx, row in enumerate(self.scan_results_by_namespace.get(namespace, [])):
+            if self._row_doc_id(row, idx) == doc_id:
+                return row
+        return None
+
+    @staticmethod
+    def _row_doc_id(row: dict[str, Any], index: int) -> str:
+        attrs = row.get("attributes") or row
+        for key in ("id", "document_id"):
+            value = row.get(key) or attrs.get(key)
+            if value:
+                return str(value)
+        review_id = attrs.get("review_id")
+        if review_id:
+            return f"{review_id}:chunk:0000"
+        return f"doc-{index}"
 
 
 class FakeClipImageEmbedder:
