@@ -50,7 +50,7 @@ jobs:
         run: |
           out=$(shop search "wireless headphones" --top-k 3)
           echo "$out"
-          echo "$out" | jq -e '.results | length >= 1' >/dev/null
+          echo "$out" | jq -e '.hits | length >= 1' >/dev/null
 
       - name: shop product (canonical fixture)
         run: |
@@ -63,7 +63,7 @@ jobs:
         run: |
           out=$(shop recommend B00FI7TCGI --top-k 3)
           echo "$out"
-          echo "$out" | jq -e '.results | length >= 1' >/dev/null
+          echo "$out" | jq -e '.hits | length >= 1' >/dev/null
 
       - name: shop search-reviews (best-effort)
         # API_REVIEW_SEARCH_ENABLED gates this behind a GPU pod; don't fail
