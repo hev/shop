@@ -63,7 +63,7 @@ class FakeLayerClient:
         self.next_claim: list[str] = []
         self.chunks_by_doc_id: dict[str, list[dict[str, Any]]] = {}
         self.documents_by_namespace: dict[tuple[str, str], dict[str, Any]] = {}
-        self.scan_results_by_namespace: dict[str, list[dict[str, Any]]] = {}
+        self.listing_results_by_namespace: dict[str, list[dict[str, Any]]] = {}
         self.listing_filters_by_id: dict[str, Any] = {}
 
         self.create_pipeline_calls: list[tuple[str, str, str]] = []
@@ -522,7 +522,7 @@ class FakeLayerClient:
         return _attach_perf(ListingResults(ids=ids, total=total), with_perf)
 
     def _listing_rows(self, namespace: str, listing_id: str) -> list[dict[str, Any]]:
-        rows = list(self.scan_results_by_namespace.get(namespace, []))
+        rows = list(self.listing_results_by_namespace.get(namespace, []))
         filters = self.listing_filters_by_id.get(listing_id)
         if isinstance(filters, list) and len(filters) == 3 and filters[1] == "Eq":
             field, _op, expected = filters
@@ -537,7 +537,7 @@ class FakeLayerClient:
         key = (namespace, doc_id)
         if key in self.documents_by_namespace:
             return self.documents_by_namespace[key]
-        for idx, row in enumerate(self.scan_results_by_namespace.get(namespace, [])):
+        for idx, row in enumerate(self.listing_results_by_namespace.get(namespace, [])):
             if self._row_doc_id(row, idx) == doc_id:
                 return row
         return None
@@ -618,7 +618,7 @@ def make_settings(**overrides) -> SimpleNamespace:
         claim_heartbeat_seconds=3600,  # large → heartbeat task sleeps, never fires
         embedding_batch_size=16,
         vector_upsert_batch_size=10_000,
-        review_aggregate_scan_page_size=10_000,
+        review_aggregate_listing_page_size=10_000,
         chunk_fetch_concurrency=4,
         review_upsert_concurrency=4,
         cleanup_embedded_images=False,

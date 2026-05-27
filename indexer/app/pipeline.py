@@ -625,7 +625,7 @@ async def process_classify_reviews(ctx: StageContext, doc_ids: list[str]) -> Sta
 
 
 # ---------------------------------------------------------------------------
-# Stage: aggregate-tags  (review namespace scan → PATCH product rows)
+# Stage: aggregate-tags  (review namespace listing -> PATCH product rows)
 # ---------------------------------------------------------------------------
 
 async def setup_aggregate_tags(ctx: StageContext) -> None:
@@ -679,7 +679,7 @@ async def aggregate_review_tag_attrs(
         namespace_base=ctx.settings.reviews_namespace_base,
         shard_count=ctx.settings.reviews_namespace_shard_count,
     )
-    page_size = max(1, min(int(ctx.settings.review_aggregate_scan_page_size), 10_000))
+    page_size = max(1, min(int(ctx.settings.review_aggregate_listing_page_size), 10_000))
     listing = await ctx.layer.listing(
         namespace,
         CreateListingRequest(

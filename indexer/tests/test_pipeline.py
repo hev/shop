@@ -634,7 +634,7 @@ class AggregateTagsStageTests(unittest.IsolatedAsyncioTestCase):
         ns_a2 = review_namespace_for(
             "A2", namespace_base="amazon-reviews", shard_count=4
         )
-        self.layer.scan_results_by_namespace.setdefault(ns_a1, []).extend([
+        self.layer.listing_results_by_namespace.setdefault(ns_a1, []).extend([
             {
                 "attributes": {
                     "asin": "A1",
@@ -646,7 +646,7 @@ class AggregateTagsStageTests(unittest.IsolatedAsyncioTestCase):
             }
             for idx in range(3)
         ])
-        self.layer.scan_results_by_namespace.setdefault(ns_a2, []).extend([
+        self.layer.listing_results_by_namespace.setdefault(ns_a2, []).extend([
             {
                 "attributes": {
                     "asin": "A2",

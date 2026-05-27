@@ -28,6 +28,16 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.reviews_namespace_base, "v2-amazon-reviews")
         self.assertIsNone(settings.reviews_query_namespace_base)
 
+    def test_review_aggregate_listing_page_size_uses_new_env_name(self):
+        settings = Settings(REVIEW_AGGREGATE_LISTING_PAGE_SIZE="123")
+
+        self.assertEqual(settings.review_aggregate_listing_page_size, 123)
+
+    def test_review_aggregate_listing_page_size_accepts_scan_alias(self):
+        settings = Settings(REVIEW_AGGREGATE_SCAN_PAGE_SIZE="456")
+
+        self.assertEqual(settings.review_aggregate_listing_page_size, 456)
+
 
 if __name__ == "__main__":
     unittest.main()
