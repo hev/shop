@@ -42,9 +42,9 @@ jobs:
         run: |
           out=$(shop meta)
           echo "$out"
-          # Just confirm we got a structured response with the headline
-          # counters; the exact field set is asserted by search/tests.
-          echo "$out" | jq -e 'has("products") and has("reviews")' >/dev/null
+          # Just confirm we got the committed /meta response shape; the
+          # exact field contract is asserted by search/tests.
+          echo "$out" | jq -e 'has("namespace") and has("vectors") and has("categories")' >/dev/null
 
       - name: shop search (text query)
         run: |
