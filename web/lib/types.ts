@@ -3,15 +3,7 @@ export type Product = {
   title: string;
   description: string;
   category: string;
-  // Original Amazon CDN URL; durable source-of-truth pointer kept on the
-  // product attributes, also used as the browser-side fallback if the blob
-  // route 404s.
   image_url: string;
-  // Storefront image src — points at the public hev-shop API proxy, which
-  // 302s to the Aerospike-backed blob route on the layer gateway. Resolved
-  // at server-render time so the URL embedded in HTML is absolute. Optional
-  // so mock-mode (no backend) can keep using image_url directly.
-  image_src?: string;
   price: number | null;
   rating: number;
   rating_count: number;

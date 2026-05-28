@@ -42,11 +42,6 @@ spec:
             # the search service, not the indexer control plane.
             - name: HEV_SHOP_API_BASE
               value: {{ default (printf "http://%s-search.%s.svc.cluster.local:8080" (include "hev-shop.fullname" .) .Release.Namespace) .Values.web.apiBaseUrl | quote }}
-            # Browser-facing API origin for <img src> on the storefront —
-            # this URL gets baked into rendered HTML and must be reachable
-            # from a browser (HEV_SHOP_API_BASE above is in-cluster only).
-            - name: PUBLIC_API_BASE
-              value: {{ default "https://api.hev-shop.com" .Values.web.publicApiBaseUrl | quote }}
             - name: LAYER_GATEWAY_URL
               value: {{ .Values.layer.gatewayUrl | quote }}
             - name: LAYER_GATEWAY_API_KEY

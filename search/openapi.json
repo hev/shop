@@ -644,44 +644,6 @@
         "summary": "Product"
       }
     },
-    "/product/{asin}/image": {
-      "get": {
-        "description": "Redirect to the gateway's dedicated blob route so the browser fetches\nJPEG bytes straight from Aerospike via layer-gateway. Keeps this pod out\nof the byte path. A 404 from the gateway falls through to the browser,\nwhich falls back to image_url via onError on the storefront side.",
-        "operationId": "product_image_product__asin__image_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "asin",
-            "required": true,
-            "schema": {
-              "title": "Asin",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Product Image"
-      }
-    },
     "/recommend": {
       "post": {
         "description": "Visual-similarity recommendations seeded by an existing product ASIN.\n\nUses Layer's `nearest_to_id` query mode: the gateway looks up the seed\ndocument's stored vector and runs the nearest-neighbor query in one call.\nThe seed ASIN itself is filtered out so callers don't get the seed back\nas its own first hit.",

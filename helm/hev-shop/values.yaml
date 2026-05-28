@@ -288,10 +288,6 @@ indexerApi:
 web:
   replicaCount: 1
   apiBaseUrl: ""
-  # Public origin baked into <img src> for product thumbnails. Browsers
-  # follow the redirect into the layer gateway blob route from here. Empty
-  # falls back to https://api.hev-shop.com in the template default.
-  publicApiBaseUrl: ""
   service:
     type: LoadBalancer
     port: 80

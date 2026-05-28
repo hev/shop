@@ -5,7 +5,6 @@ Read-only surface in front of Layer's vector gateway:
 - POST /search           — text query → CLIP-text embedding → vector query
 - GET  /search/reviews   — text query against review chunks for one ASIN
 - GET  /product/{asin}   — document fetch (Aerospike-cached on the gateway)
-- GET  /product/{asin}/image — 302 to the gateway blob route for product JPEG
 - GET  /reviews/samples  — verbatim review chunks by ID (for product UX)
 - GET  /meta             — namespace metadata + per-category counts
 - GET  /healthz          — liveness
@@ -25,7 +24,6 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import RedirectResponse
 from hevlayer import (
     AsyncHevlayer,
     CountRequest,
@@ -438,25 +436,6 @@ async def product(request: Request, asin: str) -> ProductResponse:
             latency_ms=int(response.perf.latency_ms),
             cache_status=response.perf.cache_status,
         ),
-    )
-
-
-@app.get("/product/{asin}/image")
-async def product_image(request: Request, asin: str) -> RedirectResponse:
-    """Redirect to the gateway's dedicated blob route so the browser fetches
-    JPEG bytes straight from Aerospike via layer-gateway. Keeps this pod out
-    of the byte path. A 404 from the gateway falls through to the browser,
-    which falls back to image_url via onError on the storefront side.
-    """
-    settings = request.app.state.settings
-    target = (
-        f"{settings.layer_gateway_public_url}"
-        f"/v2/namespaces/{settings.namespace}/documents/{asin}/blobs/image"
-    )
-    return RedirectResponse(
-        target,
-        status_code=302,
-        headers={"Cache-Control": "public, max-age=300"},
     )
 
 

@@ -1,19 +1,9 @@
 import type { Product, ReviewHit, ReviewSample } from "./types";
 
 export const API_BASE = process.env.HEV_SHOP_API_BASE ?? "";
-// Browser-facing origin for the storefront image proxy. The pod-side
-// HEV_SHOP_API_BASE points at the in-cluster service name, which the
-// browser cannot resolve; this one is rendered into <img src> tags and
-// must therefore be a public hostname.
-export const PUBLIC_API_BASE =
-  process.env.PUBLIC_API_BASE ?? "https://api.hev-shop.com";
 
 export function backendEnabled(): boolean {
   return API_BASE.length > 0;
-}
-
-export function productImageSrc(asin: string): string {
-  return `${PUBLIC_API_BASE}/product/${encodeURIComponent(asin)}/image`;
 }
 
 const DEFAULT_BACKEND_TIMEOUT_MS = 8_000;
@@ -196,7 +186,6 @@ export function hitToProduct(hit: BackendHit): Product {
     description: asStr(a.description),
     category: asStr(a.category),
     image_url: asStr(a.image_url),
-    image_src: productImageSrc(asin),
     price: null,
     rating: parseNum(a.avg_rating_txt),
     rating_count: parseNum(a.rating_cnt_txt),
@@ -214,7 +203,6 @@ export function attributesToProduct(asin: string, a: Record<string, unknown>): P
     description: asStr(a.description),
     category: asStr(a.category),
     image_url: asStr(a.image_url),
-    image_src: productImageSrc(resolvedAsin),
     price: null,
     rating: parseNum(a.avg_rating_txt),
     rating_count: parseNum(a.rating_cnt_txt),
