@@ -62,7 +62,7 @@ func init() {
 	searchReviewsCmd.Flags().IntVar(&reviewSearchTopK, "top-k", 10, "max review chunks to return")
 	searchReviewsCmd.Flags().StringVar(&reviewSearchCategory, "category", "", "optional category filter")
 	searchReviewsCmd.Flags().StringVar(&reviewSearchCursor, "cursor", "", "opaque cursor from a prior response's next_cursor")
-	searchReviewsCmd.Flags().BoolVar(&reviewSearchWithCount, "with-count", false, "fan out an extra /count call within --max-distance")
+	searchReviewsCmd.Flags().BoolVar(&reviewSearchWithCount, "with-count", false, "fan out an extra /result-count call within --max-distance")
 	searchReviewsCmd.Flags().Float32Var(&reviewSearchMaxDistance, "max-distance", 0.4, "cosine-distance ceiling for --with-count")
 	rootCmd.AddCommand(searchReviewsCmd)
 }

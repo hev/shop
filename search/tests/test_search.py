@@ -1,6 +1,6 @@
 """Endpoint-level tests for /search and /search/reviews.
 
-These exist primarily to lock down the new cursor/count plumbing on the
+These exist primarily to lock down the new cursor/result-count plumbing on the
 SearchRequest, /search/reviews query params, and SearchResponse contract.
 The handler is exercised through FastAPI's TestClient with a fake layer
 client + fake embedders swapped onto app.state, so nothing reaches a real
@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from hevlayer import (
-    CountResponse,
+    ResultCountResponse,
     NamespaceMetadata,
     QueryResponse,
     QueryResult,
@@ -73,6 +73,39 @@ def _query_response(ids: list[str], *, next_cursor: str | None = None) -> QueryR
 
 
 class TestSearchCursor:
+    def test_first_page_records_search_history_metadata(self, client_with_fakes):
+        client, layer, _, _ = client_with_fakes
+        layer.next_query_response = _query_response(["B0001"])
+
+        resp = client.post(
+            "/search",
+            json={"query": "wireless headphones", "top_k": 5},
+            headers={"x-hev-shop-surface": "storefront"},
+        )
+        assert resp.status_code == 200
+
+        call = layer.query_calls[-1]
+        assert call["raw_query"] == "wireless headphones"
+        assert set(call["history_tags"]) == {
+            "app:hev-shop",
+            "surface:storefront",
+            "route:search",
+            "page:first",
+        }
+
+    def test_unmarked_search_does_not_record_storefront_history_metadata(
+        self, client_with_fakes
+    ):
+        client, layer, _, _ = client_with_fakes
+        layer.next_query_response = _query_response(["B0001"])
+
+        resp = client.post("/search", json={"query": "wireless headphones"})
+        assert resp.status_code == 200
+
+        call = layer.query_calls[-1]
+        assert call["raw_query"] is None
+        assert call["history_tags"] is None
+
     def test_passes_cursor_through_to_query_request(self, client_with_fakes):
         client, layer, _, _ = client_with_fakes
         layer.next_query_response = _query_response(["B0001"], next_cursor="next-1")
@@ -80,6 +113,7 @@ class TestSearchCursor:
         resp = client.post(
             "/search",
             json={"query": "wireless headphones", "top_k": 5, "cursor": "abc"},
+            headers={"x-hev-shop-surface": "storefront"},
         )
         assert resp.status_code == 200
         body = resp.json()
@@ -87,6 +121,8 @@ class TestSearchCursor:
         assert body["count"] is None
         assert layer.query_calls[-1]["cursor"] == "abc"
         assert layer.query_calls[-1]["top_k"] == 5
+        assert layer.query_calls[-1]["raw_query"] is None
+        assert layer.query_calls[-1]["history_tags"] is None
 
     def test_omits_next_cursor_when_gateway_returns_short_page(
         self, client_with_fakes
@@ -101,10 +137,10 @@ class TestSearchCursor:
 
 
 class TestSearchCount:
-    def test_with_count_fans_out_to_count_ranked(self, client_with_fakes):
+    def test_with_count_fans_out_to_result_count(self, client_with_fakes):
         client, layer, _, _ = client_with_fakes
         layer.next_query_response = _query_response(["B0001", "B0002"])
-        layer.next_count_response = CountResponse(
+        layer.next_count_response = ResultCountResponse(
             count=42,
             bounded=False,
             timed_out=False,
@@ -189,7 +225,7 @@ class TestReviewSearchCursorAndCount:
     def test_with_count_on_review_search_includes_count(self, client_with_fakes):
         client, layer, _, _ = client_with_fakes
         layer.next_query_response = _query_response(["r1:chunk:0000"])
-        layer.next_count_response = CountResponse(
+        layer.next_count_response = ResultCountResponse(
             count=10_000,
             bounded=True,
             timed_out=False,

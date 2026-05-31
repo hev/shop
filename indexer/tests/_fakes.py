@@ -21,9 +21,9 @@ from typing import Any
 from hevlayer import (
     ClaimDocumentsRequest,
     ClaimDocumentsResponse,
-    CountRequest,
-    CountResponse,
-    CreateListingRequest,
+    ResultCountRequest,
+    ResultCountResponse,
+    CreateScanRequest,
     CreatePipelineRequest,
     Chunk,
     Document,
@@ -33,8 +33,8 @@ from hevlayer import (
     HeartbeatDocumentsRequest,
     LayerPerf,
     LayerResponse,
-    ListingJob,
-    ListingResults,
+    ScanJob,
+    ScanIdsResponse,
     PatchRequest,
     Pipeline,
     PutChunksRequest,
@@ -63,8 +63,8 @@ class FakeLayerClient:
         self.next_claim: list[str] = []
         self.chunks_by_doc_id: dict[str, list[dict[str, Any]]] = {}
         self.documents_by_namespace: dict[tuple[str, str], dict[str, Any]] = {}
-        self.listing_results_by_namespace: dict[str, list[dict[str, Any]]] = {}
-        self.listing_filters_by_id: dict[str, Any] = {}
+        self.scan_results_by_namespace: dict[str, list[dict[str, Any]]] = {}
+        self.scan_filters_by_id: dict[str, Any] = {}
 
         self.create_pipeline_calls: list[tuple[str, str, str]] = []
         self.claim_calls: list[dict[str, Any]] = []
@@ -75,14 +75,14 @@ class FakeLayerClient:
         self.patch_calls: list[dict[str, Any]] = []
         self.heartbeat_calls: list[dict[str, Any]] = []
         self.set_stage_calls: list[dict[str, Any]] = []
-        self.listing_calls: list[dict[str, Any]] = []
+        self.scan_calls: list[dict[str, Any]] = []
         self.stage_document_calls: list[dict[str, Any]] = []
         self.query_calls: list[dict[str, Any]] = []
         self.count_calls: list[dict[str, Any]] = []
-        # Scripted responses for query_namespace / count_ranked. When None,
+        # Scripted responses for query_namespace / result_count. When None,
         # the fake returns a sensible default (empty results / count=0).
         self.next_query_response: QueryResponse | None = None
-        self.next_count_response: CountResponse | None = None
+        self.next_count_response: ResultCountResponse | None = None
         self.count_raises: bool = False
 
     async def ensure_pipeline(self, body: CreatePipelineRequest | dict[str, Any]) -> Pipeline:
@@ -433,16 +433,16 @@ class FakeLayerClient:
         )
         return _attach_perf(response, with_perf)
 
-    async def count_ranked(
+    async def result_count(
         self,
         namespace: str,
-        body: CountRequest | dict[str, Any],
+        body: ResultCountRequest | dict[str, Any],
         *,
         with_perf: bool = False,
-    ) -> CountResponse | LayerResponse[CountResponse]:
+    ) -> ResultCountResponse | LayerResponse[ResultCountResponse]:
         if self.count_raises:
             raise RuntimeError("count upstream failure")
-        if isinstance(body, CountRequest):
+        if isinstance(body, ResultCountRequest):
             query = body.query.model_dump(exclude_none=True)
             filters = body.filters
             mode = body.mode
@@ -458,7 +458,7 @@ class FakeLayerClient:
                 "mode": mode,
             }
         )
-        response = self.next_count_response or CountResponse(
+        response = self.next_count_response or ResultCountResponse(
             count=0,
             bounded=False,
             timed_out=False,
@@ -468,32 +468,32 @@ class FakeLayerClient:
         )
         return _attach_perf(response, with_perf)
 
-    async def listing(
+    async def scan(
         self,
         namespace: str,
-        body: CreateListingRequest | dict[str, Any],
+        body: CreateScanRequest | dict[str, Any],
         *,
         initial_delay: float = 0.05,
         max_delay: float = 2.0,
         timeout: float | None = None,
-    ) -> ListingJob:
-        if isinstance(body, CreateListingRequest):
+    ) -> ScanJob:
+        if isinstance(body, CreateScanRequest):
             filters = body.filters
             page_size = body.page_size
         else:
             filters = body.get("filters")
             page_size = body.get("page_size")
-        self.listing_calls.append(
+        self.scan_calls.append(
             {
                 "namespace": namespace,
                 "filters": filters,
                 "page_size": page_size,
             }
         )
-        listing_id = f"listing-{len(self.listing_calls)}"
-        self.listing_filters_by_id[listing_id] = filters
-        return ListingJob(
-            id=listing_id,
+        scan_id = f"scan-{len(self.scan_calls)}"
+        self.scan_filters_by_id[scan_id] = filters
+        return ScanJob(
+            id=scan_id,
             namespace=namespace,
             source="auto",
             effective_source="cache",
@@ -505,25 +505,25 @@ class FakeLayerClient:
             error=None,
         )
 
-    async def get_listing_results(
+    async def get_scan_results(
         self,
         namespace: str,
-        listing_id: str,
+        scan_id: str,
         *,
         limit: int | None = None,
         offset: int | None = None,
         with_perf: bool = False,
-    ) -> ListingResults | LayerResponse[ListingResults]:
-        rows = self._listing_rows(namespace, listing_id)
+    ) -> ScanIdsResponse | LayerResponse[ScanIdsResponse]:
+        rows = self._scan_rows(namespace, scan_id)
         total = len(rows)
         start = offset or 0
         end = start + limit if limit is not None else total
         ids = [self._row_doc_id(row, idx) for idx, row in enumerate(rows[start:end], start)]
-        return _attach_perf(ListingResults(ids=ids, total=total), with_perf)
+        return _attach_perf(ScanIdsResponse(ids=ids, total=total), with_perf)
 
-    def _listing_rows(self, namespace: str, listing_id: str) -> list[dict[str, Any]]:
-        rows = list(self.listing_results_by_namespace.get(namespace, []))
-        filters = self.listing_filters_by_id.get(listing_id)
+    def _scan_rows(self, namespace: str, scan_id: str) -> list[dict[str, Any]]:
+        rows = list(self.scan_results_by_namespace.get(namespace, []))
+        filters = self.scan_filters_by_id.get(scan_id)
         if isinstance(filters, list) and len(filters) == 3 and filters[1] == "Eq":
             field, _op, expected = filters
             rows = [
@@ -537,7 +537,7 @@ class FakeLayerClient:
         key = (namespace, doc_id)
         if key in self.documents_by_namespace:
             return self.documents_by_namespace[key]
-        for idx, row in enumerate(self.listing_results_by_namespace.get(namespace, [])):
+        for idx, row in enumerate(self.scan_results_by_namespace.get(namespace, [])):
             if self._row_doc_id(row, idx) == doc_id:
                 return row
         return None
@@ -618,7 +618,7 @@ def make_settings(**overrides) -> SimpleNamespace:
         claim_heartbeat_seconds=3600,  # large → heartbeat task sleeps, never fires
         embedding_batch_size=16,
         vector_upsert_batch_size=10_000,
-        review_aggregate_listing_page_size=10_000,
+        review_aggregate_scan_page_size=10_000,
         chunk_fetch_concurrency=4,
         review_upsert_concurrency=4,
         cleanup_embedded_images=False,

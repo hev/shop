@@ -22,7 +22,7 @@ type CategoryBucket struct {
 	Value    string `json:"value"`
 }
 
-// CountInfo Result of a /v2/namespaces/{ns}/count fan-out. `bounded=True` means
+// CountInfo Result of a /v2/namespaces/{ns}/result-count fan-out. `bounded=True` means
 // one or more shards saturated their top_k cap on this round, so `count`
 // is a lower bound — render it as "≥N" rather than "=N".
 type CountInfo struct {
@@ -137,7 +137,7 @@ type ReviewSearchResponse struct {
 	Asin     string  `json:"asin"`
 	Category *string `json:"category,omitempty"`
 
-	// Count Result of a /v2/namespaces/{ns}/count fan-out. `bounded=True` means
+	// Count Result of a /v2/namespaces/{ns}/result-count fan-out. `bounded=True` means
 	// one or more shards saturated their top_k cap on this round, so `count`
 	// is a lower bound — render it as "≥N" rather than "=N".
 	Count *CountInfo  `json:"count,omitempty"`
@@ -184,13 +184,13 @@ type SearchRequest struct {
 	Tags  *[]string `json:"tags,omitempty"`
 	TopK  *int      `json:"top_k,omitempty"`
 
-	// WithCount If true, fan out an extra /v2/namespaces/{ns}/count call against the same query vector + filters to estimate how many docs sit within max_distance. Costs one extra round-trip.
+	// WithCount If true, fan out an extra /v2/namespaces/{ns}/result-count call against the same query vector + filters to estimate how many docs sit within max_distance. Costs one extra round-trip.
 	WithCount *bool `json:"with_count,omitempty"`
 }
 
 // SearchResponse defines model for SearchResponse.
 type SearchResponse struct {
-	// Count Result of a /v2/namespaces/{ns}/count fan-out. `bounded=True` means
+	// Count Result of a /v2/namespaces/{ns}/result-count fan-out. `bounded=True` means
 	// one or more shards saturated their top_k cap on this round, so `count`
 	// is a lower bound — render it as "≥N" rather than "=N".
 	Count *CountInfo  `json:"count,omitempty"`

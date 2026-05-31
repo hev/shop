@@ -26,10 +26,10 @@ from typing import Any, AsyncIterator
 from fastapi import FastAPI, HTTPException, Request
 from hevlayer import (
     AsyncHevlayer,
-    CountRequest,
+    ResultCountRequest,
     CreateSnapshotRequest,
     QueryRequest,
-    VectorCountQuery,
+    VectorResultCountQuery,
 )
 
 from hev_shop_common.config import get_settings
@@ -55,6 +55,9 @@ from .models import (
 )
 
 logger = logging.getLogger("hev_shop.search")
+
+SEARCH_HISTORY_BASE_TAGS = ("app:hev-shop", "surface:storefront", "route:search")
+SEARCH_HISTORY_SURFACE_HEADER = "x-hev-shop-surface"
 
 
 @asynccontextmanager
@@ -219,14 +222,14 @@ async def _vector_count(
     *,
     label: str,
 ) -> CountInfo | None:
-    """Best-effort fan-out to /v2/namespaces/{ns}/count. On failure the
+    """Best-effort fan-out to /v2/namespaces/{ns}/result-count. On failure the
     handler still returns hits — count is supplementary signal, not the
     contract."""
     try:
-        response = await layer.count_ranked(
+        response = await layer.result_count(
             namespace,
-            CountRequest(
-                query=VectorCountQuery(vector=vector, max_distance=max_distance),
+            ResultCountRequest(
+                query=VectorResultCountQuery(vector=vector, max_distance=max_distance),
                 filters=filters,
             ),
             with_perf=True,
@@ -260,6 +263,17 @@ def _extract_next_cursor(payload: Any) -> str | None:
     if isinstance(cursor, str) and cursor:
         return cursor
     return None
+
+
+def _search_history_kwargs(
+    query: str, *, cursor: str | None, surface: str | None
+) -> dict[str, Any]:
+    if cursor or surface != "storefront":
+        return {}
+    return {
+        "raw_query": query,
+        "tags": [*SEARCH_HISTORY_BASE_TAGS, "page:first"],
+    }
 
 
 app = FastAPI(title="hev-shop search", lifespan=lifespan)
@@ -298,6 +312,11 @@ async def search(request: Request, body: SearchRequest) -> SearchResponse:
         query_task = layer.query_namespace(
             namespace,
             QueryRequest(**query_kwargs),
+            **_search_history_kwargs(
+                body.query,
+                cursor=body.cursor,
+                surface=request.headers.get(SEARCH_HISTORY_SURFACE_HEADER),
+            ),
             with_perf=True,
         )
         if body.with_count:

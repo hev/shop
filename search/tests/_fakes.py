@@ -14,8 +14,8 @@ from __future__ import annotations
 from typing import Any
 
 from hevlayer import (
-    CountRequest,
-    CountResponse,
+    ResultCountRequest,
+    ResultCountResponse,
     CreateSnapshotRequest,
     Document,
     LayerPerf,
@@ -47,7 +47,7 @@ class FakeLayerClient:
         self.namespace_metadata_calls: list[str] = []
 
         self.next_query_response: QueryResponse | None = None
-        self.next_count_response: CountResponse | None = None
+        self.next_count_response: ResultCountResponse | None = None
         self.documents_by_namespace: dict[tuple[str, str], dict[str, Any]] = {}
         self.snapshot_values_by_namespace: dict[str, dict[str, list[dict[str, Any]]]] = {}
         self.namespace_metadata_data: Any = None
@@ -58,6 +58,8 @@ class FakeLayerClient:
         namespace: str,
         body: QueryRequest | dict[str, Any],
         *,
+        raw_query: str | None = None,
+        tags: list[str] | None = None,
         with_perf: bool = False,
     ) -> QueryResponse | LayerResponse[QueryResponse]:
         if isinstance(body, QueryRequest):
@@ -73,6 +75,8 @@ class FakeLayerClient:
                 "filters": body.filters,
                 "include_attributes": body.include_attributes,
                 "cursor": cursor,
+                "raw_query": raw_query,
+                "history_tags": tags,
             }
         else:
             raw_vector = body.get("vector")
@@ -84,6 +88,8 @@ class FakeLayerClient:
                 "filters": body.get("filters"),
                 "include_attributes": body.get("include_attributes"),
                 "cursor": body.get("cursor"),
+                "raw_query": raw_query,
+                "history_tags": tags,
             }
         self.query_calls.append(payload)
         response = self.next_query_response or QueryResponse(
@@ -91,16 +97,16 @@ class FakeLayerClient:
         )
         return _attach_perf(response, with_perf)
 
-    async def count_ranked(
+    async def result_count(
         self,
         namespace: str,
-        body: CountRequest | dict[str, Any],
+        body: ResultCountRequest | dict[str, Any],
         *,
         with_perf: bool = False,
-    ) -> CountResponse | LayerResponse[CountResponse]:
+    ) -> ResultCountResponse | LayerResponse[ResultCountResponse]:
         if self.count_raises:
             raise RuntimeError("count upstream failure")
-        if isinstance(body, CountRequest):
+        if isinstance(body, ResultCountRequest):
             query = body.query.model_dump(exclude_none=True)
             filters = body.filters
             mode = body.mode
@@ -116,7 +122,7 @@ class FakeLayerClient:
                 "mode": mode,
             }
         )
-        response = self.next_count_response or CountResponse(
+        response = self.next_count_response or ResultCountResponse(
             count=0,
             bounded=False,
             timed_out=False,
@@ -243,9 +249,9 @@ class FakeLayerClient:
                         )
                         for row in rows
                     ],
-                    truncated=False,
                 )
             ],
+            fields_skipped=[],
         )
         return _attach_perf(body, with_perf)
 

@@ -43,7 +43,7 @@ class SearchRequest(BaseModel):
     with_count: bool = Field(
         default=False,
         description=(
-            "If true, fan out an extra /v2/namespaces/{ns}/count call against "
+            "If true, fan out an extra /v2/namespaces/{ns}/result-count call against "
             "the same query vector + filters to estimate how many docs sit "
             "within max_distance. Costs one extra round-trip."
         ),
@@ -66,7 +66,7 @@ class SearchHit(BaseModel):
 
 
 class CountInfo(BaseModel):
-    """Result of a /v2/namespaces/{ns}/count fan-out. `bounded=True` means
+    """Result of a /v2/namespaces/{ns}/result-count fan-out. `bounded=True` means
     one or more shards saturated their top_k cap on this round, so `count`
     is a lower bound — render it as "≥N" rather than "=N"."""
 
