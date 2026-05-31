@@ -115,7 +115,7 @@ class ReviewRecord:
 
 Classification results live on the first review-vector chunk as Turbopuffer
 attributes (`tags`, `tag_confidences`, `review_classified_at`). Aggregation
-derives product-level tags by listing and fetching review documents for an ASIN, so
+derives product-level tags by scan and fetching review documents for an ASIN, so
 there is no hev-shop-owned table in the gateway database.
 
 ## Implementation plan

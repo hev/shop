@@ -80,13 +80,13 @@ product vectors as filterable tags.
   official `hevlayer.AsyncHevlayer` client (see `clients/python` in the
   layer repo). The SDK covers the turbopuffer-compatible namespace surface
   (query/upsert/patch/fetch), the pipeline state machine
-  (create/claim/heartbeat/stage), and the Layer-specific snapshot/listing and
+  (create/claim/heartbeat/stage), and the Layer-specific snapshot/scan and
   document-cache APIs.
 - `indexer/app/pipeline.py` — the N-stage pipeline. One `STAGES` manifest plus
   a `run_stage` driver that owns the claim/heartbeat/release lifecycle, so
   each stage's `process_*` is just the work that's unique to that stage.
   Stages: `embed-products` (CLIP), `embed-reviews` (Qwen), `classify-reviews`
-  (OpenRouter), `aggregate-tags` (review listing + fetch → PATCH product rows).
+  (OpenRouter), `aggregate-tags` (review scan + fetch → PATCH product rows).
 - `indexer/app/extraction.py` — the CPU extraction worker that drains the
   Layer extraction pipeline and stages products + raw reviews into the layer
   pipelines.

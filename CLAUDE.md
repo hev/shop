@@ -30,3 +30,24 @@ and aggregate product attributes.
   multiple downstream destinations from one ingest path.
 - Product docs should describe what users can do; operational commands belong
   in `AGENTS.md`.
+
+## Pipeline Authoring
+
+hev layer supports two equal authoring surfaces for pipelines —
+declarative config (CRD/YAML) and SDK calls in app code — and both must
+round-trip through one schema (see `../layer/CLAUDE.md` § Design Bias).
+Shop is the canonical consumer that keeps this contract honest: as
+indexer stages move into Layer pipelines, shop should exercise both
+surfaces rather than picking one.
+
+- **SDK-declared:** pipelines whose shape co-evolves with shop's Python
+  UDFs (e.g., review classification or embedding) belong in app code, where
+  the pipeline declaration lives next to the transform it composes.
+- **Config-declared:** pipelines whose body is mostly source plumbing with
+  no surrounding shop code (e.g., a Snowflake-style extraction) belong in
+  YAML committed under `helm/hev-shop/` or a sibling pipeline directory,
+  applied alongside the chart.
+
+Either authoring surface produces the same `Pipeline` object server-side;
+if shop ever sees drift between what the SDK can express and what YAML can
+express, that is a Layer bug, not a shop choice to work around.
