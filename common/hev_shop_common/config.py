@@ -116,15 +116,15 @@ class Settings(BaseSettings):
     )
     embedding_claim_size: int = Field(default=2_000, alias="EMBEDDING_CLAIM_SIZE")
     vector_upsert_batch_size: int = Field(default=10_000, alias="VECTOR_UPSERT_BATCH_SIZE")
-    # Aggregate-worker batches expand into one review-namespace listing per ASIN
+    # Aggregate-worker batches expand into one review-namespace scan per ASIN
     # plus one PATCH call, so they need a smaller cap than the embed-side
     # vector upserts. Sized to fit comfortably under the 60s ALB request limit.
     review_aggregate_batch_size: int = Field(default=200, alias="REVIEW_AGGREGATE_BATCH_SIZE")
-    review_aggregate_listing_page_size: int = Field(
+    review_aggregate_scan_page_size: int = Field(
         default=10_000,
         validation_alias=AliasChoices(
-            "REVIEW_AGGREGATE_LISTING_PAGE_SIZE",
             "REVIEW_AGGREGATE_SCAN_PAGE_SIZE",
+            "REVIEW_AGGREGATE_LISTING_PAGE_SIZE",
         ),
     )
     chunk_fetch_concurrency: int = Field(default=32, alias="CHUNK_FETCH_CONCURRENCY")
