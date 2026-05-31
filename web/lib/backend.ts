@@ -44,6 +44,15 @@ type BackendSearchResponse = {
   count?: BackendCountInfo | null;
 };
 
+type BackendRecommendResponse = {
+  asin: string;
+  namespace: string;
+  hits: BackendHit[];
+  stable_as_of?: number | null;
+  layer_perf?: LayerPerf | null;
+  next_cursor?: string | null;
+};
+
 export type CountInfo = {
   count: number;
   bounded: boolean;
@@ -248,7 +257,10 @@ export async function backendSearch(
 
   const res = await fetchWithTimeout(`${API_BASE}/search`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      "x-hev-shop-surface": "storefront",
+    },
     body: JSON.stringify(payload),
     cache: "no-store",
   });
@@ -327,20 +339,26 @@ export async function backendSimilar(
   asin: string,
   topK = 8,
 ): Promise<SearchResult> {
-  const seed = getCachedProduct(asin);
-  if (!seed || !seed.title) {
-    return {
-      products: [],
-      layer_perf: null,
-      stable_as_of: null,
-      next_cursor: null,
-      count: null,
-    };
+  if (!API_BASE) throw new Error("HEV_SHOP_API_BASE not set");
+  const res = await fetchWithTimeout(`${API_BASE}/recommend`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ asin, top_k: Math.min(topK, 200) }),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    await logUpstreamFailure("recommend", res);
+    throw new Error(`recommend upstream ${res.status}`);
   }
-  const result = await backendSearch(seed.title, { topK: topK + 1 });
+  const json = (await res.json()) as BackendRecommendResponse;
+  const products = json.hits.map(hitToProduct);
+  for (const p of products) cacheProduct(p);
   return {
-    ...result,
-    products: result.products.filter((p) => p.asin !== asin).slice(0, topK),
+    products,
+    layer_perf: parsePerf(json.layer_perf),
+    stable_as_of: json.stable_as_of ?? null,
+    next_cursor: json.next_cursor ?? null,
+    count: null,
   };
 }
 

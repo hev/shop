@@ -30,10 +30,10 @@ type LoadedPage = {
   samples: ReviewSample[];
   perf: {
     fetchDocument: LayerPerf | null;     // /v2/namespaces/.../documents/{asin}
-    similarQuery: LayerPerf | null;      // /v2/namespaces/.../query (similar)
+    similarQuery: LayerPerf | null;      // /recommend nearest_to_id query
     reviewQuery: LayerPerf | null;       // /v2/namespaces/.../query (review)
     reviewStableAsOf: number | null;
-    reviewCount: CountInfo | null;       // /v2/namespaces/.../count fan-out
+    reviewCount: CountInfo | null;       // /v2/namespaces/.../result-count fan-out
   };
 };
 
@@ -269,7 +269,7 @@ export default async function ProductPage({
                 <span className="font-mono text-xs text-ink-400">—</span>
               )}
               <span className="font-mono text-xs text-ink-400">
-                re-embed title → /query
+                nearest_to_id → /query
               </span>
             </dd>
           </dl>
@@ -278,9 +278,8 @@ export default async function ProductPage({
             <span className="font-semibold text-ink-700">Doc fetch</span> goes
             through Layer's Aerospike pull-through cache; <span className="font-mono">cache hit</span>{" "}
             served the row without touching turbopuffer. The <span className="font-semibold text-ink-700">similar query</span>{" "}
-            re-embeds this product's title with CLIP-text and runs a vector
-            query — queries don't go through the doc cache, so no cache
-            header is set.
+            asks Layer for nearest neighbors of the stored product vector — queries
+            don't go through the doc cache, so no cache header is set.
           </p>
         </div>
       </div>

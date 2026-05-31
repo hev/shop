@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { similarProducts } from "@/lib/search";
-import { backendEnabled, backendSimilar, getCachedProduct } from "@/lib/backend";
+import { backendEnabled, backendSimilar } from "@/lib/backend";
 
 export const runtime = "nodejs";
 
@@ -11,15 +11,6 @@ export async function GET(req: Request) {
   const t0 = performance.now();
 
   if (backendEnabled()) {
-    if (!getCachedProduct(asin)) {
-      return NextResponse.json({
-        asin,
-        results: [],
-        took_ms: Math.round(performance.now() - t0),
-        source: "backend",
-        note: "seed not in pod cache; visit /search first or add a fetch-by-id endpoint",
-      });
-    }
     try {
       const { products, layer_perf, stable_as_of } = await backendSimilar(
         asin,
