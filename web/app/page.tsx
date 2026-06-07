@@ -94,13 +94,14 @@ export default async function HomePage() {
               <LayerPerfBadge perf={meta?.layer_perf ?? null} label="/meta" />
             </div>
             <h1 className="mt-4 font-display text-5xl leading-[1.05] tracking-tight text-ink-900 sm:text-6xl">
-              Find things by how they look, not what we called them.
+              An online shop to help you learn search.
             </h1>
             <p className="mt-6 max-w-md text-base text-ink-700">
-              hev·shop is a storefront wrapped around a vector database. Every
-              product is a 768-dimensional CLIP embedding. Type a vibe —
-              "cozy reading corner", "something brass and warm" — and we'll
-              return the nearest neighbors. Spelling and grammar entirely optional.
+              hev·shop is a complete open-source e-commerce search experience
+              designed to help you learn about image search, hybrid search,
+              pipelines, and UDFs. Type a vibe — "cozy reading corner",
+              "something brass and warm" — and we'll return the nearest
+              neighbors. Spelling and grammar entirely optional.
             </p>
             <div className="mt-8 flex gap-3">
               <Link
@@ -117,6 +118,23 @@ export default async function HomePage() {
               </Link>
             </div>
             <RecentSearches />
+            <p className="mt-6 text-xs text-ink-500">
+              Built on{" "}
+              <a
+                href="https://hevlayer.com"
+                className="font-medium text-ink-700 underline-offset-2 hover:underline"
+              >
+                hev layer
+              </a>{" "}
+              +{" "}
+              <a
+                href="https://turbopuffer.com"
+                className="font-medium text-ink-700 underline-offset-2 hover:underline"
+              >
+                turbopuffer
+              </a>
+              .
+            </p>
           </div>
 
           <div className="grid grid-cols-3 gap-3">

@@ -7,8 +7,18 @@ export function Header() {
     <header className="sticky top-0 z-40 border-b border-ink-200 bg-ink-50/85 backdrop-blur">
       <div className="bg-ink-900 text-ink-100">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-1.5 text-xs">
-          <span>Free cosine similarity metric with every search</span>
-          <span className="hidden sm:inline">no keywords were harmed in the making of these results</span>
+          <a
+            href="https://hevlayer.com/#design-preview"
+            className="underline-offset-2 hover:underline"
+          >
+            Join the hev layer design preview →
+          </a>
+          <a
+            href="https://hevlayer.com"
+            className="hidden underline-offset-2 hover:underline sm:inline"
+          >
+            built on hev layer →
+          </a>
         </div>
       </div>
 
