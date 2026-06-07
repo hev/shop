@@ -295,6 +295,15 @@ export default async function ProductPage({
             </h2>
             {perf.reviewCount ? (
               <p className="mt-2 text-sm text-ink-500">
+                {reviews.length > 0 ? (
+                  <>
+                    Showing the top{" "}
+                    <span className="font-mono text-ink-900">
+                      {reviews.length}
+                    </span>{" "}
+                    of{" "}
+                  </>
+                ) : null}
                 {perf.reviewCount.bounded ? "≥" : ""}
                 <span className="font-mono text-ink-900">
                   {perf.reviewCount.count.toLocaleString()}
