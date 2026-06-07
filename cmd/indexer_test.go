@@ -38,33 +38,6 @@ func TestIndexCmdSendsRequest(t *testing.T) {
 	}
 }
 
-func TestBackfillCmdSendsRequest(t *testing.T) {
-	resetCLIState()
-	srv, recorded := recordingServer(t, 200, map[string]any{
-		"job_id": "j1", "pipeline_id": "p1", "namespace": "amazon-products",
-		"category": "Electronics", "product_limit": -1, "stages": []any{"embed"},
-	})
-	if err := runArgs(t,
-		"backfill",
-		"--indexer-url", srv.URL,
-		"--category", "Electronics",
-		"--asins", "B0001,B0002",
-		"--stages", "embed,classify",
-	); err != nil {
-		t.Fatalf("backfill cmd failed: %v", err)
-	}
-	if recorded.Method != "POST" || recorded.Path != "/backfill" {
-		t.Fatalf("unexpected request: %s %s", recorded.Method, recorded.Path)
-	}
-	if recorded.Body["category"] != "Electronics" {
-		t.Errorf("expected category=Electronics, got %v", recorded.Body["category"])
-	}
-	asins, ok := recorded.Body["asins"].([]any)
-	if !ok || len(asins) != 2 || asins[0] != "B0001" {
-		t.Errorf("expected asins=[B0001,B0002], got %v", recorded.Body["asins"])
-	}
-}
-
 func TestStatusCmdSendsRequest(t *testing.T) {
 	resetCLIState()
 	srv, recorded := recordingServer(t, 200, map[string]any{

@@ -1,4 +1,4 @@
-import type { Product, ReviewHit, ReviewSample } from "./types";
+import type { Product } from "./types";
 
 export const API_BASE = process.env.HEV_SHOP_API_BASE ?? "";
 
@@ -80,14 +80,6 @@ export type SearchResult = {
   count: CountInfo | null;
 };
 
-export type ReviewSearchResult = {
-  reviews: ReviewHit[];
-  layer_perf: LayerPerf | null;
-  stable_as_of: number | null;
-  next_cursor: string | null;
-  count: CountInfo | null;
-};
-
 function parsePerf(p: unknown): LayerPerf | null {
   if (!p || typeof p !== "object") return null;
   const obj = p as Record<string, unknown>;
@@ -134,29 +126,6 @@ function parseNum(v: unknown): number {
   return 0;
 }
 
-function asStringArray(v: unknown): string[] {
-  return Array.isArray(v) ? v.filter((item): item is string => typeof item === "string") : [];
-}
-
-function asNumberRecord(v: unknown): Record<string, number> {
-  if (!v || typeof v !== "object" || Array.isArray(v)) return {};
-  return Object.fromEntries(
-    Object.entries(v as Record<string, unknown>)
-      .map(([key, value]) => [key, parseNum(value)] as const)
-      .filter(([, value]) => value > 0),
-  );
-}
-
-function asStringArrayRecord(v: unknown): Record<string, string[]> {
-  if (!v || typeof v !== "object" || Array.isArray(v)) return {};
-  return Object.fromEntries(
-    Object.entries(v as Record<string, unknown>).map(([key, value]) => [
-      key,
-      asStringArray(value),
-    ]),
-  );
-}
-
 // Log the upstream response body to the Node-side pod logs but never thread
 // it through to the thrown Error — Next.js server components surface
 // Error.message into rendered UI on the search/product pages, and upstream
@@ -198,9 +167,6 @@ export function hitToProduct(hit: BackendHit): Product {
     price: null,
     rating: parseNum(a.avg_rating_txt),
     rating_count: parseNum(a.rating_cnt_txt),
-    tags: asStringArray(a.tags),
-    tag_counts: asNumberRecord(a.tag_counts),
-    tag_samples: asStringArrayRecord(a.tag_samples),
   };
 }
 
@@ -215,15 +181,11 @@ export function attributesToProduct(asin: string, a: Record<string, unknown>): P
     price: null,
     rating: parseNum(a.avg_rating_txt),
     rating_count: parseNum(a.rating_cnt_txt),
-    tags: asStringArray(a.tags),
-    tag_counts: asNumberRecord(a.tag_counts),
-    tag_samples: asStringArrayRecord(a.tag_samples),
   };
 }
 
 export type SearchOptions = {
   topK?: number;
-  tags?: string[];
   cursor?: string | null;
   withCount?: boolean;
   maxDistance?: number;
@@ -244,12 +206,11 @@ export async function backendSearch(
       count: null,
     };
   }
-  const { topK = 24, tags = [], cursor, withCount, maxDistance } = options;
+  const { topK = 24, cursor, withCount, maxDistance } = options;
 
   const payload: Record<string, unknown> = {
     query: trimmed,
     top_k: Math.min(topK, 200),
-    tags,
   };
   if (cursor) payload.cursor = cursor;
   if (withCount) payload.with_count = true;
@@ -433,70 +394,4 @@ export async function backendSimilar(
     next_cursor: json.next_cursor ?? null,
     count: null,
   };
-}
-
-export type ReviewSearchOptions = {
-  topK?: number;
-  cursor?: string | null;
-  withCount?: boolean;
-  maxDistance?: number;
-};
-
-export async function backendReviewSearch(
-  asin: string,
-  query: string,
-  options: ReviewSearchOptions = {},
-): Promise<ReviewSearchResult> {
-  if (!API_BASE) throw new Error("HEV_SHOP_API_BASE not set");
-  const { topK = 8, cursor, withCount, maxDistance } = options;
-  const url = new URL(`${API_BASE}/search/reviews`);
-  url.searchParams.set("asin", asin);
-  url.searchParams.set("q", query.trim() || "quality");
-  url.searchParams.set("top_k", String(Math.min(topK, 200)));
-  if (cursor) url.searchParams.set("cursor", cursor);
-  if (withCount) url.searchParams.set("with_count", "true");
-  if (typeof maxDistance === "number") {
-    url.searchParams.set("max_distance", String(maxDistance));
-  }
-  const res = await fetchWithTimeout(url, { cache: "no-store" });
-  if (!res.ok) {
-    await logUpstreamFailure("review search", res);
-    throw new Error(`review search upstream ${res.status}`);
-  }
-  const json = (await res.json()) as BackendSearchResponse;
-  const reviews = json.hits.map((hit) => {
-    const a = hit.attributes ?? {};
-    return {
-      id: hit.id,
-      dist: hit.dist,
-      review_id: asStr(a.review_id),
-      asin: asStr(a.asin),
-      chunk_idx: parseNum(a.chunk_idx),
-      text_chunk: asStr(a.text_chunk),
-      rating: a.rating == null ? null : parseNum(a.rating),
-      title: asStr(a.title),
-      helpful_vote: parseNum(a.helpful_vote),
-    };
-  });
-  return {
-    reviews,
-    layer_perf: parsePerf(json.layer_perf),
-    stable_as_of: json.stable_as_of ?? null,
-    next_cursor: json.next_cursor ?? null,
-    count: parseCount(json.count),
-  };
-}
-
-export async function backendReviewSamples(
-  asin: string,
-  reviewIds: string[],
-): Promise<ReviewSample[]> {
-  if (!API_BASE || reviewIds.length === 0) return [];
-  const url = new URL(`${API_BASE}/reviews/samples`);
-  url.searchParams.set("asin", asin);
-  url.searchParams.set("ids", reviewIds.join(","));
-  const res = await fetchWithTimeout(url, { cache: "no-store" });
-  if (!res.ok) return [];
-  const json = (await res.json()) as { samples: ReviewSample[] };
-  return json.samples ?? [];
 }

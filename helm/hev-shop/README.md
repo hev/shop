@@ -6,12 +6,9 @@ This chart deploys the full hev-shop app:
 - Next.js web storefront
 - CPU extraction worker
 - GPU product image embedding worker
-- GPU review embedding worker
-- CPU review classification worker
-- CPU review aggregation worker
 - KEDA ScaledObjects backed by Layer pipeline metrics
 - optional Karpenter EC2NodeClasses and NodePools for CPU/GPU workers
-- shared RWX PVC for dataset, image, and model caches
+- shared RWX PVC for dataset cache
 
 The chart assumes Layer already provides the gateway and a Prometheus-compatible
 query API for gateway metrics.
@@ -40,8 +37,8 @@ helm upgrade --install hev-shop ./helm/hev-shop \
   --set secrets.existingSecret=hev-shop-secrets
 ```
 
-The secret is only for app credentials such as `OPENROUTER_API_KEY`; hev-shop
-does not need Layer PostgreSQL credentials.
+The secret is only for app credentials such as the HuggingFace token and Layer
+gateway API key; hev-shop does not need Layer PostgreSQL credentials.
 
 ## Karpenter NodePools
 

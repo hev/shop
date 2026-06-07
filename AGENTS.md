@@ -5,30 +5,30 @@ design, and strategic context, read `CLAUDE.md`.
 
 ## Repo Layout
 
-Three Python services + one Next.js app, organized so each can be forked
-independently:
+Two Python services + shared Python library + one Next.js app:
 
-```
+```text
 hev-shop/
-  search/                 # read API: /search, /product, /meta, /reviews/...
+  search/                 # read API: /search, /recommend, /product, /meta
     app/{main,models}.py
-    tests/                # pytest, see search/conftest.py
+    tests/
     Dockerfile, requirements.txt
-  indexer/                # control plane + workers
-    app/                  # /index, /backfill, /status + pipeline stages
-    tests/                # pytest, see indexer/conftest.py
+  indexer/                # control plane + CPU/GPU workers
+    app/                  # /index, /status + product extraction/embedding
+      crds/               # app-owned Layer Pipeline/UDF YAML, if/when used
+    tests/
     Dockerfile, requirements.txt
-  common/                 # shared library — Settings, records, embedders
+  common/                 # shared Settings, ProductRecord, CLIP embedders
     hev_shop_common/{config,records,embedders}.py
-    tests/                # pytest, see common/conftest.py
+    tests/
     pyproject.toml
   web/                    # Next.js storefront
-  helm/hev-shop/          # one chart, four deploys (search, indexer-api, web, workers)
+  helm/hev-shop/          # chart for search, indexer-api, web, workers
 ```
 
-Search and indexer both pull `hev_shop_common` via `pip install -e ../common`
-(see each `requirements.txt`). The same pattern is used for the hev layer SDK
-in `../../layer/clients/python`.
+Search and indexer both pull `hev_shop_common` via `pip install -e ../common`.
+The same pattern is used for the hev layer SDK in `../layer/clients/python`
+from the repo root's sibling checkout layout.
 
 ## Live Endpoints
 
@@ -40,13 +40,13 @@ The app runs on EKS in namespace `hev-shop`, fronted by a shared ALB
 |---|---|---|
 | Storefront | https://hev-shop.com | `hev-shop-web` (port 80 to pod 3000) |
 | Storefront (www) | https://www.hev-shop.com redirects to apex | LBC `redirect-to-apex` action |
-| Read API | https://api.hev-shop.com/{search,product,meta,...} | `hev-shop-search` (port 8080) |
-| Indexer API | https://api.hev-shop.com/{index,backfill,status} | `hev-shop-indexer-api` (port 8080) |
+| Read API | https://api.hev-shop.com/{search,recommend,product,meta,...} | `hev-shop-search` (port 8080) |
+| Indexer API | https://api.hev-shop.com/{index,status} | `hev-shop-indexer-api` (port 8080) |
 | Layer gateway | https://aws-us-east-1.hevlayer.com | `layer-gateway` in namespace `layer` (port 8080) |
 
-`api.hev-shop.com` is path-routed by the ALB: `/search*`, `/product*`,
-`/meta*`, and `/reviews/*` go to `hev-shop-search`; `/index`, `/backfill`,
-`/status` go to `hev-shop-indexer-api`. Update the ingress under
+`api.hev-shop.com` is path-routed by the ALB: `/search*`, `/recommend*`,
+`/product*`, and `/meta*` go to `hev-shop-search`; `/index` and `/status`
+go to `hev-shop-indexer-api`. Update the ingress under
 `../layer/infra/ingress/hev-shop/` when adding new routes.
 
 The web pod only calls read endpoints, so it talks to search in-cluster:
@@ -63,15 +63,17 @@ curl -s "https://api.hev-shop.com/product/B00FI7TCGI" | jq .
 curl -s -X POST -H 'content-type: application/json' \
   -d '{"query":"wireless headphones","top_k":3}' \
   https://api.hev-shop.com/search | jq .
-curl -s "https://api.hev-shop.com/search/reviews?asin=B00FI7TCGI&q=battery&top_k=4" | jq .
+curl -s -X POST -H 'content-type: application/json' \
+  -d '{"asin":"B00FI7TCGI","top_k":3}' \
+  https://api.hev-shop.com/recommend | jq .
 
 # Indexer control plane
 curl -s "https://api.hev-shop.com/status?pipeline_id=hev-shop-product-images" | jq .
 ```
 
-The read-API request/response contract is in `search/app/main.py` (mirrored
-on the storefront in `web/lib/backend.ts`); the indexer control-plane
-contract is in `indexer/app/main.py`.
+The read-API request/response contract is in `search/app/main.py` (mirrored on
+the storefront in `web/lib/backend.ts`); the indexer control-plane contract is
+in `indexer/app/main.py`.
 
 Layer gateway checks:
 
@@ -100,7 +102,8 @@ kubectl get pods -n hev-shop
 kubectl logs     -n hev-shop deploy/hev-shop-search       --tail=200
 kubectl logs     -n hev-shop deploy/hev-shop-indexer-api  --tail=200
 kubectl logs     -n hev-shop deploy/hev-shop-web          --tail=200
-kubectl exec -it -n hev-shop deploy/hev-shop-search -- sh
+kubectl logs     -n hev-shop deploy/hev-shop-cpu-worker   --tail=200
+kubectl logs     -n hev-shop deploy/hev-shop-gpu-worker   --tail=200
 ```
 
 ## `shop` CLI
@@ -114,16 +117,13 @@ Every hev-shop endpoint has a matching subcommand. The binary is `shop`
 | `shop recommend B00FI7TCGI --top-k 3` | `POST /recommend` |
 | `shop product B00FI7TCGI` | `GET /product/{asin}` |
 | `shop meta` | `GET /meta` |
-| `shop search-reviews --asin B00FI7TCGI --query battery` | `GET /search/reviews` |
-| `shop review-samples --asin B00FI7TCGI --ids r1,r2` | `GET /reviews/samples` |
 | `shop index --category Electronics --count 1000` | `POST /index` |
-| `shop backfill --category Electronics --asins B0001,B0002` | `POST /backfill` |
 | `shop status --pipeline-id hev-shop-product-images` | `GET /status` |
 | `shop health` | search `/healthz` + indexer `/status` |
 
 The CLI talks to one host by default: `--api-base` (env `SHOP_API_BASE`,
-default `https://api.hev-shop.com`). For port-forward dev, override
-either service with `--search-url` / `--indexer-url`:
+default `https://api.hev-shop.com`). For port-forward dev, override either
+service with `--search-url` / `--indexer-url`:
 
 ```sh
 shop --search-url http://127.0.0.1:18080 meta
@@ -132,9 +132,9 @@ shop --indexer-url http://127.0.0.1:18081 status
 
 ## OpenAPI Specs
 
-The committed specs at `search/openapi.json` and `indexer/openapi.json`
-are the source of truth for the Go client. Regenerate after touching a
-route or Pydantic model:
+The committed specs at `search/openapi.json` and `indexer/openapi.json` are the
+source of truth for the Go client. Regenerate after touching a route or
+Pydantic model:
 
 ```sh
 make openapi    # dumps both specs deterministically
@@ -150,13 +150,11 @@ committed spec drifts from the FastAPI app.
 
 | File | Purpose |
 |---|---|
-| `main.py` | FastAPI app: `/search`, `/search/reviews`, `/product/{asin}`, `/meta`, `/reviews/samples`, `/healthz` |
+| `main.py` | FastAPI app: `/search`, `/recommend`, `/product/{asin}`, `/meta`, `/healthz` |
 | `models.py` | Pydantic HTTP contracts for the read API |
 
-Heavy lifting (Settings, embedder wrappers, namespace helpers) is in
-`hev_shop_common`. The search pod loads `CLIPTextEmbedder` at boot to
-embed query strings; review search uses `QwenTextEmbedder` and is gated
-behind `API_REVIEW_SEARCH_ENABLED` (off by default — Qwen-8B needs a GPU).
+Heavy lifting (Settings and CLIP embedder wrappers) is in `hev_shop_common`.
+The search pod loads `CLIPTextEmbedder` to embed query strings.
 
 ## Indexer Service Layout
 
@@ -164,14 +162,14 @@ behind `API_REVIEW_SEARCH_ENABLED` (off by default — Qwen-8B needs a GPU).
 
 | File | Purpose |
 |---|---|
-| `main.py` | FastAPI control plane: `/index`, `/backfill`, `/status`, `/healthz` |
-| `worker.py` | Process entrypoint; reads `WORKER_TYPE` and dispatches to a stage |
-| `pipeline.py` | N-stage pipeline manifest and driver |
-| `extraction.py` | CPU worker for extraction jobs, product staging, and raw review staging |
-| `classifier.py` | OpenRouter client for review tag classification |
-| `jobs.py` | Extraction/backfill job document shapes |
-| `dataset.py` | HuggingFace `McAuley-Lab/Amazon-Reviews-2023` reader |
-| `models.py` | Pydantic HTTP contracts for /index, /backfill, /status |
+| `main.py` | FastAPI control plane: `/index`, `/status`, `/healthz` |
+| `worker.py` | Process entrypoint; `WORKER_TYPE=cpu` or `gpu` |
+| `extraction.py` | CPU worker for extraction jobs and product chunk staging |
+| `pipeline.py` | GPU product embedding worker using `put_pipeline_document_vectors` |
+| `jobs.py` | Extraction job document shape |
+| `dataset.py` | HuggingFace `McAuley-Lab/Amazon-Reviews-2023` product metadata reader |
+| `models.py` | Pydantic HTTP contracts for `/index` and `/status` |
+| `crds/` | Home for app-owned Layer Pipeline/UDF manifests if shop moves a pipeline to declarative ownership |
 
 ## Common Library
 
@@ -180,54 +178,56 @@ behind `API_REVIEW_SEARCH_ENABLED` (off by default — Qwen-8B needs a GPU).
 | File | Purpose |
 |---|---|
 | `config.py` | `pydantic_settings.BaseSettings` env-var config used by both services |
-| `records.py` | `ProductRecord` / `ReviewRecord`, namespace + shard helpers, input normalizers, review-tag enum |
-| `embedders.py` | `CLIPImageEmbedder`, `CLIPTextEmbedder`, `QwenTextEmbedder` lazy-init wrappers |
+| `records.py` | `ProductRecord`, category normalizer, product vector attributes |
+| `embedders.py` | `CLIPImageEmbedder` and `CLIPTextEmbedder` lazy-init wrappers |
 
 ## Pipeline Model
 
-`pipeline.py:STAGES` is a dict with one entry per stage. `_run_once(stage,
-ctx)` owns claim, heartbeat, release, and per-doc disposition handling. Each
-stage processor returns a `StageOutcome(complete=, fail=, release=)`.
+The product indexing path follows Layer's pipeline document lifecycle:
 
 ```text
-extract:          Layer extraction pipeline -> products + raw reviews
-embed-products:   pending -> indexed   (CLIP image vectors)
-embed-reviews:    pending -> indexed   (Qwen text vectors, prefix=review-embed:)
-classify-reviews: pending -> indexed   (OpenRouter tags, prefix=review-classify:)
-aggregate-tags:   pending -> indexed   (review scan -> PATCH product rows)
+CPU extraction: product metadata row -> put_pipeline_document_chunks -> pending
+GPU embedding: claim pending -> fetch image bytes -> put_pipeline_document_vectors -> indexed
 ```
 
-`WORKER_TYPE` values map to `STAGES` keys via `worker.STAGE_FOR_WORKER_TYPE`.
-`cpu` runs `ExtractionWorker` because it expands extraction jobs into product
-and review work items.
+Extraction jobs are small control documents in `EXTRACTION_PIPELINE_ID`.
+`WORKER_TYPE=cpu` claims those jobs and stages product chunks into `PIPELINE_ID`.
+`WORKER_TYPE=gpu` claims pending product documents from `PIPELINE_ID` and writes
+vectors. Product images are fetched in memory by the GPU worker and are not
+cached on local disk.
 
-To add a stage:
-
-1. Write `process_yourstage(ctx, doc_ids) -> StageOutcome` in `pipeline.py`.
-2. Add a `STAGES` entry with `pipeline_attr`, `from_stage`, `claim_size_attr`,
-   optional `prefix`, and optional `setup`.
-3. Map a `WORKER_TYPE` value to it in `worker.STAGE_FOR_WORKER_TYPE`.
-4. Add focused tests in `indexer/tests/test_pipeline.py`.
+App-owned Layer Pipeline/UDF YAML belongs under `indexer/app/crds/`. The Helm
+chart should pass IDs/config and deploy Kubernetes workloads; it should not carry
+pipeline shape definitions.
 
 ## Tests
 
-Each service has its own pytest tree. Run the narrowest meaningful one for
-the code you touched:
+Each service has its own pytest tree. Run the narrowest meaningful one for the
+code you touched:
 
 ```sh
 cd common  && python3 -m pytest tests/ --tb=short   # Settings + records
-cd search  && python3 -m pytest tests/ --tb=short   # /search, /search/reviews
-cd indexer && python3 -m pytest tests/ --tb=short   # pipeline stages, /index, /backfill
+cd search  && python3 -m pytest tests/ --tb=short   # /search, /recommend, /product, /meta
+cd indexer && python3 -m pytest tests/ --tb=short   # product pipeline, /index, /status
 ```
 
-Each `conftest.py` puts the sibling `common/` and the local hev layer SDK
-checkout on `sys.path` so tests don't need pip installs.
+Go and frontend checks:
+
+```sh
+go test ./...
+cd web && npm run build
+helm lint ./helm/hev-shop
+helm template hev-shop ./helm/hev-shop --namespace hev-shop >/tmp/hev-shop-rendered.yaml
+```
+
+Each Python `conftest.py` puts the sibling `common/` and local hev layer SDK
+checkout on `sys.path` so tests do not need pip installs.
 
 ## Agent Rules
 
 - Prefer public DNS for laptop checks unless the task specifically needs an
   in-cluster bypass.
-- Keep the three Python service boundaries intact:
+- Keep the Python service boundaries intact:
   - Read-API HTTP contracts live in `search/app/`.
   - Indexer HTTP contracts and pipeline code live in `indexer/app/`.
   - Anything shared (Settings, records, embedders) goes in `common/hev_shop_common/`.

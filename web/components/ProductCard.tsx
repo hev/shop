@@ -32,18 +32,6 @@ export function ProductCard({ product, priority = false }: { product: Product; p
             <span>·</span>
             <span>{formatCount(product.rating_count)}</span>
           </div>
-          {product.tags && product.tags.length > 0 ? (
-            <div className="mt-2 flex flex-wrap gap-1">
-              {product.tags.slice(0, 2).map((tag) => (
-                <span
-                  key={tag}
-                  className="rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-ink-600 ring-1 ring-ink-200"
-                >
-                  {tag}
-                </span>
-              ))}
-            </div>
-          ) : null}
         </div>
         {product.price != null ? (
           <div className="shrink-0 text-sm font-semibold text-ink-900">

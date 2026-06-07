@@ -13,17 +13,6 @@ export const PRODUCTS: Product[] = [
     price: 248,
     rating: 4.6,
     rating_count: 12480,
-    tags: ["Worth the splurge", "Good but...", "Better in person"],
-    tag_counts: {
-      "Worth the splurge": 42,
-      "Good but...": 31,
-      "Better in person": 18,
-    },
-    tag_samples: {
-      "Worth the splurge": ["mock-headphones-1", "mock-headphones-2"],
-      "Good but...": ["mock-headphones-3"],
-      "Better in person": ["mock-headphones-4"],
-    },
   },
   {
     asin: "B08AAA222B",
@@ -35,15 +24,6 @@ export const PRODUCTS: Product[] = [
     price: 169,
     rating: 4.8,
     rating_count: 3120,
-    tags: ["Buy it for life, no regrets", "Beginner friendly"],
-    tag_counts: {
-      "Buy it for life, no regrets": 22,
-      "Beginner friendly": 15,
-    },
-    tag_samples: {
-      "Buy it for life, no regrets": ["mock-keyboard-1"],
-      "Beginner friendly": ["mock-keyboard-2"],
-    },
   },
   {
     asin: "B09CAM333C",
@@ -66,15 +46,6 @@ export const PRODUCTS: Product[] = [
     price: 129,
     rating: 4.3,
     rating_count: 8401,
-    tags: ["Good but...", "Overpriced"],
-    tag_counts: {
-      "Good but...": 37,
-      Overpriced: 21,
-    },
-    tag_samples: {
-      "Good but...": ["mock-mug-1"],
-      Overpriced: ["mock-mug-2"],
-    },
   },
   {
     asin: "B06ZOR555E",
@@ -367,22 +338,3 @@ export const PRODUCTS: Product[] = [
 export function findByAsin(asin: string): Product | undefined {
   return PRODUCTS.find((p) => p.asin === asin);
 }
-
-export const MOCK_REVIEW_TEXT: Record<string, string> = {
-  "mock-headphones-1":
-    "The sound and noise cancellation are expensive, but this is the first pair I have not wanted to replace after a year.",
-  "mock-headphones-2":
-    "Worth paying more for if you travel often. The battery lasts through long flights and the pads still look new.",
-  "mock-headphones-3":
-    "Great audio and comfort, but the app setup took a few tries before firmware updates would finish.",
-  "mock-headphones-4":
-    "They look cleaner in person than the product shots. The case and finish feel more premium than expected.",
-  "mock-keyboard-1":
-    "Heavy case, clean stabilizers, and the switches still feel tight after months of daily work.",
-  "mock-keyboard-2":
-    "I was new to mechanical keyboards and had it customized in minutes without reading a manual.",
-  "mock-mug-1":
-    "Keeps coffee exactly where I want it, but the charging coaster is one more thing to keep on the counter.",
-  "mock-mug-2":
-    "It works, but the price is hard to justify unless you nurse one cup for a long time.",
-};

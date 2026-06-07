@@ -2,6 +2,7 @@
 set -euo pipefail
 
 APP_NAMESPACE="${APP_NAMESPACE:-hev-shop}"
+INDEXER_DEPLOYMENT="${INDEXER_DEPLOYMENT:-hev-shop-indexer-api}"
 PIPELINE_ID="${PIPELINE_ID:-hev-shop-product-images}"
 TARGET_NAMESPACE="${TARGET_NAMESPACE:-amazon-products}"
 COUNT_PER_CATEGORY="${COUNT_PER_CATEGORY:-50000}"
@@ -16,7 +17,7 @@ echo "  count per category: ${COUNT_PER_CATEGORY}"
 echo "  job size:           ${JOB_SIZE}"
 echo "  categories:         ${CATEGORIES}"
 
-kubectl exec -i -n "$APP_NAMESPACE" deploy/hev-shop-api -- \
+kubectl exec -i -n "$APP_NAMESPACE" "deploy/${INDEXER_DEPLOYMENT}" -- \
   python - "$COUNT_PER_CATEGORY" "$JOB_SIZE" "$PIPELINE_ID" "$TARGET_NAMESPACE" "$CATEGORIES" <<'PY'
 import json
 import sys

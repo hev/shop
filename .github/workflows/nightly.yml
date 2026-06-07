@@ -5,7 +5,7 @@ name: Nightly
 # (see AGENTS.md), so the script below mirrors what an operator would
 # do from a laptop.
 #
-# We do NOT exercise /index or /backfill here — those mutate prod data.
+# We do NOT exercise /index here — it mutates prod data.
 # Hermetic write-path coverage lives in layer-e2e.yml.
 
 on:
@@ -64,12 +64,6 @@ jobs:
           out=$(shop recommend B00FI7TCGI --top-k 3)
           echo "$out"
           echo "$out" | jq -e '.hits | length >= 1' >/dev/null
-
-      - name: shop search-reviews (best-effort)
-        # API_REVIEW_SEARCH_ENABLED gates this behind a GPU pod; don't fail
-        # nightly if review search isn't currently scheduled.
-        continue-on-error: true
-        run: shop search-reviews --asin B00FI7TCGI --query battery --top-k 3
 
       - name: shop status (read-only pipeline check)
         run: shop status --pipeline-id hev-shop-product-images

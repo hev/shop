@@ -1,12 +1,9 @@
 # Frontend 0.1 design — Drops & Recent searches
 
-UI design for the two new storefront surfaces in `LAUNCH_0.1_PLAN.md`:
-WS4 (nightly catalog drops) and WS5 (recent searches). Both depend on
-search-service endpoints that do not exist yet (`GET /drops`,
-`GET /search/recent`); this doc fixes the UI shape and the response
-contract the frontend will consume, so backend and frontend work can land
-independently. WS3 (pagination window) and WS6 (branding) are already
-implemented and are not covered here.
+UI design notes for the two storefront surfaces around catalog drops and
+recent searches. The implementation lives in `web/app/drops/page.tsx`,
+`web/components/DropBand.tsx`, `web/components/RecentSearches.tsx`, and
+`web/lib/backend.ts`.
 
 Design constraints carried over from `CLAUDE.md`:
 
@@ -18,7 +15,7 @@ Design constraints carried over from `CLAUDE.md`:
 
 ---
 
-## 1. Drops ("What's new") — WS4
+## 1. Drops ("What's new")
 
 ### What the user can do
 
@@ -73,10 +70,10 @@ catalog_run_id — click through to browse only those vectors.   [/drops perf ba
 
 - `backendSearch` gains `catalogRunId?: string`, sent as `catalog_run_id`
   (WS2 adds it to `SearchRequest`).
-- An active-filter chip renders in the existing review-tag chip row,
-  visually distinct (mono label): `drop: catalog-2026-06-07 ×`. Clicking
-  × removes the param. The drop filter composes with `q` and `tag` —
-  same URLSearchParams plumbing the tag chips already use.
+- An active-filter chip renders above results, visually distinct (mono label):
+  `drop: catalog-2026-06-07 ×`. Clicking × removes the param. The drop filter
+  composes with `q` through the same URLSearchParams plumbing used by search
+  pagination.
 - An empty `q` with a `drop` param is valid: "everything in this drop".
   (Backend note: this needs `/search` to accept filter-only queries, or
   the page substitutes the drop's category as the query — decide when
@@ -107,7 +104,7 @@ Frontend treats `drops` as newest-first; tolerates missing
 
 ---
 
-## 2. Recent searches — WS5
+## 2. Recent searches
 
 ### What the user can do
 
@@ -145,8 +142,8 @@ is the restrained version; the header dropdown is a natural follow-up.
 }
 ```
 
-Backend owns normalization (dedupe, case/whitespace, drop empty/overlong)
-per the launch plan; the frontend renders verbatim.
+Backend owns normalization (dedupe, case/whitespace, drop empty/overlong);
+the frontend renders verbatim.
 
 ### Files (when built)
 
@@ -167,7 +164,6 @@ per the launch plan; the frontend renders verbatim.
 - **Browsing rail (issue #7).** Reserved slot: below "Visually similar"
   on `/product/[asin]`. No work now; blocked on layer-gateway
   query-by-document-ID.
-- **`/drops` ingress.** New top-level path → needs a routing rule to
-  `hev-shop-search` in `../layer/infra/ingress/hev-shop/` (the launch
-  plan already calls this out). `/search/recent` rides the existing
+- **`/drops` ingress.** The top-level path routes to `hev-shop-search` in
+  `../layer/infra/ingress/hev-shop/`. `/search/recent` rides the existing
   `/search*` prefix.

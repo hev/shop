@@ -1,10 +1,9 @@
-"""Endpoint-level tests for /search and /search/reviews.
+"""Endpoint-level tests for /search.
 
 These exist primarily to lock down the new cursor/result-count plumbing on the
-SearchRequest, /search/reviews query params, and SearchResponse contract.
-The handler is exercised through FastAPI's TestClient with a fake layer
-client + fake embedders swapped onto app.state, so nothing reaches a real
-gateway or model.
+SearchRequest and SearchResponse contract. The handler is exercised through
+FastAPI's TestClient with a fake layer client + fake embedder swapped onto
+app.state, so nothing reaches a real gateway or model.
 """
 
 from __future__ import annotations
@@ -25,7 +24,6 @@ from app.main import app
 from tests._fakes import (
     FakeClipTextEmbedder,
     FakeLayerClient,
-    FakeQwenTextEmbedder,
     make_settings,
 )
 
@@ -34,29 +32,23 @@ from tests._fakes import (
 def client_with_fakes():
     layer = FakeLayerClient()
     clip = FakeClipTextEmbedder()
-    qwen = FakeQwenTextEmbedder()
 
     prev = {
         "settings": app.state.__dict__.get("settings"),
         "layer": app.state.__dict__.get("layer"),
         "text_embedder": app.state.__dict__.get("text_embedder"),
-        "review_text_embedder": app.state.__dict__.get("review_text_embedder"),
         "meta_cache": app.state.__dict__.get("meta_cache"),
         "meta_cache_lock": app.state.__dict__.get("meta_cache_lock"),
     }
-    app.state.settings = make_settings(
-        API_REVIEW_SEARCH_ENABLED=True,
-        REVIEWS_QUERY_NAMESPACE_BASE="v2-amazon-reviews",
-    )
+    app.state.settings = make_settings()
     app.state.layer = layer
     app.state.text_embedder = clip
-    app.state.review_text_embedder = qwen
     app.state.meta_cache = {}
     app.state.meta_cache_lock = asyncio.Lock()
 
     client = TestClient(app)
     try:
-        yield client, layer, clip, qwen
+        yield client, layer, clip
     finally:
         for key, value in prev.items():
             setattr(app.state, key, value)
@@ -74,7 +66,7 @@ def _query_response(ids: list[str], *, next_cursor: str | None = None) -> QueryR
 
 class TestSearchCursor:
     def test_first_page_records_search_history_metadata(self, client_with_fakes):
-        client, layer, _, _ = client_with_fakes
+        client, layer, _ = client_with_fakes
         layer.next_query_response = _query_response(["B0001"])
 
         resp = client.post(
@@ -96,7 +88,7 @@ class TestSearchCursor:
     def test_unmarked_search_does_not_record_storefront_history_metadata(
         self, client_with_fakes
     ):
-        client, layer, _, _ = client_with_fakes
+        client, layer, _ = client_with_fakes
         layer.next_query_response = _query_response(["B0001"])
 
         resp = client.post("/search", json={"query": "wireless headphones"})
@@ -107,7 +99,7 @@ class TestSearchCursor:
         assert call["history_tags"] is None
 
     def test_passes_cursor_through_to_query_request(self, client_with_fakes):
-        client, layer, _, _ = client_with_fakes
+        client, layer, _ = client_with_fakes
         layer.next_query_response = _query_response(["B0001"], next_cursor="next-1")
 
         resp = client.post(
@@ -127,7 +119,7 @@ class TestSearchCursor:
     def test_omits_next_cursor_when_gateway_returns_short_page(
         self, client_with_fakes
     ):
-        client, layer, _, _ = client_with_fakes
+        client, layer, _ = client_with_fakes
         layer.next_query_response = _query_response(["B0001"])
 
         resp = client.post("/search", json={"query": "headphones"})
@@ -138,7 +130,7 @@ class TestSearchCursor:
 
 class TestSearchCount:
     def test_with_count_fans_out_to_result_count(self, client_with_fakes):
-        client, layer, _, _ = client_with_fakes
+        client, layer, _ = client_with_fakes
         layer.next_query_response = _query_response(["B0001", "B0002"])
         layer.next_count_response = ResultCountResponse(
             count=42,
@@ -156,7 +148,6 @@ class TestSearchCount:
                 "with_count": True,
                 "max_distance": 0.35,
                 "category": "Electronics",
-                "tags": ["Overpriced"],
             },
         )
         assert resp.status_code == 200
@@ -170,16 +161,10 @@ class TestSearchCount:
         assert len(layer.count_calls) == 1
         count_call = layer.count_calls[0]
         assert count_call["query"]["max_distance"] == 0.35
-        assert count_call["filters"] == [
-            "And",
-            [
-                ["category", "Eq", "Electronics"],
-                ["tags", "ContainsAny", ["Overpriced"]],
-            ],
-        ]
+        assert count_call["filters"] == ["category", "Eq", "Electronics"]
 
     def test_without_with_count_skips_count_fanout(self, client_with_fakes):
-        client, layer, _, _ = client_with_fakes
+        client, layer, _ = client_with_fakes
         layer.next_query_response = _query_response(["B0001"])
 
         resp = client.post("/search", json={"query": "headphones"})
@@ -188,7 +173,7 @@ class TestSearchCount:
         assert layer.count_calls == []
 
     def test_count_failure_does_not_fail_the_search(self, client_with_fakes):
-        client, layer, _, _ = client_with_fakes
+        client, layer, _ = client_with_fakes
         layer.next_query_response = _query_response(["B0001"])
         layer.count_raises = True
 
@@ -201,63 +186,9 @@ class TestSearchCount:
         assert len(body["hits"]) == 1
 
 
-class TestReviewSearchCursorAndCount:
-    def test_cursor_query_param_passes_through(self, client_with_fakes):
-        client, layer, _, _ = client_with_fakes
-        layer.next_query_response = _query_response(
-            ["r1:chunk:0000"], next_cursor="rev-cur"
-        )
-
-        resp = client.get(
-            "/search/reviews",
-            params={
-                "asin": "B00FI7TCGI",
-                "q": "battery",
-                "top_k": 4,
-                "cursor": "from-prev-page",
-            },
-        )
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["next_cursor"] == "rev-cur"
-        assert layer.query_calls[-1]["cursor"] == "from-prev-page"
-
-    def test_with_count_on_review_search_includes_count(self, client_with_fakes):
-        client, layer, _, _ = client_with_fakes
-        layer.next_query_response = _query_response(["r1:chunk:0000"])
-        layer.next_count_response = ResultCountResponse(
-            count=10_000,
-            bounded=True,
-            timed_out=False,
-            shards_saturated=1,
-            shards_total=1,
-            elapsed_ms=420,
-        )
-
-        resp = client.get(
-            "/search/reviews",
-            params={
-                "asin": "B00FI7TCGI",
-                "q": "battery",
-                "with_count": "true",
-                "max_distance": 0.5,
-            },
-        )
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["count"]["count"] == 10_000
-        assert body["count"]["bounded"] is True
-        assert body["count"]["max_distance"] == 0.5
-
-        # Filters must include the ASIN gate — without it, count would
-        # span the whole shard.
-        count_call = layer.count_calls[0]
-        assert count_call["filters"] == ["asin", "Eq", "B00FI7TCGI"]
-
-
 class TestMeta:
     def test_category_buckets_come_from_snapshot(self, client_with_fakes):
-        client, layer, _, _ = client_with_fakes
+        client, layer, _ = client_with_fakes
         layer.namespace_metadata_data = NamespaceMetadata(
             id="amazon-products",
             schema={},

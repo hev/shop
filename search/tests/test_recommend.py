@@ -4,12 +4,9 @@ Verifies that the recommend handler:
   - calls layer.query_namespace with nearest_to_id (no vector)
   - applies the [id NotEq <asin>] filter so the seed isn't its own neighbor
   - combines an optional category filter with the seed-exclusion filter
-  - decodes JSON-encoded dict attrs (tag_counts / tag_samples) on hits
 """
 
 from __future__ import annotations
-
-import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -50,7 +47,6 @@ def test_recommend_uses_nearest_to_id_and_excludes_seed(client_with_fakes):
                 attributes={
                     "asin": "B0002",
                     "title": "Similar product",
-                    "tag_counts": json.dumps({"good-fit": 3}),
                 },
             ),
             QueryResult(id="B0003", dist=0.15, attributes={"asin": "B0003"}),
@@ -64,8 +60,7 @@ def test_recommend_uses_nearest_to_id_and_excludes_seed(client_with_fakes):
 
     assert body["asin"] == "B0001"
     assert [hit["id"] for hit in body["hits"]] == ["B0002", "B0003"]
-    # JSON-encoded dict attr is decoded back into a dict on the wire.
-    assert body["hits"][0]["attributes"]["tag_counts"] == {"good-fit": 3}
+    assert body["hits"][0]["attributes"]["title"] == "Similar product"
     assert body["stable_as_of"] == 99
 
     call = layer.query_calls[-1]

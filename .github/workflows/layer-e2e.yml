@@ -105,8 +105,7 @@ jobs:
           # Point the shop services at the local gateway. The exact env
           # name comes from common/hev_shop_common/config.py — adjust if
           # the Settings field is renamed.
-          HEVLAYER_GATEWAY_URL: http://127.0.0.1:8080
-          API_REVIEW_SEARCH_ENABLED: 'false'
+          LAYER_GATEWAY_URL: http://127.0.0.1:8080
         run: |
           (cd search  && uvicorn app.main:app --host 127.0.0.1 --port 8081) &
           echo $! > "$RUNNER_TEMP/search.pid"

@@ -1,35 +1,44 @@
 import unittest
 
-from hev_shop_common.records import (
-    product_vector_attributes,
-    review_id_from_work_document,
-    review_namespace_for,
-    review_work_document_id,
-    stable_shard,
-)
+from hev_shop_common.records import ProductRecord, dedupe_categories, product_vector_attributes
 
 
-class StableShardTests(unittest.TestCase):
-    def test_stable_shard_is_bounded_and_repeatable(self):
-        first = stable_shard("B0123", 16)
-        second = stable_shard("B0123", 16)
-
-        self.assertEqual(first, second)
-        self.assertGreaterEqual(first, 0)
-        self.assertLess(first, 16)
-
-    def test_review_namespace_uses_hash_shard_suffix(self):
-        namespace = review_namespace_for(
-            "B0123", namespace_base="amazon-reviews", shard_count=16
+class InputNormalizerTests(unittest.TestCase):
+    def test_dedupe_categories_trims_and_preserves_order(self):
+        self.assertEqual(
+            dedupe_categories([" Books ", "Electronics", "books"]),
+            ["Books", "Electronics"],
         )
 
-        self.assertRegex(namespace, r"^amazon-reviews-\d+$")
 
-    def test_review_work_document_ids_are_reversible(self):
-        doc_id = review_work_document_id("classify", "r123")
+class ProductRecordTests(unittest.TestCase):
+    def test_product_attributes_are_json_ready(self):
+        product = ProductRecord(
+            asin="B0123",
+            category="Electronics",
+            image_url="https://example.test/camera.jpg",
+            title="Camera",
+            description="Small camera",
+            avg_rating=3.5,
+            rating_count=6,
+        )
 
-        self.assertEqual(doc_id, "review-classify:r123")
-        self.assertEqual(review_id_from_work_document(doc_id), "r123")
+        attrs = product.attributes()
+
+        self.assertEqual(product.document_text(), "Camera\nSmall camera")
+        self.assertEqual(attrs["image_url"], "https://example.test/camera.jpg")
+        self.assertEqual(
+            set(attrs),
+            {
+                "asin",
+                "category",
+                "image_url",
+                "title",
+                "description",
+                "avg_rating",
+                "rating_count",
+            },
+        )
 
 
 class ProductVectorAttributeTests(unittest.TestCase):
@@ -41,7 +50,6 @@ class ProductVectorAttributeTests(unittest.TestCase):
                 "category": "Electronics",
                 "description": "Small camera",
                 "image_url": "https://example.test/camera.jpg",
-                "image_path": "/data/images/B0123.jpg",
                 "avg_rating": 3.5,
                 "rating_count": 6,
             },
@@ -53,6 +61,18 @@ class ProductVectorAttributeTests(unittest.TestCase):
         self.assertEqual(attrs["rating_cnt_txt"], "6")
         self.assertNotIn("avg_rating", attrs)
         self.assertNotIn("rating_count", attrs)
+        self.assertEqual(
+            set(attrs),
+            {
+                "asin",
+                "title",
+                "category",
+                "description",
+                "image_url",
+                "avg_rating_txt",
+                "rating_cnt_txt",
+            },
+        )
 
 
 if __name__ == "__main__":

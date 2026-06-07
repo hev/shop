@@ -21,8 +21,8 @@ spec:
   metadataOptions:
     {{- toYaml . | nindent 4 }}
   {{- end }}
-  # AL2023's default root volume is 20 GiB. The indexer image (with Qwen-8B
-  # baked) unpacks to ~25 GiB on disk, so we override with a 50 GiB volume.
+  # AL2023's default root volume is 20 GiB. The CLIP-baked images need extra
+  # pull/unpack headroom, so we override with a larger gp3 volume.
   # Throughput bumped above the gp3 default 125 MB/s to cut the ECR image
   # pull on fresh Karpenter nodes from ~5 min to ~1.5 min.
   blockDeviceMappings:

@@ -1,20 +1,17 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { findByAsin, MOCK_REVIEW_TEXT, PRODUCTS } from "@/lib/mock-data";
+import { findByAsin, PRODUCTS } from "@/lib/mock-data";
 import { similarProducts } from "@/lib/search";
 import {
   backendEnabled,
   backendProduct,
-  backendReviewSamples,
-  backendReviewSearch,
   backendSimilar,
-  type CountInfo,
   type LayerPerf,
 } from "@/lib/backend";
 import { ProductGrid } from "@/components/ProductGrid";
 import { ProductImage } from "@/components/ProductImage";
-import { LayerPerfBadge, StableAsOfBadge } from "@/components/LayerPerfBadge";
-import type { Product, ReviewHit, ReviewSample } from "@/lib/types";
+import { LayerPerfBadge } from "@/components/LayerPerfBadge";
+import type { Product } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -26,89 +23,39 @@ export function generateStaticParams() {
 type LoadedPage = {
   product: Product;
   similar: Product[];
-  reviews: ReviewHit[];
-  samples: ReviewSample[];
   perf: {
     fetchDocument: LayerPerf | null;     // /v2/namespaces/.../documents/{asin}
     similarQuery: LayerPerf | null;      // /recommend nearest_to_id query
-    reviewQuery: LayerPerf | null;       // /v2/namespaces/.../query (review)
-    reviewStableAsOf: number | null;
-    reviewCount: CountInfo | null;       // /v2/namespaces/.../result-count fan-out
   };
 };
 
-async function load(asin: string, reviewQuery: string): Promise<LoadedPage | null> {
+async function load(asin: string): Promise<LoadedPage | null> {
   if (backendEnabled()) {
     const fetched = await backendProduct(asin).catch(() => null);
     if (!fetched) return null;
     const { product, layer_perf: fetchDocumentPerf } = fetched;
-    const sampleIds = Object.values(product.tag_samples ?? {}).flat();
-    const [similarRes, reviewRes, samples] = await Promise.all([
-      backendSimilar(asin, 8).catch(() => ({
-        products: [] as Product[],
-        layer_perf: null,
-        stable_as_of: null,
-      })),
-      backendReviewSearch(asin, reviewQuery || product.title, {
-        topK: 8,
-        withCount: true,
-      }).catch(() => ({
-        reviews: [] as ReviewHit[],
-        layer_perf: null,
-        stable_as_of: null,
-        next_cursor: null,
-        count: null,
-      })),
-      backendReviewSamples(asin, sampleIds).catch(() => [] as ReviewSample[]),
-    ]);
+    const similarRes = await backendSimilar(asin, 8).catch(() => ({
+      products: [] as Product[],
+      layer_perf: null,
+      stable_as_of: null,
+    }));
     return {
       product,
       similar: similarRes.products,
-      reviews: reviewRes.reviews,
-      samples,
       perf: {
         fetchDocument: fetchDocumentPerf,
         similarQuery: similarRes.layer_perf,
-        reviewQuery: reviewRes.layer_perf,
-        reviewStableAsOf: reviewRes.stable_as_of,
-        reviewCount: reviewRes.count,
       },
     };
   }
   const product = findByAsin(asin);
   if (!product) return null;
-  const samples = Object.values(product.tag_samples ?? {})
-    .flat()
-    .map((review_id) => ({
-      review_id,
-      asin,
-      title: null,
-      text: MOCK_REVIEW_TEXT[review_id] ?? "",
-      rating: null,
-    }))
-    .filter((sample) => sample.text);
-  const reviews = samples.slice(0, 4).map((sample, index) => ({
-    id: `${sample.review_id}:chunk:0000`,
-    dist: null,
-    review_id: sample.review_id,
-    asin,
-    chunk_idx: index,
-    text_chunk: sample.text,
-    rating: sample.rating,
-    title: sample.title ?? "",
-    helpful_vote: 0,
-  }));
   return {
     product,
     similar: similarProducts(asin, 8),
-    reviews,
-    samples,
     perf: {
       fetchDocument: null,
       similarQuery: null,
-      reviewQuery: null,
-      reviewStableAsOf: null,
-      reviewCount: null,
     },
   };
 }
@@ -118,14 +65,13 @@ export default async function ProductPage({
   searchParams,
 }: {
   params: Promise<{ asin: string }>;
-  searchParams: Promise<{ rq?: string }>;
+  searchParams: Promise<Record<string, never>>;
 }) {
   const { asin } = await params;
-  const { rq = "" } = await searchParams;
-  const data = await load(asin, rq);
+  await searchParams;
+  const data = await load(asin);
   if (!data) notFound();
-  const { product, similar, reviews, samples, perf } = data;
-  const sampleById = new Map(samples.map((sample) => [sample.review_id, sample]));
+  const { product, similar, perf } = data;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
@@ -172,31 +118,7 @@ export default async function ProductPage({
               </span>
               <span>{product.rating.toFixed(1)}</span>
               <span>·</span>
-              <span>{product.rating_count.toLocaleString()} reviews</span>
-            </div>
-          ) : null}
-
-          {product.tags && product.tags.length > 0 ? (
-            <div className="mt-5 flex flex-wrap gap-2">
-              {product.tags.map((tag) => {
-                const count = product.tag_counts?.[tag] ?? 0;
-                const sampleText = (product.tag_samples?.[tag] ?? [])
-                  .map((id) => sampleById.get(id)?.text)
-                  .filter(Boolean)
-                  .join("\n\n");
-                return (
-                  <span
-                    key={tag}
-                    title={sampleText || undefined}
-                    className="rounded-full bg-white px-3 py-1 text-xs font-medium text-ink-700 ring-1 ring-ink-200"
-                  >
-                    {tag}
-                    {count > 0 ? (
-                      <span className="ml-1 text-ink-400">{count}</span>
-                    ) : null}
-                  </span>
-                );
-              })}
+              <span>{product.rating_count.toLocaleString()} ratings</span>
             </div>
           ) : null}
 
@@ -283,90 +205,6 @@ export default async function ProductPage({
           </p>
         </div>
       </div>
-
-      <section className="mt-20 border-t border-ink-200 pt-10">
-        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-widest text-ink-500">
-              Reviews
-            </div>
-            <h2 className="mt-1 font-display text-3xl tracking-tight">
-              Search inside customer reviews
-            </h2>
-            {perf.reviewCount ? (
-              <p className="mt-2 text-sm text-ink-500">
-                {reviews.length > 0 ? (
-                  <>
-                    Showing the top{" "}
-                    <span className="font-mono text-ink-900">
-                      {reviews.length}
-                    </span>{" "}
-                    of{" "}
-                  </>
-                ) : null}
-                {perf.reviewCount.bounded ? "≥" : ""}
-                <span className="font-mono text-ink-900">
-                  {perf.reviewCount.count.toLocaleString()}
-                </span>{" "}
-                review chunks within cosine{" "}
-                <span className="font-mono">{perf.reviewCount.max_distance}</span>{" "}
-                of the query
-              </p>
-            ) : null}
-            {(perf.reviewQuery || perf.reviewStableAsOf !== null) && (
-              <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                <LayerPerfBadge perf={perf.reviewQuery} label="review query" />
-                {perf.reviewCount?.layer_perf ? (
-                  <LayerPerfBadge
-                    perf={perf.reviewCount.layer_perf}
-                    label="review count"
-                  />
-                ) : null}
-                <StableAsOfBadge stableAsOf={perf.reviewStableAsOf} />
-              </div>
-            )}
-          </div>
-          <form className="flex w-full gap-2 sm:w-auto" action={`/product/${product.asin}`}>
-            <input
-              name="rq"
-              defaultValue={rq}
-              placeholder="battery, fit, setup"
-              className="min-w-0 flex-1 rounded-full border border-ink-200 bg-white px-4 py-2 text-sm outline-none transition focus:border-ink-900 sm:w-72"
-            />
-            <button
-              type="submit"
-              className="rounded-full bg-ink-900 px-4 py-2 text-sm font-medium text-white"
-            >
-              Search
-            </button>
-          </form>
-        </div>
-
-        {reviews.length > 0 ? (
-          <div className="grid gap-4 md:grid-cols-2">
-            {reviews.map((review) => (
-              <article
-                key={review.id}
-                className="rounded-2xl bg-white p-5 ring-1 ring-ink-200"
-              >
-                <div className="mb-3 flex items-center justify-between gap-3 text-xs text-ink-500">
-                  <span className="font-mono">{review.review_id}</span>
-                  {review.rating != null ? (
-                    <span className="text-accent">
-                      {"★".repeat(Math.max(0, Math.round(review.rating)))}
-                    </span>
-                  ) : null}
-                </div>
-                <p className="text-sm leading-6 text-ink-700">{review.text_chunk}</p>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <div className="rounded-2xl border border-dashed border-ink-200 bg-white p-8 text-sm text-ink-500">
-            No review chunks are indexed for this product yet.
-          </div>
-        )}
-      </section>
 
       {/* Similar products */}
       {similar.length > 0 && (

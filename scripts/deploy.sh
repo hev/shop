@@ -3,20 +3,20 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+RELEASE="${RELEASE:-hev-shop}"
 NAMESPACE="${NAMESPACE:-hev-shop}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
-BUILD_IMAGE="${BUILD_IMAGE:-1}"
+BUILD_INDEXER="${BUILD_INDEXER:-1}"
+BUILD_SEARCH="${BUILD_SEARCH:-0}"
 BUILD_WEB="${BUILD_WEB:-0}"
 BUILDER="${BUILDER:-depot}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 TF_DIR="${TF_DIR:-../layer/infra/terraform}"
 KEDA_NAMESPACE="${KEDA_NAMESPACE:-keda}"
 KEDA_NODE_ROLE="${KEDA_NODE_ROLE:-infra}"
-OPENROUTER_OP_VAULT="${OPENROUTER_OP_VAULT:-mesh-staging}"
-OPENROUTER_OP_ITEM="${OPENROUTER_OP_ITEM:-layer-openrouter}"
-OPENROUTER_OP_FIELD="${OPENROUTER_OP_FIELD:-credential}"
-OP_ACCOUNT="${OP_ACCOUNT:-}"
 LAYER_CLIENT_CONTEXT="${LAYER_CLIENT_CONTEXT:-../layer/clients/python}"
+HELM_VALUES="${HELM_VALUES:-}"
+HELM_SET="${HELM_SET:-}"
 
 log() { echo "==> $*"; }
 err() { echo "ERROR: $*" >&2; exit 1; }
@@ -26,44 +26,51 @@ require_tool() {
 
 for arg in "$@"; do
   case "$arg" in
-    --skip-build) BUILD_IMAGE=0 ;;
+    --skip-build)
+      BUILD_INDEXER=0
+      BUILD_SEARCH=0
+      BUILD_WEB=0
+      ;;
+    --build-indexer) BUILD_INDEXER=1 ;;
+    --build-search) BUILD_SEARCH=1 ;;
     --build-web) BUILD_WEB=1 ;;
     *) err "Unknown argument: $arg" ;;
   esac
 done
 
 require_tool kubectl
+require_tool helm
 require_tool aws
+
+INDEXER_IMAGE_REPOSITORY="${INDEXER_IMAGE_REPOSITORY:-${ECR_REPOSITORY_URL:-}}"
+SEARCH_IMAGE_REPOSITORY="${SEARCH_IMAGE_REPOSITORY:-${ECR_SEARCH_URL:-}}"
+WEB_IMAGE_REPOSITORY="${WEB_IMAGE_REPOSITORY:-${ECR_WEB_URL:-}}"
+CLUSTER_NAME="${CLUSTER_NAME:-}"
+HEV_SHOP_EFS_FILE_SYSTEM_ID="${HEV_SHOP_EFS_FILE_SYSTEM_ID:-}"
 
 if [[ -n "$TF_DIR" && -d "$TF_DIR" ]]; then
   pushd "$TF_DIR" >/dev/null
-  ECR_REPOSITORY_URL="${ECR_REPOSITORY_URL:-$(terraform output -raw ecr_amazon_reviews_url 2>/dev/null || true)}"
-  ECR_WEB_URL="${ECR_WEB_URL:-$(terraform output -raw ecr_hev_shop_web_url 2>/dev/null || true)}"
+  WEB_IMAGE_REPOSITORY="${WEB_IMAGE_REPOSITORY:-$(terraform output -raw ecr_hev_shop_web_url 2>/dev/null || true)}"
   CLUSTER_NAME="${CLUSTER_NAME:-$(terraform output -raw cluster_name 2>/dev/null || true)}"
   HEV_SHOP_EFS_FILE_SYSTEM_ID="${HEV_SHOP_EFS_FILE_SYSTEM_ID:-$(terraform output -raw hev_shop_efs_file_system_id 2>/dev/null || true)}"
   popd >/dev/null
-else
-  ECR_REPOSITORY_URL="${ECR_REPOSITORY_URL:-}"
-  ECR_WEB_URL="${ECR_WEB_URL:-}"
-  CLUSTER_NAME="${CLUSTER_NAME:-}"
-  HEV_SHOP_EFS_FILE_SYSTEM_ID="${HEV_SHOP_EFS_FILE_SYSTEM_ID:-}"
 fi
 
-[[ -n "$ECR_REPOSITORY_URL" ]] || err "Set ECR_REPOSITORY_URL or apply Terraform with ecr_amazon_reviews_url output."
-[[ -n "$CLUSTER_NAME" ]] || err "Set CLUSTER_NAME or apply Terraform with cluster_name output."
-[[ -n "$HEV_SHOP_EFS_FILE_SYSTEM_ID" ]] || err "Set HEV_SHOP_EFS_FILE_SYSTEM_ID or apply Terraform with hev_shop_efs_file_system_id output."
+if [[ "$BUILD_INDEXER" == "1" ]]; then
+  [[ -n "$INDEXER_IMAGE_REPOSITORY" ]] || err "Set INDEXER_IMAGE_REPOSITORY or ECR_REPOSITORY_URL to build the indexer image."
+fi
+if [[ "$BUILD_SEARCH" == "1" ]]; then
+  [[ -n "$SEARCH_IMAGE_REPOSITORY" ]] || err "Set SEARCH_IMAGE_REPOSITORY or ECR_SEARCH_URL to build the search image."
+fi
 if [[ "$BUILD_WEB" == "1" ]]; then
-  [[ -n "$ECR_WEB_URL" ]] || err "Set ECR_WEB_URL or apply Terraform with ecr_hev_shop_web_url output."
+  [[ -n "$WEB_IMAGE_REPOSITORY" ]] || err "Set WEB_IMAGE_REPOSITORY or ECR_WEB_URL to build the web image."
 fi
-
-IMAGE="${ECR_REPOSITORY_URL}:${IMAGE_TAG}"
-WEB_IMAGE="${ECR_WEB_URL:+${ECR_WEB_URL}:${IMAGE_TAG}}"
+[[ -n "$CLUSTER_NAME" ]] || err "Set CLUSTER_NAME or apply Terraform with cluster_name output."
 
 log "Updating kubeconfig for ${CLUSTER_NAME}..."
 aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION"
 
 if ! kubectl get crd scaledobjects.keda.sh >/dev/null 2>&1; then
-  require_tool helm
   log "KEDA is not installed; installing it on mesh-role=${KEDA_NODE_ROLE} nodes..."
   helm repo add kedacore https://kedacore.github.io/charts >/dev/null 2>&1 || true
   helm repo update kedacore
@@ -79,55 +86,56 @@ if ! kubectl get crd scaledobjects.keda.sh >/dev/null 2>&1; then
   kubectl rollout status deployment/keda-admission-webhooks -n "$KEDA_NAMESPACE" --timeout=180s
 fi
 
-if [[ "$BUILD_IMAGE" == "1" || "$BUILD_WEB" == "1" ]]; then
-  log "Logging in to ECR..."
-  ECR_LOGIN_URL="${ECR_REPOSITORY_URL:-$ECR_WEB_URL}"
+docker_login() {
+  local repository="$1"
   aws ecr get-login-password --region "$AWS_REGION" \
-    | docker login --username AWS --password-stdin "${ECR_LOGIN_URL%/*}"
-fi
+    | docker login --username AWS --password-stdin "${repository%/*}"
+}
 
-if [[ "$BUILD_IMAGE" == "1" ]]; then
-  log "Building and pushing ${IMAGE}..."
+build_image() {
+  local dockerfile="$1"
+  local context="$2"
+  local image="$3"
+  shift 3
+
+  log "Building and pushing ${image}..."
   case "$BUILDER" in
     depot)
       require_tool depot
-      DEPOT_DISABLE_OTEL=1 depot build --platform linux/amd64 \
-        --build-context "layer_client=${LAYER_CLIENT_CONTEXT}" \
-        -f indexer/Dockerfile -t "$IMAGE" --push .
+      DEPOT_DISABLE_OTEL=1 depot build --platform linux/amd64 "$@" \
+        -f "$dockerfile" -t "$image" --push "$context"
       ;;
     docker)
       require_tool docker
-      docker buildx build --platform linux/amd64 \
-        --build-context "layer_client=${LAYER_CLIENT_CONTEXT}" \
-        -f indexer/Dockerfile -t "$IMAGE" --push .
+      docker buildx build --platform linux/amd64 "$@" \
+        -f "$dockerfile" -t "$image" --push "$context"
       ;;
     *)
       err "Unsupported BUILDER=${BUILDER}; use depot or docker."
       ;;
   esac
+}
+
+if [[ "$BUILD_INDEXER" == "1" ]]; then
+  docker_login "$INDEXER_IMAGE_REPOSITORY"
+  build_image indexer/Dockerfile . "${INDEXER_IMAGE_REPOSITORY}:${IMAGE_TAG}" \
+    --build-context "layer_client=${LAYER_CLIENT_CONTEXT}"
+fi
+
+if [[ "$BUILD_SEARCH" == "1" ]]; then
+  docker_login "$SEARCH_IMAGE_REPOSITORY"
+  build_image search/Dockerfile . "${SEARCH_IMAGE_REPOSITORY}:${IMAGE_TAG}" \
+    --build-context "layer_client=${LAYER_CLIENT_CONTEXT}"
 fi
 
 if [[ "$BUILD_WEB" == "1" ]]; then
-  log "Building and pushing ${WEB_IMAGE}..."
-  case "$BUILDER" in
-    depot)
-      require_tool depot
-      DEPOT_DISABLE_OTEL=1 depot build --platform linux/amd64 \
-        -f web/Dockerfile -t "$WEB_IMAGE" --push web
-      ;;
-    docker)
-      require_tool docker
-      docker buildx build --platform linux/amd64 \
-        -f web/Dockerfile -t "$WEB_IMAGE" --push web
-      ;;
-    *)
-      err "Unsupported BUILDER=${BUILDER}; use depot or docker."
-      ;;
-  esac
+  docker_login "$WEB_IMAGE_REPOSITORY"
+  build_image web/Dockerfile web "${WEB_IMAGE_REPOSITORY}:${IMAGE_TAG}"
 fi
 
-log "Applying hev-shop EFS StorageClass for ${HEV_SHOP_EFS_FILE_SYSTEM_ID}..."
-kubectl apply -f - <<EOF
+if [[ -n "$HEV_SHOP_EFS_FILE_SYSTEM_ID" ]]; then
+  log "Applying hev-shop EFS StorageClass for ${HEV_SHOP_EFS_FILE_SYSTEM_ID}..."
+  kubectl apply -f - <<EOF
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
@@ -143,82 +151,45 @@ volumeBindingMode: Immediate
 mountOptions:
   - tls
 EOF
-
-CURRENT_WEB_IMAGE=""
-if [[ "$BUILD_WEB" != "1" ]]; then
-  CURRENT_WEB_IMAGE="$(kubectl get deployment/hev-shop-web -n "$NAMESPACE" -o jsonpath='{.spec.template.spec.containers[?(@.name=="web")].image}' 2>/dev/null || true)"
 fi
 
-log "Applying hev-shop manifests..."
-kubectl apply -k kubernetes
+helm_args=(
+  upgrade --install "$RELEASE" ./helm/hev-shop
+  --namespace "$NAMESPACE"
+  --create-namespace
+)
 
-OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}"
-if [[ -z "$OPENROUTER_API_KEY" ]] && command -v op >/dev/null 2>&1; then
-  OP_ARGS=()
-  if [[ -n "$OP_ACCOUNT" ]]; then
-    OP_ARGS=(--account "$OP_ACCOUNT")
-  fi
-  OPENROUTER_API_KEY="$(op read "op://${OPENROUTER_OP_VAULT}/${OPENROUTER_OP_ITEM}/${OPENROUTER_OP_FIELD}" ${OP_ARGS[@]+"${OP_ARGS[@]}"} 2>/dev/null || true)"
+if [[ -n "$INDEXER_IMAGE_REPOSITORY" ]]; then
+  helm_args+=(--set "indexerImage.repository=${INDEXER_IMAGE_REPOSITORY}")
+  helm_args+=(--set "indexerImage.tag=${IMAGE_TAG}")
 fi
-if [[ -n "$OPENROUTER_API_KEY" ]]; then
-  log "Restoring OpenRouter API key into ${NAMESPACE}/hev-shop-secrets..."
-  OPENROUTER_API_KEY_B64="$(printf '%s' "$OPENROUTER_API_KEY" | base64 | tr -d '\n')"
-  kubectl patch secret hev-shop-secrets -n "$NAMESPACE" \
-    --type merge \
-    -p "{\"data\":{\"OPENROUTER_API_KEY\":\"${OPENROUTER_API_KEY_B64}\"}}" >/dev/null
-else
-  log "OpenRouter API key not supplied or found; review-classify workers will idle."
+if [[ -n "$SEARCH_IMAGE_REPOSITORY" ]]; then
+  helm_args+=(--set "searchImage.repository=${SEARCH_IMAGE_REPOSITORY}")
+  helm_args+=(--set "searchImage.tag=${IMAGE_TAG}")
 fi
-
-if [[ "$BUILD_WEB" != "1" && -n "$CURRENT_WEB_IMAGE" ]]; then
-  log "Restoring web image to ${CURRENT_WEB_IMAGE}..."
-  kubectl set image deployment/hev-shop-web "web=${CURRENT_WEB_IMAGE}" -n "$NAMESPACE"
+if [[ -n "$WEB_IMAGE_REPOSITORY" ]]; then
+  helm_args+=(--set "webImage.repository=${WEB_IMAGE_REPOSITORY}")
+  helm_args+=(--set "webImage.tag=${IMAGE_TAG}")
 fi
-
-log "Waiting for shared data PVC..."
-kubectl wait --for=jsonpath='{.status.phase}'=Bound pvc/hev-shop-data -n "$NAMESPACE" --timeout=180s
-
-log "Setting image to ${IMAGE}..."
-kubectl set image deployment/hev-shop-api "api=${IMAGE}" -n "$NAMESPACE"
-kubectl set image deployment/hev-shop-cpu-worker "worker=${IMAGE}" -n "$NAMESPACE"
-kubectl set image deployment/hev-shop-gpu-worker "worker=${IMAGE}" -n "$NAMESPACE"
-kubectl set image deployment/hev-shop-review-embed-worker "worker=${IMAGE}" -n "$NAMESPACE"
-kubectl set image deployment/hev-shop-review-classify-worker "worker=${IMAGE}" -n "$NAMESPACE"
-kubectl set image deployment/hev-shop-review-aggregate-worker "worker=${IMAGE}" -n "$NAMESPACE"
-
-log "Restarting deployments to pull ${IMAGE}..."
-kubectl rollout restart \
-  deployment/hev-shop-api \
-  deployment/hev-shop-cpu-worker \
-  deployment/hev-shop-gpu-worker \
-  deployment/hev-shop-review-embed-worker \
-  deployment/hev-shop-review-classify-worker \
-  deployment/hev-shop-review-aggregate-worker \
-  -n "$NAMESPACE"
-
-log "Waiting for API rollout..."
-kubectl rollout status deployment/hev-shop-api -n "$NAMESPACE" --timeout=180s
-
-if [[ "$BUILD_WEB" == "1" ]]; then
-  log "Setting web image to ${WEB_IMAGE}..."
-  kubectl set image deployment/hev-shop-web "web=${WEB_IMAGE}" -n "$NAMESPACE"
-  kubectl rollout restart deployment/hev-shop-web -n "$NAMESPACE"
-  kubectl rollout status deployment/hev-shop-web -n "$NAMESPACE" --timeout=180s
-
-  WEB_LB="$(kubectl get svc hev-shop-web -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)"
-  if [[ -n "$WEB_LB" ]]; then
-    log "Web reachable at http://${WEB_LB}"
-  else
-    log "Web NLB not yet provisioned. Watch with:"
-    log "  kubectl get svc hev-shop-web -n ${NAMESPACE} -w"
-  fi
+if [[ -n "$HELM_SET" ]]; then
+  helm_args+=(--set "$HELM_SET")
+fi
+if [[ -n "$HELM_VALUES" ]]; then
+  IFS=',' read -r -a value_files <<< "$HELM_VALUES"
+  for value_file in "${value_files[@]}"; do
+    [[ -n "$value_file" ]] && helm_args+=(-f "$value_file")
+  done
 fi
 
-if [[ "$NAMESPACE" != "layer" ]] && kubectl get deployment/hev-shop-api -n layer >/dev/null 2>&1; then
-  log "Legacy hev-shop workloads still exist in layer namespace."
-  log "Remove them after validating this deploy with:"
-  log "  kubectl delete deploy,svc,cm,secret,scaledobject -n layer -l app.kubernetes.io/name=hev-shop"
-fi
+log "Deploying ${RELEASE} with Helm..."
+helm "${helm_args[@]}"
 
-log "hev-shop deployed. Port-forward with:"
-log "  kubectl port-forward svc/hev-shop-api 8090:8080 -n ${NAMESPACE}"
+log "Waiting for core rollout..."
+kubectl rollout status deployment/"${RELEASE}-indexer-api" -n "$NAMESPACE" --timeout=180s
+kubectl rollout status deployment/"${RELEASE}-search" -n "$NAMESPACE" --timeout=180s
+kubectl rollout status deployment/"${RELEASE}-web" -n "$NAMESPACE" --timeout=180s
+
+log "hev-shop deployed with Helm. Useful checks:"
+log "  kubectl get pods -n ${NAMESPACE}"
+log "  kubectl port-forward -n ${NAMESPACE} svc/${RELEASE}-search 18080:8080"
+log "  kubectl port-forward -n ${NAMESPACE} svc/${RELEASE}-indexer-api 18081:8080"

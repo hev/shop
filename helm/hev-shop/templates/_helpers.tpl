@@ -44,8 +44,8 @@ app.kubernetes.io/name: {{ include "hev-shop.name" . }}
 {{- end -}}
 
 {{- /*
-  Worker + indexer control plane image. Bakes both CLIP-image and Qwen-8B
-  by default — workers need both. Built from indexer/Dockerfile.
+  Worker + indexer control plane image. Bakes CLIP-image by default.
+  Built from indexer/Dockerfile.
 */ -}}
 {{- define "hev-shop.indexerImage" -}}
 {{- printf "%s:%s" .Values.indexerImage.repository (.Values.indexerImage.tag | default .Chart.AppVersion) -}}
@@ -56,10 +56,7 @@ app.kubernetes.io/name: {{ include "hev-shop.name" . }}
 {{- end -}}
 
 {{- /*
-  Search read-API image. CLIP-text only — Qwen-8B is off by default in the
-  search Dockerfile because the search pod runs on the small infra node and
-  never loads Qwen on CPU (review search returns 503 unless the pod has a
-  GPU). Built from search/Dockerfile.
+  Search read-API image. CLIP-text only. Built from search/Dockerfile.
 */ -}}
 {{- define "hev-shop.searchImage" -}}
 {{- printf "%s:%s" .Values.searchImage.repository (.Values.searchImage.tag | default .Chart.AppVersion) -}}

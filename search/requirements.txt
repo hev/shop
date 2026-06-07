@@ -9,9 +9,7 @@ fastapi>=0.115
 -e ../common
 httpx>=0.27
 pydantic-settings>=2.6
-# torch + transformers cover CLIP-text query embedding (always loaded) and
-# Qwen review embedding (loaded only when API_REVIEW_SEARCH_ENABLED=true,
-# which requires a GPU pod — see config.py).
+# torch + transformers cover CLIP-text query embedding.
 torch>=2.5
 transformers>=4.46
 uvicorn[standard]>=0.32

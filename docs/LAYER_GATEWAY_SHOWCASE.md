@@ -5,40 +5,36 @@ would use it. The app keeps source-specific logic in workers and leaves vector
 storage, cache-aware retrieval, query freshness, and pipeline state management
 to Layer. See [hevlayer.com](https://hevlayer.com) for the gateway overview.
 
-## What Layer adds over turbopuffer
+## What Layer Adds Over Turbopuffer
 
-Layer's HTTP surface is wire-compatible with turbopuffer for the namespace
-APIs hev-shop uses for search and writes — same paths, same request and
-response shapes for `query`, `upserts`, `patch`, `fetch_document`, and the
-schema operations. Code that points at Layer instead of turbopuffer keeps
-working; nothing in this repo imports a turbopuffer SDK directly. Every
-Layer call goes through `hevlayer.AsyncHevlayer`, the official Python SDK
-that ships from `hev/layer/clients/python`.
+Layer's HTTP surface is wire-compatible with turbopuffer for the namespace APIs
+hev-shop uses for search and reads. Code points at Layer instead of a
+turbopuffer SDK directly, and the app uses `hevlayer.AsyncHevlayer` for gateway
+calls.
 
-Layer adds four capabilities on top of that compatible surface, and hev-shop
-is structured to make each one visible:
+Layer adds four capabilities on top of that compatible surface, and hev-shop is
+structured to make each one visible:
 
 | Capability | Where in hev-shop |
 | ---------- | ----------------- |
-| **Document cache** — Aerospike pull-through on `fetch_document` / `fetch_many_documents`, populated by warm jobs and read-through. Cache hits show `x-layer-cache: hit`. | Product detail pages call `AsyncHevlayer.fetch_document`; the storefront's `/product/[asin]` route reads from the cache without touching turbopuffer for the second hit. |
-| **Snapshots and scans** — field-value snapshots, ID scans, auto-mode source selection (cache vs origin) gated on a freshness watermark, plus a `warm` operation that primes the cache. | `/meta` materializes a `category` snapshot to drive the landing-page facets; review aggregation creates an ID scan and fetches the matching review documents. |
-| **Pipeline state machine** — `pending → embedding → indexed/failed` per document, exposed through Layer's pipeline API with atomic claim, leases, heartbeats, and stale-claim recovery. | `pipeline.py` is the entire app-side contract: claim, heartbeat, complete/fail/release. KEDA scales workers from `layer_pipeline_stage_count` metrics. |
-| **Freshness watermark** — every query response carries `stable_as_of` (epoch ms) and namespaces expose `is_stable`, derived from a consistency watcher that tracks when `unindexed_bytes` reaches 0. | `/search`, `/search/reviews`, and `/meta` pass the watermark through to the UI; the homepage renders "last indexed at …" against it. |
+| **Document cache** — Aerospike pull-through on `fetch_document` / `fetch_many_documents`, populated by warm jobs and read-through. Cache hits show `x-layer-cache: hit`. | Product detail pages call `AsyncHevlayer.fetch_document`; repeated product fetches can be served from the gateway cache. |
+| **Snapshots** — field-value snapshots gated on a freshness watermark. | `/meta` materializes a `category` snapshot to drive storefront category facets. |
+| **Pipeline state machine** — `pending -> embedding -> indexed/failed` per document, exposed through Layer's pipeline API with atomic claim, leases, heartbeats, and stale-claim recovery. | CPU workers stage product chunks; GPU workers claim pending documents and call `put_pipeline_document_vectors`, which writes vectors and marks docs indexed. KEDA scales workers from `layer_pipeline_stage_count` metrics. |
+| **Freshness watermark** — every query response carries `stable_as_of` (epoch ms) and namespaces expose `is_stable`, derived from a consistency watcher that tracks when `unindexed_bytes` reaches 0. | `/search`, `/recommend`, and `/meta` pass the watermark through to the UI. |
 
-These are the four properties to keep in mind when adding features: prefer
-changes that expose one of them more clearly. Avoid adding code that reaches
-around the gateway (a direct turbopuffer call, a private worker-only cache,
-an out-of-band scheduler) — that defeats the demo.
+These are the properties to keep in mind when adding features: prefer changes
+that expose one of them clearly. Avoid adding code that reaches around the
+gateway, such as direct turbopuffer writes or private worker-only caches.
 
 ## Namespace API
 
-The product index uses the gateway namespace API as its only turbopuffer write
-path:
+The product index uses the gateway namespace API for reads:
 
-- product vectors are upserted into `amazon-products`
-- review vectors are written to `amazon-reviews-*` shards
+- product vectors are addressed in `amazon-products`
 - product search uses `/v2/namespaces/{namespace}/query`
-- product pages and similar-item paths can use fetch/query/scan/snapshot surfaces
+- recommendations use `nearest_to_id`
+- product pages fetch cached documents from the gateway
+- `/meta` uses namespace metadata and category snapshots
 
 The gateway adds Aerospike pull-through caching and a hidden `_upserted_at`
 watermark. The web app passes `stable_as_of` through to the UI so users can see
@@ -46,41 +42,35 @@ which consistent snapshot a result set reflects.
 
 Relevant code:
 
-- `hevlayer` SDK (`hev/layer/clients/python`) — `AsyncHevlayer` is the
-  client; the indexer imports it directly in `main.py`, `pipeline.py`,
+- `hevlayer` SDK (`hev/layer/clients/python`) — `AsyncHevlayer` is the client;
+  the indexer imports it directly in `main.py`, `pipeline.py`,
   `extraction.py`, and `worker.py`.
-- `indexer/app/pipeline.py` (`process_embed_products`, `process_embed_reviews`,
-  `process_aggregate_tags` — namespace upserts and PATCH attribute rollup)
-- `web/app/api/search/route.ts`
+- `search/app/main.py` — query, recommendation, product fetch, and metadata
+  endpoints.
+- `web/app/api/search/route.ts` and `web/lib/backend.ts` — frontend adapters.
 
 ## Pipeline API
 
 The app uses gateway pipeline state instead of maintaining a bespoke GPU queue.
 CPU workers stage documents, GPU workers claim and heartbeat documents, and the
-gateway owns the queue state transitions.
+gateway owns queue state transitions.
 
 Main stages:
 
-- `pending`: CPU work has staged chunks and metadata
-- `embedding`: a worker has claimed the document lease
-- `indexed`: vectors are in turbopuffer
-- `failed`: the document exceeded retry policy or hit a permanent error
-
-The review pipeline deliberately fans out from one ingest into multiple work
-items in the shared `hev-shop-reviews` pipeline (one `embed:` doc, one
-`classify:` doc per review), with classification debouncing per-ASIN jobs
-onto a third `review-aggregate` pipeline. That makes the gateway's claim,
-stage, and cross-pipeline transition APIs visible under a realistic parallel
-workload.
+- `pending`: CPU work has staged chunks and metadata.
+- `embedding`: a worker has claimed the document lease.
+- `indexed`: vectors are written through `put_pipeline_document_vectors`.
+- `failed`: the document hit a permanent input error.
 
 Relevant code:
 
-- `indexer/app/extraction.py` — stages products and per-review work items
-- `indexer/app/pipeline.py` — `STAGES` manifest + `run_stage` driver + each
-  stage's `process_*` function
-- `indexer/app/worker.py` — `WORKER_TYPE` env → stage dispatch
-- `kubernetes/*-scaledobject.yaml`, `helm/hev-shop/templates/scaledobjects.yaml` —
-  KEDA queries Layer pipeline metrics to scale each stage
+- `indexer/app/extraction.py` — stages product chunks with product metadata and
+  image URLs.
+- `indexer/app/pipeline.py` — claims pending product docs, fetches image bytes
+  in memory, and writes vectors through Layer.
+- `indexer/app/worker.py` — `WORKER_TYPE=cpu` or `gpu`.
+- `helm/hev-shop/templates/scaledobjects.yaml` — KEDA queries Layer pipeline
+  metrics to scale workers.
 
 ## Developer Contract
 
@@ -89,7 +79,7 @@ The app should make these gateway properties easy to inspect:
 - where chunks are staged before embedding
 - which documents are pending, claimed, indexed, or failed
 - when turbopuffer is still indexing and which watermark search used
-- how worker count follows PostgreSQL pipeline state through KEDA
+- how worker count follows Layer pipeline state through KEDA
 - how product attributes map into turbopuffer's schema
 
 When adding features, prefer examples that expose a gateway behavior directly.

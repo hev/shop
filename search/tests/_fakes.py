@@ -1,9 +1,8 @@
 """Test doubles for the search service.
 
-Only the slice of hevlayer that /search, /search/reviews, /product,
-/reviews/samples, and /meta actually call lives here. Indexer-only
-methods (claim_documents, set_documents_stage, etc.) belong in
-`indexer/tests/_fakes.py`.
+Only the slice of hevlayer that /search, /product, /recommend, and /meta
+actually call lives here. Indexer-only methods (claim_documents,
+set_documents_stage, etc.) belong in `indexer/tests/_fakes.py`.
 
 Recorded calls land in flat dicts so tests can assert on payload fields
 without unwrapping pydantic models.
@@ -265,19 +264,8 @@ class FakeClipTextEmbedder:
         return [0.1, 0.2, 0.3]
 
 
-class FakeQwenTextEmbedder:
-    def __init__(self) -> None:
-        self.encode_calls: list[list[str]] = []
-
-    def encode_texts(self, texts: list[str]) -> list[list[float]]:
-        self.encode_calls.append(list(texts))
-        return [[float(i), 0.5] for i in range(len(texts))]
-
-
 def make_settings(**overrides):
-    """Construct a real `Settings` with overrides. Tests can pass either
-    field names (`reviews_query_namespace_base=...`) or env-var aliases
-    (`REVIEWS_QUERY_NAMESPACE_BASE=...`)."""
+    """Construct a real `Settings` with overrides."""
     from hev_shop_common.config import Settings
 
     return Settings(**overrides)

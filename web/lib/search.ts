@@ -39,17 +39,13 @@ export function dropProducts(runId: string, size = DROP_SIZE): Product[] {
 export function searchProducts(
   query: string,
   limit = 24,
-  tags: string[] = [],
   pool: Product[] = PRODUCTS,
 ): Product[] {
   const tokens = tokenize(query);
-  const products = tags.length
-    ? pool.filter((p) => p.tags?.some((tag) => tags.includes(tag)))
-    : pool;
   if (tokens.length === 0) {
-    return [...products].sort((a, b) => b.rating_count - a.rating_count).slice(0, limit);
+    return [...pool].sort((a, b) => b.rating_count - a.rating_count).slice(0, limit);
   }
-  return products.map((p) => ({ p, s: score(p, tokens) }))
+  return pool.map((p) => ({ p, s: score(p, tokens) }))
     .filter((x) => x.s > 0)
     .sort((a, b) => b.s - a.s)
     .slice(0, limit)

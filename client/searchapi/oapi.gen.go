@@ -117,49 +117,6 @@ type RecommendResponse struct {
 	StableAsOf *int       `json:"stable_as_of,omitempty"`
 }
 
-// ReviewSample defines model for ReviewSample.
-type ReviewSample struct {
-	Asin     string  `json:"asin"`
-	Rating   *int    `json:"rating,omitempty"`
-	ReviewId string  `json:"review_id"`
-	Text     string  `json:"text"`
-	Title    *string `json:"title,omitempty"`
-}
-
-// ReviewSamplesResponse defines model for ReviewSamplesResponse.
-type ReviewSamplesResponse struct {
-	Asin    string         `json:"asin"`
-	Samples []ReviewSample `json:"samples"`
-}
-
-// ReviewSearchResponse defines model for ReviewSearchResponse.
-type ReviewSearchResponse struct {
-	Asin     string  `json:"asin"`
-	Category *string `json:"category,omitempty"`
-
-	// Count Result of a /v2/namespaces/{ns}/result-count fan-out. `bounded=True` means
-	// one or more shards saturated their top_k cap on this round, so `count`
-	// is a lower bound — render it as "≥N" rather than "=N".
-	Count *CountInfo  `json:"count,omitempty"`
-	Hits  []SearchHit `json:"hits"`
-
-	// LayerPerf One Layer gateway round-trip's timing + cache disposition,
-	// surfaced to the UI so the showcase can render `42ms · cache hit`
-	// inline. `cache_status` is the gateway's `x-layer-cache` header
-	// (`"hit"`, `"miss"`, or `"miss-on-error"`); `None` when the gateway
-	// didn't attach the header — the `query` endpoint doesn't go through
-	// the document cache, so query perfs always have `cache_status=None`.
-	LayerPerf *LayerPerf `json:"layer_perf,omitempty"`
-	Namespace string     `json:"namespace"`
-
-	// NextCursor Opaque cursor for the next page. Present iff the gateway returned a full top_k (i.e. there may be more results). Pass it back as `cursor` on the next /search call alongside the same filters.
-	NextCursor *string `json:"next_cursor,omitempty"`
-	Query      string  `json:"query"`
-
-	// StableAsOf Epoch-ms watermark — results reflect everything indexed at or before this timestamp. None until the gateway's consistency watcher has observed a clean snapshot for the namespace.
-	StableAsOf *int `json:"stable_as_of,omitempty"`
-}
-
 // SearchHit defines model for SearchHit.
 type SearchHit struct {
 	Attributes *map[string]interface{} `json:"attributes,omitempty"`
@@ -180,9 +137,8 @@ type SearchRequest struct {
 	Namespace   *string  `json:"namespace,omitempty"`
 
 	// Query Free-text search query
-	Query string    `json:"query"`
-	Tags  *[]string `json:"tags,omitempty"`
-	TopK  *int      `json:"top_k,omitempty"`
+	Query string `json:"query"`
+	TopK  *int   `json:"top_k,omitempty"`
 
 	// WithCount If true, fan out an extra /v2/namespaces/{ns}/result-count call against the same query vector + filters to estimate how many docs sit within max_distance. Costs one extra round-trip.
 	WithCount *bool `json:"with_count,omitempty"`
@@ -236,23 +192,6 @@ type ValidationError_Loc_Item struct {
 // MetaMetaGetParams defines parameters for MetaMetaGet.
 type MetaMetaGetParams struct {
 	Namespace *string `form:"namespace,omitempty" json:"namespace,omitempty"`
-}
-
-// ReviewSamplesReviewsSamplesGetParams defines parameters for ReviewSamplesReviewsSamplesGet.
-type ReviewSamplesReviewsSamplesGetParams struct {
-	Asin string `form:"asin" json:"asin"`
-	Ids  string `form:"ids" json:"ids"`
-}
-
-// SearchReviewsSearchReviewsGetParams defines parameters for SearchReviewsSearchReviewsGet.
-type SearchReviewsSearchReviewsGetParams struct {
-	Q           string   `form:"q" json:"q"`
-	Asin        string   `form:"asin" json:"asin"`
-	TopK        *int     `form:"top_k,omitempty" json:"top_k,omitempty"`
-	Category    *string  `form:"category,omitempty" json:"category,omitempty"`
-	Cursor      *string  `form:"cursor,omitempty" json:"cursor,omitempty"`
-	WithCount   *bool    `form:"with_count,omitempty" json:"with_count,omitempty"`
-	MaxDistance *float32 `form:"max_distance,omitempty" json:"max_distance,omitempty"`
 }
 
 // RecommendRecommendPostJSONRequestBody defines body for RecommendRecommendPost for application/json ContentType.
@@ -410,16 +349,10 @@ type ClientInterface interface {
 
 	RecommendRecommendPost(ctx context.Context, body RecommendRecommendPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// ReviewSamplesReviewsSamplesGet request
-	ReviewSamplesReviewsSamplesGet(ctx context.Context, params *ReviewSamplesReviewsSamplesGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
-
 	// SearchSearchPostWithBody request with any body
 	SearchSearchPostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	SearchSearchPost(ctx context.Context, body SearchSearchPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	// SearchReviewsSearchReviewsGet request
-	SearchReviewsSearchReviewsGet(ctx context.Context, params *SearchReviewsSearchReviewsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 func (c *Client) HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -482,18 +415,6 @@ func (c *Client) RecommendRecommendPost(ctx context.Context, body RecommendRecom
 	return c.Client.Do(req)
 }
 
-func (c *Client) ReviewSamplesReviewsSamplesGet(ctx context.Context, params *ReviewSamplesReviewsSamplesGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewReviewSamplesReviewsSamplesGetRequest(c.Server, params)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
 func (c *Client) SearchSearchPostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSearchSearchPostRequestWithBody(c.Server, contentType, body)
 	if err != nil {
@@ -508,18 +429,6 @@ func (c *Client) SearchSearchPostWithBody(ctx context.Context, contentType strin
 
 func (c *Client) SearchSearchPost(ctx context.Context, body SearchSearchPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSearchSearchPostRequest(c.Server, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) SearchReviewsSearchReviewsGet(ctx context.Context, params *SearchReviewsSearchReviewsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewSearchReviewsSearchReviewsGetRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -685,64 +594,6 @@ func NewRecommendRecommendPostRequestWithBody(server string, contentType string,
 	return req, nil
 }
 
-// NewReviewSamplesReviewsSamplesGetRequest generates requests for ReviewSamplesReviewsSamplesGet
-func NewReviewSamplesReviewsSamplesGetRequest(server string, params *ReviewSamplesReviewsSamplesGetParams) (*http.Request, error) {
-	var err error
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/reviews/samples")
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	if params != nil {
-		// queryValues collects non-styled parameters (passthrough, JSON)
-		// that are safe to round-trip through url.Values.Encode().
-		queryValues := queryURL.Query()
-		// rawQueryFragments collects pre-encoded query fragments from
-		// styled parameters, preserving literal commas as delimiters
-		// per the OpenAPI spec (e.g. "color=blue,black,brown").
-		var rawQueryFragments []string
-
-		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "asin", params.Asin, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
-			return nil, err
-		} else {
-			for _, qp := range strings.Split(queryFrag, "&") {
-				rawQueryFragments = append(rawQueryFragments, qp)
-			}
-		}
-
-		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "ids", params.Ids, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
-			return nil, err
-		} else {
-			for _, qp := range strings.Split(queryFrag, "&") {
-				rawQueryFragments = append(rawQueryFragments, qp)
-			}
-		}
-
-		if encoded := queryValues.Encode(); encoded != "" {
-			rawQueryFragments = append(rawQueryFragments, encoded)
-		}
-		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
-	}
-
-	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return req, nil
-}
-
 // NewSearchSearchPostRequest calls the generic SearchSearchPost builder with application/json body
 func NewSearchSearchPostRequest(server string, body SearchSearchPostJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -779,124 +630,6 @@ func NewSearchSearchPostRequestWithBody(server string, contentType string, body 
 	}
 
 	req.Header.Add("Content-Type", contentType)
-
-	return req, nil
-}
-
-// NewSearchReviewsSearchReviewsGetRequest generates requests for SearchReviewsSearchReviewsGet
-func NewSearchReviewsSearchReviewsGetRequest(server string, params *SearchReviewsSearchReviewsGetParams) (*http.Request, error) {
-	var err error
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/search/reviews")
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	if params != nil {
-		// queryValues collects non-styled parameters (passthrough, JSON)
-		// that are safe to round-trip through url.Values.Encode().
-		queryValues := queryURL.Query()
-		// rawQueryFragments collects pre-encoded query fragments from
-		// styled parameters, preserving literal commas as delimiters
-		// per the OpenAPI spec (e.g. "color=blue,black,brown").
-		var rawQueryFragments []string
-
-		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "q", params.Q, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
-			return nil, err
-		} else {
-			for _, qp := range strings.Split(queryFrag, "&") {
-				rawQueryFragments = append(rawQueryFragments, qp)
-			}
-		}
-
-		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "asin", params.Asin, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
-			return nil, err
-		} else {
-			for _, qp := range strings.Split(queryFrag, "&") {
-				rawQueryFragments = append(rawQueryFragments, qp)
-			}
-		}
-
-		if params.TopK != nil {
-
-			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "top_k", *params.TopK, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
-				return nil, err
-			} else {
-				for _, qp := range strings.Split(queryFrag, "&") {
-					rawQueryFragments = append(rawQueryFragments, qp)
-				}
-			}
-
-		}
-
-		if params.Category != nil {
-
-			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "category", *params.Category, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
-				return nil, err
-			} else {
-				for _, qp := range strings.Split(queryFrag, "&") {
-					rawQueryFragments = append(rawQueryFragments, qp)
-				}
-			}
-
-		}
-
-		if params.Cursor != nil {
-
-			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
-				return nil, err
-			} else {
-				for _, qp := range strings.Split(queryFrag, "&") {
-					rawQueryFragments = append(rawQueryFragments, qp)
-				}
-			}
-
-		}
-
-		if params.WithCount != nil {
-
-			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "with_count", *params.WithCount, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
-				return nil, err
-			} else {
-				for _, qp := range strings.Split(queryFrag, "&") {
-					rawQueryFragments = append(rawQueryFragments, qp)
-				}
-			}
-
-		}
-
-		if params.MaxDistance != nil {
-
-			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "max_distance", *params.MaxDistance, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "number", Format: ""}); err != nil {
-				return nil, err
-			} else {
-				for _, qp := range strings.Split(queryFrag, "&") {
-					rawQueryFragments = append(rawQueryFragments, qp)
-				}
-			}
-
-		}
-
-		if encoded := queryValues.Encode(); encoded != "" {
-			rawQueryFragments = append(rawQueryFragments, encoded)
-		}
-		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
-	}
-
-	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
-	if err != nil {
-		return nil, err
-	}
 
 	return req, nil
 }
@@ -958,16 +691,10 @@ type ClientWithResponsesInterface interface {
 
 	RecommendRecommendPostWithResponse(ctx context.Context, body RecommendRecommendPostJSONRequestBody, reqEditors ...RequestEditorFn) (*RecommendRecommendPostResponse, error)
 
-	// ReviewSamplesReviewsSamplesGetWithResponse request
-	ReviewSamplesReviewsSamplesGetWithResponse(ctx context.Context, params *ReviewSamplesReviewsSamplesGetParams, reqEditors ...RequestEditorFn) (*ReviewSamplesReviewsSamplesGetResponse, error)
-
 	// SearchSearchPostWithBodyWithResponse request with any body
 	SearchSearchPostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SearchSearchPostResponse, error)
 
 	SearchSearchPostWithResponse(ctx context.Context, body SearchSearchPostJSONRequestBody, reqEditors ...RequestEditorFn) (*SearchSearchPostResponse, error)
-
-	// SearchReviewsSearchReviewsGetWithResponse request
-	SearchReviewsSearchReviewsGetWithResponse(ctx context.Context, params *SearchReviewsSearchReviewsGetParams, reqEditors ...RequestEditorFn) (*SearchReviewsSearchReviewsGetResponse, error)
 }
 
 type HealthzHealthzGetResponse struct {
@@ -1093,37 +820,6 @@ func (r RecommendRecommendPostResponse) ContentType() string {
 	return ""
 }
 
-type ReviewSamplesReviewsSamplesGetResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *ReviewSamplesResponse
-	JSON422      *HTTPValidationError
-}
-
-// Status returns HTTPResponse.Status
-func (r ReviewSamplesReviewsSamplesGetResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r ReviewSamplesReviewsSamplesGetResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
-func (r ReviewSamplesReviewsSamplesGetResponse) ContentType() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Header.Get("Content-Type")
-	}
-	return ""
-}
-
 type SearchSearchPostResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -1149,37 +845,6 @@ func (r SearchSearchPostResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r SearchSearchPostResponse) ContentType() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Header.Get("Content-Type")
-	}
-	return ""
-}
-
-type SearchReviewsSearchReviewsGetResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *ReviewSearchResponse
-	JSON422      *HTTPValidationError
-}
-
-// Status returns HTTPResponse.Status
-func (r SearchReviewsSearchReviewsGetResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r SearchReviewsSearchReviewsGetResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
-func (r SearchReviewsSearchReviewsGetResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -1230,15 +895,6 @@ func (c *ClientWithResponses) RecommendRecommendPostWithResponse(ctx context.Con
 	return ParseRecommendRecommendPostResponse(rsp)
 }
 
-// ReviewSamplesReviewsSamplesGetWithResponse request returning *ReviewSamplesReviewsSamplesGetResponse
-func (c *ClientWithResponses) ReviewSamplesReviewsSamplesGetWithResponse(ctx context.Context, params *ReviewSamplesReviewsSamplesGetParams, reqEditors ...RequestEditorFn) (*ReviewSamplesReviewsSamplesGetResponse, error) {
-	rsp, err := c.ReviewSamplesReviewsSamplesGet(ctx, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseReviewSamplesReviewsSamplesGetResponse(rsp)
-}
-
 // SearchSearchPostWithBodyWithResponse request with arbitrary body returning *SearchSearchPostResponse
 func (c *ClientWithResponses) SearchSearchPostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SearchSearchPostResponse, error) {
 	rsp, err := c.SearchSearchPostWithBody(ctx, contentType, body, reqEditors...)
@@ -1254,15 +910,6 @@ func (c *ClientWithResponses) SearchSearchPostWithResponse(ctx context.Context, 
 		return nil, err
 	}
 	return ParseSearchSearchPostResponse(rsp)
-}
-
-// SearchReviewsSearchReviewsGetWithResponse request returning *SearchReviewsSearchReviewsGetResponse
-func (c *ClientWithResponses) SearchReviewsSearchReviewsGetWithResponse(ctx context.Context, params *SearchReviewsSearchReviewsGetParams, reqEditors ...RequestEditorFn) (*SearchReviewsSearchReviewsGetResponse, error) {
-	rsp, err := c.SearchReviewsSearchReviewsGet(ctx, params, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseSearchReviewsSearchReviewsGetResponse(rsp)
 }
 
 // ParseHealthzHealthzGetResponse parses an HTTP response from a HealthzHealthzGetWithResponse call
@@ -1390,39 +1037,6 @@ func ParseRecommendRecommendPostResponse(rsp *http.Response) (*RecommendRecommen
 	return response, nil
 }
 
-// ParseReviewSamplesReviewsSamplesGetResponse parses an HTTP response from a ReviewSamplesReviewsSamplesGetWithResponse call
-func ParseReviewSamplesReviewsSamplesGetResponse(rsp *http.Response) (*ReviewSamplesReviewsSamplesGetResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &ReviewSamplesReviewsSamplesGetResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest ReviewSamplesResponse
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
-		var dest HTTPValidationError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON422 = &dest
-
-	}
-
-	return response, nil
-}
-
 // ParseSearchSearchPostResponse parses an HTTP response from a SearchSearchPostWithResponse call
 func ParseSearchSearchPostResponse(rsp *http.Response) (*SearchSearchPostResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -1439,39 +1053,6 @@ func ParseSearchSearchPostResponse(rsp *http.Response) (*SearchSearchPostRespons
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest SearchResponse
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
-		var dest HTTPValidationError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON422 = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseSearchReviewsSearchReviewsGetResponse parses an HTTP response from a SearchReviewsSearchReviewsGetWithResponse call
-func ParseSearchReviewsSearchReviewsGetResponse(rsp *http.Response) (*SearchReviewsSearchReviewsGetResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &SearchReviewsSearchReviewsGetResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest ReviewSearchResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

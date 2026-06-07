@@ -1,9 +1,9 @@
 """Pydantic request/response contracts for the read API.
 
-Pure HTTP shapes. Internal data shapes (ProductRecord, ReviewRecord,
-vector-attribute extractors, namespace helpers) live in
+Pure HTTP shapes. Internal data shapes (ProductRecord and vector-attribute
+extractors) live in
 `hev_shop_common.records`. Indexer-side request shapes (IndexRequest,
-BackfillRequest, StatusResponse) live in `indexer/app/models.py`.
+StatusResponse) live in `indexer/app/models.py`.
 """
 
 from __future__ import annotations
@@ -31,7 +31,6 @@ class SearchRequest(BaseModel):
     namespace: str | None = None
     include_attributes: list[str] | None = None
     category: str | None = None
-    tags: list[str] | None = None
     cursor: str | None = Field(
         default=None,
         description=(
@@ -109,11 +108,6 @@ class SearchResponse(BaseModel):
     )
 
 
-class ReviewSearchResponse(SearchResponse):
-    asin: str
-    category: str | None = None
-
-
 class RecommendRequest(BaseModel):
     asin: str = Field(..., min_length=1, description="Seed product ASIN")
     top_k: int = Field(default=10, ge=1, le=200)
@@ -143,19 +137,6 @@ class ProductResponse(BaseModel):
             "turbopuffer."
         ),
     )
-
-
-class ReviewSample(BaseModel):
-    review_id: str
-    asin: str
-    title: str | None = None
-    text: str
-    rating: int | None = None
-
-
-class ReviewSamplesResponse(BaseModel):
-    asin: str
-    samples: list[ReviewSample]
 
 
 class CategoryBucket(BaseModel):

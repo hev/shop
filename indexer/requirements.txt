@@ -1,4 +1,3 @@
-datasets>=3.0
 fastapi>=0.115
 # hevlayer ships from the layer repo; pinned via a sibling-checkout editable
 # install until clients/python lands on PyPI. The Docker/CI install path is

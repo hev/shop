@@ -10,17 +10,12 @@ from hev_shop_common.config import get_settings
 
 from .dataset import AmazonProductDataset
 from .extraction import ExtractionWorker
-from .pipeline import STAGES, StageContext, run_stage
+from .pipeline import StageContext, run_embed_products
 
 
-# WORKER_TYPE env values map directly to STAGES keys, except "cpu" which
-# runs the extraction worker (postgres job queue, not a layer pipeline).
-STAGE_FOR_WORKER_TYPE = {
-    "gpu": "embed-products",
-    "review-embed": "embed-reviews",
-    "review-classify": "classify-reviews",
-    "review-aggregate": "aggregate-tags",
-}
+# WORKER_TYPE=cpu claims extraction jobs and stages product chunks.
+# WORKER_TYPE=gpu claims pending product docs and writes vectors.
+WORKER_TYPES = {"cpu", "gpu"}
 
 
 def install_signal_handlers(stop_event: asyncio.Event) -> None:
@@ -61,21 +56,13 @@ async def amain() -> None:
                 await worker.run_forever(stop_event)
             finally:
                 await worker.close()
-        elif settings.worker_type in STAGE_FOR_WORKER_TYPE:
-            stage = STAGES[STAGE_FOR_WORKER_TYPE[settings.worker_type]]
+        elif settings.worker_type == "gpu":
             ctx = StageContext(settings=settings, layer=layer)
-            try:
-                await run_stage(stage, ctx, stop_event)
-            finally:
-                # OpenRouterReviewClassifier holds an httpx client; close
-                # it if classify-reviews lazily instantiated one.
-                classifier = ctx._classifier
-                if classifier is not None and hasattr(classifier, "close"):
-                    await classifier.close()
+            await run_embed_products(ctx, stop_event)
         else:
             raise ValueError(
-                "WORKER_TYPE must be one of 'cpu', "
-                + ", ".join(repr(name) for name in STAGE_FOR_WORKER_TYPE)
+                "WORKER_TYPE must be one of "
+                + ", ".join(repr(name) for name in sorted(WORKER_TYPES))
             )
     finally:
         await layer.aclose()

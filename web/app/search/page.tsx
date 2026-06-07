@@ -10,7 +10,6 @@ import {
 } from "@/lib/backend";
 import { LayerPerfBadge, StableAsOfBadge } from "@/components/LayerPerfBadge";
 import type { Product } from "@/lib/types";
-import { REVIEW_TAGS } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +31,6 @@ export default async function SearchPage({
 }: {
   searchParams: Promise<{
     q?: string;
-    tag?: string | string[];
     cursor?: string;
     offset?: string;
     total?: string;
@@ -42,7 +40,6 @@ export default async function SearchPage({
 }) {
   const {
     q = "",
-    tag,
     cursor,
     offset: offsetParam,
     total: totalParam,
@@ -54,9 +51,6 @@ export default async function SearchPage({
   // through backendSearch here.
   const selectedDrop =
     drop && /^catalog-\d{4}-\d{2}-\d{2}$/.test(drop) ? drop : null;
-  const selectedTags = (Array.isArray(tag) ? tag : tag ? [tag] : []).filter(
-    (value): value is string => (REVIEW_TAGS as readonly string[]).includes(value),
-  );
   // Cursor pages carry the page-1 count forward in the URL so we don't re-run
   // the count fan-out on every "load more" click. `offset` is where this page's
   // window starts within the full result set.
@@ -80,7 +74,6 @@ export default async function SearchPage({
       // falling back to a fresh count if the param is missing.
       const r = await backendSearch(q, {
         topK: PAGE_SIZE,
-        tags: selectedTags,
         cursor: cursor || null,
         withCount: !cursor || carriedTotal === null,
       });
@@ -96,7 +89,6 @@ export default async function SearchPage({
     results = searchProducts(
       q,
       PAGE_SIZE,
-      selectedTags,
       selectedDrop ? dropProducts(selectedDrop) : undefined,
     );
   }
@@ -113,7 +105,6 @@ export default async function SearchPage({
     const params = new URLSearchParams();
     if (q) params.set("q", q);
     if (selectedDrop) params.set("drop", selectedDrop);
-    for (const value of selectedTags) params.append("tag", value);
     params.set("cursor", nextCursor);
     const nextOffset = offset + results.length;
     if (nextOffset > 0) params.set("offset", String(nextOffset));
@@ -197,7 +188,6 @@ export default async function SearchPage({
             const active = selectedDrop === d.run_id;
             const params = new URLSearchParams();
             if (q) params.set("q", q);
-            for (const value of selectedTags) params.append("tag", value);
             if (!active) params.set("drop", d.run_id);
             const qs = params.toString();
             const date = dropDate(d);
@@ -236,32 +226,6 @@ export default async function SearchPage({
           })}
         </div>
       ) : null}
-
-      <div className="mb-8 flex flex-wrap gap-2">
-        {REVIEW_TAGS.map((reviewTag) => {
-          const active = selectedTags.includes(reviewTag);
-          const nextTags = active
-            ? selectedTags.filter((value) => value !== reviewTag)
-            : [...selectedTags, reviewTag];
-          const params = new URLSearchParams();
-          if (q) params.set("q", q);
-          if (selectedDrop) params.set("drop", selectedDrop);
-          for (const value of nextTags) params.append("tag", value);
-          return (
-            <Link
-              key={reviewTag}
-              href={`/search?${params.toString()}`}
-              className={`rounded-full px-3 py-1 text-xs font-medium ring-1 transition ${
-                active
-                  ? "bg-ink-900 text-white ring-ink-900"
-                  : "bg-white text-ink-600 ring-ink-200 hover:text-ink-900"
-              }`}
-            >
-              {reviewTag}
-            </Link>
-          );
-        })}
-      </div>
 
       {error ? (
         <div className="rounded-2xl border border-dashed border-red-300 bg-red-50 p-12 text-center">

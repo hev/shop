@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { searchProducts } from "@/lib/search";
 import { backendEnabled, backendSearch } from "@/lib/backend";
-import { REVIEW_TAGS } from "@/lib/types";
 
 export const runtime = "nodejs";
 
@@ -9,9 +8,6 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const q = url.searchParams.get("q") ?? "";
   const limit = Number(url.searchParams.get("limit") ?? 24);
-  const tags = url.searchParams
-    .getAll("tag")
-    .filter((tag) => (REVIEW_TAGS as readonly string[]).includes(tag));
   const t0 = performance.now();
 
   const cursor = url.searchParams.get("cursor") || undefined;
@@ -24,7 +20,7 @@ export async function GET(req: Request) {
         stable_as_of,
         next_cursor,
         count,
-      } = await backendSearch(q, { topK: limit, tags, cursor, withCount });
+      } = await backendSearch(q, { topK: limit, cursor, withCount });
       return NextResponse.json({
         query: q,
         results: products,
@@ -49,7 +45,7 @@ export async function GET(req: Request) {
     }
   }
 
-  const results = searchProducts(q, limit, tags);
+  const results = searchProducts(q, limit);
   return NextResponse.json({
     query: q,
     results,

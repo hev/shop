@@ -24,7 +24,7 @@ func resetCLIState() {
 	indexerURL = ""
 
 	searchQuery, searchTopK, searchCategory = "", 10, ""
-	searchTags, searchCursor = nil, ""
+	searchCursor = ""
 	searchWithCount = false
 	searchMaxDistance, searchNamespace = 0.4, ""
 
@@ -33,24 +33,9 @@ func resetCLIState() {
 
 	metaNamespace = ""
 
-	reviewSearchQuery, reviewSearchASIN = "", ""
-	reviewSearchTopK, reviewSearchCategory = 10, ""
-	reviewSearchCursor = ""
-	reviewSearchWithCount = false
-	reviewSearchMaxDistance = 0.4
-
-	reviewSamplesASIN = ""
-	reviewSamplesIDs = nil
-
 	indexCount, indexCategory = 10000, "Electronics"
 	indexCategories = nil
 	indexPipelineID, indexJobSize, indexNamespace = "", 10000, ""
-
-	backfillCategory = "Electronics"
-	backfillAsins, backfillStages = nil, nil
-	backfillProductLimit = 1000
-	backfillReviewsPerProduct, backfillMaxTotalReviews = 0, 0
-	backfillPipelineID, backfillNamespace = "", ""
 
 	statusPipelineID = ""
 }
@@ -102,7 +87,6 @@ func TestSearchCmdSendsRequest(t *testing.T) {
 		"--search-url", srv.URL,
 		"--top-k", "3",
 		"--category", "Electronics",
-		"--tags", "Overpriced,Stylish",
 	); err != nil {
 		t.Fatalf("search cmd failed: %v", err)
 	}
@@ -117,10 +101,6 @@ func TestSearchCmdSendsRequest(t *testing.T) {
 	}
 	if recorded.Body["category"] != "Electronics" {
 		t.Errorf("expected category=Electronics, got %v", recorded.Body["category"])
-	}
-	tags, ok := recorded.Body["tags"].([]any)
-	if !ok || len(tags) != 2 {
-		t.Fatalf("expected 2 tags, got %v", recorded.Body["tags"])
 	}
 }
 
@@ -185,51 +165,5 @@ func TestMetaCmdSendsRequest(t *testing.T) {
 	}
 	if recorded.Query.Get("namespace") != "amazon-products" {
 		t.Errorf("expected namespace query param, got %v", recorded.Query)
-	}
-}
-
-func TestSearchReviewsCmdSendsRequest(t *testing.T) {
-	resetCLIState()
-	srv, recorded := recordingServer(t, 200, map[string]any{
-		"query": "battery", "namespace": "rev", "asin": "B0001", "hits": []any{},
-	})
-	if err := runArgs(t,
-		"search-reviews",
-		"--search-url", srv.URL,
-		"--query", "battery",
-		"--asin", "B00FI7TCGI",
-		"--top-k", "4",
-	); err != nil {
-		t.Fatalf("search-reviews cmd failed: %v", err)
-	}
-	if recorded.Method != "GET" || recorded.Path != "/search/reviews" {
-		t.Fatalf("unexpected request: %s %s", recorded.Method, recorded.Path)
-	}
-	if recorded.Query.Get("asin") != "B00FI7TCGI" || recorded.Query.Get("q") != "battery" {
-		t.Errorf("unexpected query: %v", recorded.Query)
-	}
-	if recorded.Query.Get("top_k") != "4" {
-		t.Errorf("expected top_k=4, got %v", recorded.Query.Get("top_k"))
-	}
-}
-
-func TestReviewSamplesCmdSendsRequest(t *testing.T) {
-	resetCLIState()
-	srv, recorded := recordingServer(t, 200, map[string]any{
-		"asin": "B0001", "samples": []any{},
-	})
-	if err := runArgs(t,
-		"review-samples",
-		"--search-url", srv.URL,
-		"--asin", "B0001",
-		"--ids", "r1,r2,r3",
-	); err != nil {
-		t.Fatalf("review-samples cmd failed: %v", err)
-	}
-	if recorded.Method != "GET" || recorded.Path != "/reviews/samples" {
-		t.Fatalf("unexpected request: %s %s", recorded.Method, recorded.Path)
-	}
-	if recorded.Query.Get("ids") != "r1,r2,r3" {
-		t.Errorf("expected ids=r1,r2,r3, got %v", recorded.Query.Get("ids"))
 	}
 }

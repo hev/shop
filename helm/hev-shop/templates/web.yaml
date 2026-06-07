@@ -37,9 +37,8 @@ spec:
             - name: http
               containerPort: 3000
           env:
-            # The storefront only calls the read API (/search, /product,
-            # /meta, /search/reviews, /reviews/samples) so this points at
-            # the search service, not the indexer control plane.
+            # The storefront only calls the read API, so this points at the
+            # search service, not the indexer control plane.
             - name: HEV_SHOP_API_BASE
               value: {{ default (printf "http://%s-search.%s.svc.cluster.local:8080" (include "hev-shop.fullname" .) .Release.Namespace) .Values.web.apiBaseUrl | quote }}
             - name: LAYER_GATEWAY_URL
@@ -51,14 +50,6 @@ spec:
                   key: LAYER_GATEWAY_API_KEY
             - name: LAYER_PRODUCT_NAMESPACE
               value: {{ .Values.pipeline.product.namespace | quote }}
-            - name: LAYER_REVIEW_NAMESPACE_BASE
-              value: {{ .Values.pipeline.reviews.namespaceBase | quote }}
-            {{- with .Values.pipeline.reviews.queryNamespaceBase }}
-            - name: LAYER_REVIEW_QUERY_NAMESPACE_BASE
-              value: {{ . | quote }}
-            {{- end }}
-            - name: LAYER_REVIEW_SHARD_COUNT
-              value: {{ .Values.pipeline.reviews.shardCount | quote }}
             - name: NODE_ENV
               value: production
             - name: NEXT_TELEMETRY_DISABLED

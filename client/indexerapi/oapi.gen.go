@@ -16,46 +16,6 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
-// BackfillRequest defines model for BackfillRequest.
-type BackfillRequest struct {
-	// Asins Optional explicit ASIN list. When provided, product_limit is ignored. ASINs must belong to the given category — the HF dataset is sharded by category, so reviews are looked up in that file.
-	Asins *[]string `json:"asins,omitempty"`
-
-	// Category HF dataset category (e.g., Electronics)
-	Category string `json:"category"`
-
-	// MaxTotalReviews Global cap on reviews staged across the job.
-	MaxTotalReviews *int `json:"max_total_reviews,omitempty"`
-
-	// Namespace Product namespace (defaults to settings.namespace).
-	Namespace *string `json:"namespace,omitempty"`
-
-	// PipelineId Product pipeline id (defaults to settings.default_pipeline_id).
-	PipelineId *string `json:"pipeline_id,omitempty"`
-
-	// ProductLimit When asins is omitted, cap how many products to read from the HF dataset for the category. -1 = unlimited.
-	ProductLimit *int `json:"product_limit,omitempty"`
-
-	// ReviewsPerProduct Cap reviews staged per ASIN. Defaults to the server's REVIEW_RECENT_CAP_PER_PRODUCT setting.
-	ReviewsPerProduct *int `json:"reviews_per_product,omitempty"`
-
-	// Stages Subset of ['embed','classify','aggregate']. Defaults to all three. 'embed'/'classify' stage review work items; 'aggregate' re-runs the product-level tag rollup for the affected ASINs.
-	Stages *[]string `json:"stages,omitempty"`
-}
-
-// BackfillResponse defines model for BackfillResponse.
-type BackfillResponse struct {
-	AsinCount         *int     `json:"asin_count,omitempty"`
-	Category          string   `json:"category"`
-	JobId             string   `json:"job_id"`
-	MaxTotalReviews   *int     `json:"max_total_reviews,omitempty"`
-	Namespace         string   `json:"namespace"`
-	PipelineId        string   `json:"pipeline_id"`
-	ProductLimit      int      `json:"product_limit"`
-	ReviewsPerProduct *int     `json:"reviews_per_product,omitempty"`
-	Stages            []string `json:"stages"`
-}
-
 // HTTPValidationError defines model for HTTPValidationError.
 type HTTPValidationError struct {
 	Detail *[]ValidationError `json:"detail,omitempty"`
@@ -123,9 +83,6 @@ type ValidationError_Loc_Item struct {
 type StatusStatusGetParams struct {
 	PipelineId *string `form:"pipeline_id,omitempty" json:"pipeline_id,omitempty"`
 }
-
-// BackfillBackfillPostJSONRequestBody defines body for BackfillBackfillPost for application/json ContentType.
-type BackfillBackfillPostJSONRequestBody = BackfillRequest
 
 // IndexProductsIndexPostJSONRequestBody defines body for IndexProductsIndexPost for application/json ContentType.
 type IndexProductsIndexPostJSONRequestBody = IndexRequest
@@ -265,11 +222,6 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 
 // The interface specification for the client above.
 type ClientInterface interface {
-	// BackfillBackfillPostWithBody request with any body
-	BackfillBackfillPostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	BackfillBackfillPost(ctx context.Context, body BackfillBackfillPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
-
 	// HealthzHealthzGet request
 	HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -280,30 +232,6 @@ type ClientInterface interface {
 
 	// StatusStatusGet request
 	StatusStatusGet(ctx context.Context, params *StatusStatusGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
-}
-
-func (c *Client) BackfillBackfillPostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewBackfillBackfillPostRequestWithBody(c.Server, contentType, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) BackfillBackfillPost(ctx context.Context, body BackfillBackfillPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewBackfillBackfillPostRequest(c.Server, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
 }
 
 func (c *Client) HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -352,46 +280,6 @@ func (c *Client) StatusStatusGet(ctx context.Context, params *StatusStatusGetPar
 		return nil, err
 	}
 	return c.Client.Do(req)
-}
-
-// NewBackfillBackfillPostRequest calls the generic BackfillBackfillPost builder with application/json body
-func NewBackfillBackfillPostRequest(server string, body BackfillBackfillPostJSONRequestBody) (*http.Request, error) {
-	var bodyReader io.Reader
-	buf, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	bodyReader = bytes.NewReader(buf)
-	return NewBackfillBackfillPostRequestWithBody(server, "application/json", bodyReader)
-}
-
-// NewBackfillBackfillPostRequestWithBody generates requests for BackfillBackfillPost with any type of body
-func NewBackfillBackfillPostRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
-	var err error
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/backfill")
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Add("Content-Type", contentType)
-
-	return req, nil
 }
 
 // NewHealthzHealthzGetRequest generates requests for HealthzHealthzGet
@@ -558,11 +446,6 @@ func WithBaseURL(baseURL string) ClientOption {
 
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
-	// BackfillBackfillPostWithBodyWithResponse request with any body
-	BackfillBackfillPostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*BackfillBackfillPostResponse, error)
-
-	BackfillBackfillPostWithResponse(ctx context.Context, body BackfillBackfillPostJSONRequestBody, reqEditors ...RequestEditorFn) (*BackfillBackfillPostResponse, error)
-
 	// HealthzHealthzGetWithResponse request
 	HealthzHealthzGetWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*HealthzHealthzGetResponse, error)
 
@@ -573,37 +456,6 @@ type ClientWithResponsesInterface interface {
 
 	// StatusStatusGetWithResponse request
 	StatusStatusGetWithResponse(ctx context.Context, params *StatusStatusGetParams, reqEditors ...RequestEditorFn) (*StatusStatusGetResponse, error)
-}
-
-type BackfillBackfillPostResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *BackfillResponse
-	JSON422      *HTTPValidationError
-}
-
-// Status returns HTTPResponse.Status
-func (r BackfillBackfillPostResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r BackfillBackfillPostResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
-func (r BackfillBackfillPostResponse) ContentType() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Header.Get("Content-Type")
-	}
-	return ""
 }
 
 type HealthzHealthzGetResponse struct {
@@ -698,23 +550,6 @@ func (r StatusStatusGetResponse) ContentType() string {
 	return ""
 }
 
-// BackfillBackfillPostWithBodyWithResponse request with arbitrary body returning *BackfillBackfillPostResponse
-func (c *ClientWithResponses) BackfillBackfillPostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*BackfillBackfillPostResponse, error) {
-	rsp, err := c.BackfillBackfillPostWithBody(ctx, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseBackfillBackfillPostResponse(rsp)
-}
-
-func (c *ClientWithResponses) BackfillBackfillPostWithResponse(ctx context.Context, body BackfillBackfillPostJSONRequestBody, reqEditors ...RequestEditorFn) (*BackfillBackfillPostResponse, error) {
-	rsp, err := c.BackfillBackfillPost(ctx, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseBackfillBackfillPostResponse(rsp)
-}
-
 // HealthzHealthzGetWithResponse request returning *HealthzHealthzGetResponse
 func (c *ClientWithResponses) HealthzHealthzGetWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*HealthzHealthzGetResponse, error) {
 	rsp, err := c.HealthzHealthzGet(ctx, reqEditors...)
@@ -748,39 +583,6 @@ func (c *ClientWithResponses) StatusStatusGetWithResponse(ctx context.Context, p
 		return nil, err
 	}
 	return ParseStatusStatusGetResponse(rsp)
-}
-
-// ParseBackfillBackfillPostResponse parses an HTTP response from a BackfillBackfillPostWithResponse call
-func ParseBackfillBackfillPostResponse(rsp *http.Response) (*BackfillBackfillPostResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &BackfillBackfillPostResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest BackfillResponse
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
-		var dest HTTPValidationError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON422 = &dest
-
-	}
-
-	return response, nil
 }
 
 // ParseHealthzHealthzGetResponse parses an HTTP response from a HealthzHealthzGetWithResponse call

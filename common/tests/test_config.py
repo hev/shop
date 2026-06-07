@@ -4,39 +4,20 @@ from hev_shop_common.config import Settings
 
 
 class SettingsTests(unittest.TestCase):
-    def test_query_namespace_falls_back_to_write_base(self):
-        settings = Settings(REVIEWS_NAMESPACE_BASE="v2-amazon-reviews")
+    def test_gateway_url_is_trimmed(self):
+        settings = Settings(LAYER_GATEWAY_URL="https://example.test/")
 
-        self.assertEqual(
-            settings.resolved_reviews_query_namespace_base, "v2-amazon-reviews"
-        )
+        self.assertEqual(settings.layer_gateway_url, "https://example.test")
 
-    def test_query_namespace_uses_explicit_override(self):
-        settings = Settings(
-            REVIEWS_NAMESPACE_BASE="v3-amazon-reviews",
-            REVIEWS_QUERY_NAMESPACE_BASE="v2-amazon-reviews",
-        )
+    def test_resolved_worker_id_defaults_to_worker_type(self):
+        settings = Settings(WORKER_TYPE="gpu")
 
-        self.assertEqual(
-            settings.resolved_reviews_query_namespace_base, "v2-amazon-reviews"
-        )
-        self.assertEqual(settings.reviews_namespace_base, "v3-amazon-reviews")
+        self.assertEqual(settings.resolved_worker_id, "gpu-worker")
 
-    def test_default_namespace_is_v2(self):
-        settings = Settings()
+    def test_explicit_worker_id_wins(self):
+        settings = Settings(WORKER_TYPE="gpu", WORKER_ID="pod-1")
 
-        self.assertEqual(settings.reviews_namespace_base, "v2-amazon-reviews")
-        self.assertIsNone(settings.reviews_query_namespace_base)
-
-    def test_review_aggregate_scan_page_size_uses_new_env_name(self):
-        settings = Settings(REVIEW_AGGREGATE_SCAN_PAGE_SIZE="123")
-
-        self.assertEqual(settings.review_aggregate_scan_page_size, 123)
-
-    def test_review_aggregate_scan_page_size_accepts_listing_alias(self):
-        settings = Settings(REVIEW_AGGREGATE_LISTING_PAGE_SIZE="456")
-
-        self.assertEqual(settings.review_aggregate_scan_page_size, 456)
+        self.assertEqual(settings.resolved_worker_id, "pod-1")
 
 
 if __name__ == "__main__":
