@@ -51,6 +51,7 @@ The SDK and YAML surfaces should round-trip through one schema. Drift between
 what the SDK can express and what YAML can express is a Layer bug, not a shop
 choice to work around.
 
-App-owned Pipeline/UDF YAML lives under `indexer/pipelines/`. The Helm chart
+App-owned Layer resources live next to the indexer code: `Pipeline` YAML under
+`indexer/pipelines/`, `Function`/UDF YAML under `indexer/udfs/`. The Helm chart
 owns the always-on API/web Deployments and their config injection, not Layer
-pipeline shape.
+pipeline or function shape.
