@@ -336,6 +336,40 @@ export async function backendDrops(): Promise<DropsResult> {
   return { drops, layer_perf: parsePerf(json.layer_perf) };
 }
 
+export type RecentSearchesResult = {
+  queries: string[]; // newest first, deduped server-side
+  layer_perf: LayerPerf | null;
+};
+
+// GET /search/recent — recent distinct queries from Layer search-history
+// (raw_query via x-hevlayer-search-query; see docs/FRONTEND_0.1_DESIGN.md,
+// endpoint lands with launch-plan WS5).
+export async function backendRecentSearches(
+  limit = 8,
+): Promise<RecentSearchesResult> {
+  if (!API_BASE) throw new Error("HEV_SHOP_API_BASE not set");
+  const url = new URL(`${API_BASE}/search/recent`);
+  url.searchParams.set("limit", String(limit));
+  const res = await fetchWithTimeout(
+    url,
+    { cache: "no-store" },
+    META_TIMEOUT_MS,
+  );
+  if (!res.ok) {
+    await logUpstreamFailure("recent searches", res);
+    throw new Error(`recent searches upstream ${res.status}`);
+  }
+  const json = (await res.json()) as {
+    queries?: unknown[];
+    layer_perf?: unknown;
+  };
+  const queries = (json.queries ?? []).filter(
+    (value): value is string =>
+      typeof value === "string" && value.trim().length > 0,
+  );
+  return { queries, layer_perf: parsePerf(json.layer_perf) };
+}
+
 export type CategoryBucket = {
   value: string;
   doc_count: number;

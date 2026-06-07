@@ -3,6 +3,7 @@ import { ProductGrid } from "@/components/ProductGrid";
 import { ProductImage } from "@/components/ProductImage";
 import { LayerPerfBadge } from "@/components/LayerPerfBadge";
 import { DropBand } from "@/components/DropBand";
+import { RecentSearches } from "@/components/RecentSearches";
 import { PRODUCTS } from "@/lib/mock-data";
 import {
   backendEnabled,
@@ -115,6 +116,7 @@ export default async function HomePage() {
                 Try "brass and warm"
               </Link>
             </div>
+            <RecentSearches />
           </div>
 
           <div className="grid grid-cols-3 gap-3">
