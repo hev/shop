@@ -27,7 +27,7 @@ hev-shop/
 ```
 
 Search and indexer both pull `hev_shop_common` via `pip install -e ../common`
-(see each `requirements.txt`). The same pattern is used for the hevlayer SDK
+(see each `requirements.txt`). The same pattern is used for the hev layer SDK
 in `../../layer/clients/python`.
 
 ## Live Endpoints
@@ -220,7 +220,7 @@ cd search  && python3 -m pytest tests/ --tb=short   # /search, /search/reviews
 cd indexer && python3 -m pytest tests/ --tb=short   # pipeline stages, /index, /backfill
 ```
 
-Each `conftest.py` puts the sibling `common/` and the local hevlayer SDK
+Each `conftest.py` puts the sibling `common/` and the local hev layer SDK
 checkout on `sys.path` so tests don't need pip installs.
 
 ## Agent Rules

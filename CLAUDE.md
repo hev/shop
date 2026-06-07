@@ -1,7 +1,7 @@
 # hev-shop Claude Context
 
 `hev-shop` is the product-search demo and production storefront for showing how
-hevlayer coordinates ingestion, embedding, review search, and tag rollups. This
+hev layer coordinates ingestion, embedding, review search, and tag rollups. This
 file is for product, design, research, and strategy context. For engineering
 and operations guidance, read `AGENTS.md`.
 
@@ -9,7 +9,7 @@ and operations guidance, read `AGENTS.md`.
 
 The storefront demonstrates a concrete buyer workflow over Amazon product data:
 search products, inspect product detail, search reviews, and use review-derived
-tags as product signals. The interesting hevlayer story is the fan-out shape:
+tags as product signals. The interesting hev layer story is the fan-out shape:
 one ingest produces product vectors, review vectors, review classifications,
 and aggregate product attributes.
 
