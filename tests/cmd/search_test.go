@@ -35,7 +35,7 @@ func resetCLIState() {
 
 	indexCount, indexCategory = 10000, "Electronics"
 	indexCategories = nil
-	indexPipelineID, indexJobSize, indexNamespace = "", 10000, ""
+	indexJobSize = 10000
 
 	statusPipelineID = ""
 }

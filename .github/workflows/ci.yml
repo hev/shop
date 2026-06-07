@@ -63,9 +63,12 @@ jobs:
         run: python -m pytest tests/ --tb=short
 
   go:
-    name: Go (CLI + generated clients)
+    name: Go (smoke-test CLI in tests/)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: tests
     steps:
       - uses: actions/checkout@v4
 
@@ -73,6 +76,7 @@ jobs:
         with:
           go-version: '1.25'
           cache: true
+          cache-dependency-path: tests/go.sum
 
       - name: gofmt
         run: |
@@ -92,9 +96,10 @@ jobs:
       - name: go test
         run: go test ./... -count=1
 
-      # client/searchapi and client/indexerapi are regenerated from the
-      # committed OpenAPI specs (search/openapi.json, indexer/openapi.json).
-      # Fail if someone edited a spec without re-running `make codegen`.
+      # tests/client/searchapi and tests/client/indexerapi are regenerated
+      # from the committed OpenAPI specs (search/openapi.json,
+      # indexer/openapi.json). Fail if someone edited a spec without
+      # re-running `make codegen`.
       - name: Install oapi-codegen
         run: go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest
 

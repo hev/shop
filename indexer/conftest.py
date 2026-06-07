@@ -17,7 +17,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_SERVICE_DIR = Path(__file__).resolve().parent
+_REPO_ROOT = _SERVICE_DIR.parent
 
 _SDK_SRC = _REPO_ROOT.parent / "layer" / "clients" / "python" / "src"
 if _SDK_SRC.is_dir() and str(_SDK_SRC) not in sys.path:
@@ -26,3 +27,8 @@ if _SDK_SRC.is_dir() and str(_SDK_SRC) not in sys.path:
 _COMMON_SRC = _REPO_ROOT / "common"
 if _COMMON_SRC.is_dir() and str(_COMMON_SRC) not in sys.path:
     sys.path.insert(0, str(_COMMON_SRC))
+
+# The service is flat modules (app.py, extract_chunk.py, embed.py, dataset.py),
+# matching how they run in the container with WORKDIR /app.
+if str(_SERVICE_DIR) not in sys.path:
+    sys.path.insert(0, str(_SERVICE_DIR))

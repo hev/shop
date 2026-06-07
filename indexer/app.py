@@ -6,9 +6,11 @@ Routes:
 - GET  /status    — pipeline stage counts (read-only; sibling to the read API)
 - GET  /healthz   — liveness
 
-The actual ingest work happens in worker processes that share this image but
-boot via `app.worker` rather than this FastAPI app. The storefront's read
-surface (/search, /product, /meta, …) lives in `../search/`.
+This is the only place that creates the two Layer queues. The workers that
+drain them are declared as Pipeline resources in `pipelines/` and run
+`extract_chunk.py` / `embed.py`; the Layer operator owns their Deployments
+and scaling. The storefront's read surface (/search, /product, /meta, …)
+lives in `../search/`.
 """
 
 from __future__ import annotations
@@ -25,21 +27,66 @@ from hevlayer import (
     HevlayerError,
     PutChunksRequest,
 )
+from pydantic import BaseModel, Field
 
 from hev_shop_common.config import get_settings
-from .jobs import (
+from hev_shop_common.records import dedupe_categories
+
+from extract_chunk import (
     EXTRACTION_JOB_CHUNK_ID,
     build_index_jobs,
     extraction_job_metadata,
 )
-from .models import (
-    IndexCategoryResponse,
-    IndexRequest,
-    IndexResponse,
-    StatusResponse,
-)
 
 logger = logging.getLogger("hev_shop.indexer")
+
+
+# --- HTTP contracts ---------------------------------------------------------
+
+
+class IndexRequest(BaseModel):
+    count: int = Field(default=100, description="-1 indexes all rows in one job")
+    category: str | None = None
+    categories: list[str] | None = Field(
+        default=None,
+        description=(
+            "Optional multi-category fan-out. Overrides category unless "
+            "category is explicitly merged by the caller."
+        ),
+    )
+    job_size: int | None = None
+
+    def resolved_categories(self, default_category: str) -> list[str]:
+        if self.categories is not None:
+            categories = self.categories
+        else:
+            categories = [self.category or default_category]
+        return dedupe_categories(categories)
+
+
+class IndexCategoryResponse(BaseModel):
+    category: str
+    count: int
+    jobs_created: int
+
+
+class IndexResponse(BaseModel):
+    pipeline_id: str
+    namespace: str
+    category: str
+    count: int
+    jobs_created: int
+    categories: list[IndexCategoryResponse] = Field(default_factory=list)
+
+
+class StatusResponse(BaseModel):
+    pipeline_id: str
+    layer: dict[str, Any]
+    jobs: dict[str, int]
+    extraction: dict[str, Any] = Field(default_factory=dict)
+
+
+# --- App --------------------------------------------------------------------
 
 
 @asynccontextmanager
@@ -71,8 +118,8 @@ async def index_products(request: Request, body: IndexRequest) -> IndexResponse:
     settings = request.app.state.settings
     layer: AsyncHevlayer = request.app.state.layer
 
-    pipeline_id = body.pipeline_id or settings.default_pipeline_id
-    namespace = body.namespace or settings.namespace
+    pipeline_id = settings.default_pipeline_id
+    namespace = settings.namespace
     job_size = body.job_size or settings.extraction_job_size
     categories = body.resolved_categories(settings.default_category)
     if not categories:

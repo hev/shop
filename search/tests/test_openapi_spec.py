@@ -18,7 +18,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from app.main import app  # noqa: E402
+from app import app  # noqa: E402
 from scripts.dump_openapi import _normalize_for_3_0, _serialize  # noqa: E402
 
 SPEC_PATH = Path(__file__).resolve().parent.parent / "openapi.json"

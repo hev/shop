@@ -1,4 +1,4 @@
-module github.com/hev/shop
+module github.com/hev/shop/tests
 
 go 1.25
 

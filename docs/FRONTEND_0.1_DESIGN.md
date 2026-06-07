@@ -1,9 +1,9 @@
 # Frontend 0.1 design — Drops & Recent searches
 
 UI design notes for the two storefront surfaces around catalog drops and
-recent searches. The implementation lives in `web/app/drops/page.tsx`,
-`web/components/DropBand.tsx`, `web/components/RecentSearches.tsx`, and
-`web/lib/backend.ts`.
+recent searches. The implementation lives in `app/app/drops/page.tsx`,
+`app/components/DropBand.tsx`, `app/components/RecentSearches.tsx`, and
+`app/lib/backend.ts`.
 
 Design constraints carried over from `CLAUDE.md`:
 
@@ -27,7 +27,7 @@ products from one refresh.
 1. **Route `/drops`** — the canonical surface. A list of recent catalog
    runs, newest first. Each row links to `/search?drop={run_id}`.
 2. **Header nav** — add `Drops` between `Shop` and `All`
-   (`web/components/Header.tsx`). The nav stays three text links + cart;
+   (`app/components/Header.tsx`). The nav stays three text links + cart;
    no mega-menu.
 3. **Homepage band** — a slim single-line strip between the hero and the
    categories section showing only the *latest* run:
@@ -96,11 +96,11 @@ Frontend treats `drops` as newest-first; tolerates missing
 
 ### Files (when built)
 
-- `web/app/drops/page.tsx` — new route
-- `web/components/DropBand.tsx` — homepage strip (server component)
-- `web/components/Header.tsx` — nav link
-- `web/lib/backend.ts` — `backendDrops()`, `catalogRunId` on `SearchOptions`
-- `web/app/search/page.tsx` — drop filter chip + param plumbing
+- `app/app/drops/page.tsx` — new route
+- `app/components/DropBand.tsx` — homepage strip (server component)
+- `app/components/Header.tsx` — nav link
+- `app/lib/backend.ts` — `backendDrops()`, `catalogRunId` on `SearchOptions`
+- `app/app/search/page.tsx` — drop filter chip + param plumbing
 
 ---
 
@@ -147,9 +147,9 @@ the frontend renders verbatim.
 
 ### Files (when built)
 
-- `web/components/RecentSearches.tsx` — new server component
-- `web/app/page.tsx` — mount under hero CTAs
-- `web/lib/backend.ts` — `backendRecentSearches()`
+- `app/components/RecentSearches.tsx` — new server component
+- `app/app/page.tsx` — mount under hero CTAs
+- `app/lib/backend.ts` — `backendRecentSearches()`
 
 ---
 

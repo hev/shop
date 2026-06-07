@@ -1,6 +1,6 @@
 import unittest
 
-from app.models import IndexRequest
+from app import IndexRequest
 from hev_shop_common.records import dedupe_categories
 
 

@@ -48,7 +48,7 @@ jobs:
         with:
           go-version: '1.25'
           cache: true
-          cache-dependency-path: shop/go.sum
+          cache-dependency-path: shop/tests/go.sum
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -107,9 +107,9 @@ jobs:
           # the Settings field is renamed.
           LAYER_GATEWAY_URL: http://127.0.0.1:8080
         run: |
-          (cd search  && uvicorn app.main:app --host 127.0.0.1 --port 8081) &
+          (cd search  && uvicorn app:app --host 127.0.0.1 --port 8081) &
           echo $! > "$RUNNER_TEMP/search.pid"
-          (cd indexer && uvicorn app.main:app --host 127.0.0.1 --port 8082) &
+          (cd indexer && uvicorn app:app --host 127.0.0.1 --port 8082) &
           echo $! > "$RUNNER_TEMP/indexer.pid"
           for i in $(seq 1 60); do
             curl -sf http://127.0.0.1:8081/healthz >/dev/null && \
@@ -121,7 +121,7 @@ jobs:
 
       # ---- Drive the shop CLI ----
       - name: Build shop CLI
-        working-directory: shop
+        working-directory: shop/tests
         run: go build -o "$RUNNER_TEMP/shop" .
 
       - name: shop CLI smoke

@@ -39,10 +39,11 @@ and let the gateway own the Turbopuffer edge.
 - **Facet snapshots through Layer.** Category exploration is driven through
   Layer's namespace snapshot API, so the app can inspect indexed product state
   without building a warehouse path for every facet.
-- **Two-worker Kubernetes pipeline.** CPU extraction workers stage product
-  chunks; GPU workers claim pending product docs, fetch image bytes in memory,
-  and call `put_pipeline_document_vectors`. KEDA reads Layer pipeline metrics
-  to scale pods, while optional Karpenter NodePools add CPU/GPU capacity.
+- **Declarative two-stage pipeline.** The CPU extract and GPU embed stages are
+  Layer `Pipeline` resources (`indexer/pipelines/`); the Layer operator owns
+  their Deployments and KEDA scaling. Workers are plain scripts: claim pending
+  work, embed it, call `put_pipeline_document_vectors`. Optional Karpenter
+  NodePools add CPU/GPU capacity.
 
 ## How It Works
 
@@ -74,52 +75,36 @@ local disk.
   official `hevlayer.AsyncHevlayer` client (see `clients/python` in the layer
   repo). The SDK covers namespace query/fetch APIs, pipeline chunk/vector
   writes, claim/heartbeat APIs, and Layer snapshot/cache APIs.
-- `indexer/app/extraction.py` — CPU worker that drains extraction jobs and
+- `indexer/pipelines/` — the two Layer `Pipeline` resources (extract-chunk +
+  embed) that declare worker images, pools, and scaling.
+- `indexer/extract_chunk.py` — CPU worker that drains extraction jobs and
   stages product chunks into the product pipeline.
-- `indexer/app/pipeline.py` — GPU product embedding loop that claims pending
-  docs, fetches image bytes in memory, and writes vectors with
+- `indexer/embed.py` — GPU product embedding loop that claims pending docs,
+  fetches image bytes in memory, and writes vectors with
   `put_pipeline_document_vectors`.
-- `indexer/app/main.py` — FastAPI control plane: `/index`, `/status`, and
-  `/healthz`.
-- `search/app/main.py` — read API: `/search`, `/recommend`, `/product/{asin}`,
+- `indexer/app.py` — FastAPI control plane: `/index`, `/status`, and
+  `/healthz`. The one place that creates the Layer queues.
+- `search/app.py` — read API: `/search`, `/recommend`, `/product/{asin}`,
   `/meta`, and `/healthz`.
-- `web/app/api/search/route.ts` and `web/lib/backend.ts` — storefront backend
+- `app/app/api/search/route.ts` and `app/lib/backend.ts` — storefront backend
   adapters that preserve Layer `stable_as_of` and perf metadata.
-- `helm/hev-shop` — deploys search, indexer API, web, CPU extraction workers,
-  GPU embedding workers, KEDA ScaledObjects, and optional Karpenter NodePools.
+- `helm/hev-shop` — deploys search, indexer API, and web, plus optional
+  Karpenter NodePools. Workers are operator-owned, not chart-owned.
 
 ## Repo Layout
 
 ```text
-cmd/                  Cobra subcommands for the `shop` CLI
-client/searchapi/     oapi-codegen-generated Go client for search/openapi.json
-client/indexerapi/    oapi-codegen-generated Go client for indexer/openapi.json
+app/                  Next.js storefront and server-side API adapters
+search/               Read API: app.py, models.py (/search, /recommend, ...)
+indexer/              Pipeline service: app.py, extract_chunk.py, embed.py,
+                      dataset.py, and pipelines/*.yaml Pipeline resources
 common/               Shared Settings, product records, and CLIP embedders
-indexer/              FastAPI control plane plus CPU/GPU worker code
-helm/hev-shop/        Standalone Helm chart for deploys
+helm/hev-shop/        Standalone Helm chart for the three API/web deploys
+tests/                Go smoke-test CLI (`shop`) + generated API clients
 scripts/              Operational helper scripts
-web/                  Next.js storefront and server-side API adapters
 ```
 
 ## Local Development
-
-Install the CLI:
-
-```sh
-go install github.com/hev/shop@latest
-shop --help
-```
-
-Or run from a checkout:
-
-```sh
-go run . --help
-go test ./...
-```
-
-By default the CLI talks to `https://api.hev-shop.com`. Override with
-`--api-base` (or env `SHOP_API_BASE`), or point at individual services with
-`--search-url` / `--indexer-url` for port-forward dev.
 
 Run the indexer API:
 
@@ -128,13 +113,13 @@ cd indexer
 python -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
-DATA_DIR=/tmp/hev-shop-data uvicorn app.main:app --host 0.0.0.0 --port 8090
+DATA_DIR=/tmp/hev-shop-data uvicorn app:app --host 0.0.0.0 --port 8090
 ```
 
 Run the storefront in mock mode:
 
 ```sh
-cd web
+cd app
 npm install
 npm run dev
 ```
@@ -142,24 +127,32 @@ npm run dev
 Point the storefront at a running API:
 
 ```sh
-cd web
+cd app
 HEV_SHOP_API_BASE=http://127.0.0.1:8090 npm run dev
 ```
 
-Try the CLI against the deployed API:
+The `shop` smoke-test CLI lives in `tests/` (it drives the nightly and e2e
+workflows; every endpoint has a matching subcommand):
 
 ```sh
-shop meta
-shop search "wireless headphones" --top-k 3
-shop recommend B00FI7TCGI --top-k 3
-shop product B00FI7TCGI
+cd tests
+go run . meta
+go run . search "wireless headphones" --top-k 3
+go run . recommend B00FI7TCGI --top-k 3
+go run . product B00FI7TCGI
+go test ./...
 ```
+
+By default it talks to `https://api.hev-shop.com`. Override with `--api-base`
+(or env `SHOP_API_BASE`), or point at individual services with `--search-url`
+/ `--indexer-url` for port-forward dev.
 
 Queue a small indexing job:
 
 ```sh
-shop index --count 1000 --category Electronics
-shop status --pipeline-id hev-shop-product-images
+cd tests
+go run . index --count 1000 --category Electronics
+go run . status --pipeline-id hev-shop-product-images
 ```
 
 OpenAPI specs are committed at `search/openapi.json` and
@@ -167,7 +160,7 @@ OpenAPI specs are committed at `search/openapi.json` and
 
 ```sh
 make openapi   # dump from the FastAPI apps
-make codegen   # regenerate the Go clients in client/*api/
+make codegen   # regenerate the Go clients in tests/client/*api/
 ```
 
 ## Helm Deploy
@@ -189,14 +182,19 @@ helm upgrade --install hev-shop ./helm/hev-shop \
   --set indexerImage.repository=ghcr.io/hev/hev-shop-indexer \
   --set searchImage.repository=ghcr.io/hev/hev-shop-search \
   --set webImage.repository=ghcr.io/hev/hev-shop-web
+kubectl apply -f indexer/pipelines/
 ```
 
-For EKS deploys, `scripts/deploy.sh` is a Helm wrapper. It can optionally build
-and push indexer, search, and web images, then runs `helm upgrade --install`.
+The chart deploys the three always-on pods (search, indexer API, web). The
+workers are the two `Pipeline` resources in `indexer/pipelines/` — the Layer
+operator creates their Deployments and KEDA ScaledObjects from pipeline queue
+depth, so hev-shop never needs Layer PostgreSQL credentials. Their `gpu` /
+`cpu-large` compute pools come from the Layer chart's `InfraRules/default`.
 
-The KEDA ScaledObjects use Prometheus queries against
-`layer_pipeline_stage_count`, so hev-shop never needs Layer PostgreSQL
-credentials.
+For EKS deploys, `scripts/deploy.sh` is a wrapper that builds and pushes the
+images (the indexer Dockerfile has `api`, `extract-chunk`, and `embed`
+targets), runs `helm upgrade --install`, and applies `indexer/pipelines/`
+with the pushed image tags.
 
 Enable app-owned Karpenter NodePools:
 

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/hev/shop/client/searchapi"
+	"github.com/hev/shop/tests/client/searchapi"
 	"github.com/spf13/cobra"
 )
 

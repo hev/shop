@@ -43,11 +43,11 @@ which consistent snapshot a result set reflects.
 Relevant code:
 
 - `hevlayer` SDK (`hev/layer/clients/python`) — `AsyncHevlayer` is the client;
-  the indexer imports it directly in `main.py`, `pipeline.py`,
-  `extraction.py`, and `worker.py`.
-- `search/app/main.py` — query, recommendation, product fetch, and metadata
+  the indexer imports it directly in `app.py`, `extract_chunk.py`, and
+  `embed.py`.
+- `search/app.py` — query, recommendation, product fetch, and metadata
   endpoints.
-- `web/app/api/search/route.ts` and `web/lib/backend.ts` — frontend adapters.
+- `app/app/api/search/route.ts` and `app/lib/backend.ts` — frontend adapters.
 
 ## Pipeline API
 
@@ -64,13 +64,12 @@ Main stages:
 
 Relevant code:
 
-- `indexer/app/extraction.py` — stages product chunks with product metadata and
+- `indexer/extract_chunk.py` — stages product chunks with product metadata and
   image URLs.
-- `indexer/app/pipeline.py` — claims pending product docs, fetches image bytes
+- `indexer/embed.py` — claims pending product docs, fetches image bytes
   in memory, and writes vectors through Layer.
-- `indexer/app/worker.py` — `WORKER_TYPE=cpu` or `gpu`.
-- `helm/hev-shop/templates/scaledobjects.yaml` — KEDA queries Layer pipeline
-  metrics to scale workers.
+- `indexer/pipelines/` — the Pipeline resources the Layer operator reconciles
+  into worker Deployments and KEDA scaling from pipeline queue depth.
 
 ## Developer Contract
 

@@ -1,22 +1,25 @@
 # hev-shop Helm Chart
 
-This chart deploys the full hev-shop app:
+This chart deploys the always-on hev-shop pods:
 
+- search read API
 - indexer API
 - Next.js web storefront
-- CPU extraction worker
-- GPU product image embedding worker
-- KEDA ScaledObjects backed by Layer pipeline metrics
-- optional Karpenter EC2NodeClasses and NodePools for CPU/GPU workers
-- shared RWX PVC for dataset cache
+- optional Karpenter EC2NodeClasses and NodePools for CPU/GPU worker capacity
+- shared RWX PVC
 
-The chart assumes Layer already provides the gateway and a Prometheus-compatible
-query API for gateway metrics.
-By default it uses:
+The CPU extraction and GPU embedding workers are *not* chart-owned: they are
+Layer `Pipeline` resources under `indexer/pipelines/`, reconciled by the Layer
+operator into Deployments + KEDA ScaledObjects. Apply them after the chart:
+
+```sh
+kubectl apply -f indexer/pipelines/
+```
+
+The chart assumes Layer already provides the gateway, by default at:
 
 ```text
 http://layer-gateway.layer.svc.cluster.local:8080
-http://layer-gateway.layer.svc.cluster.local:8080/v2/metrics
 ```
 
 Install:
@@ -43,7 +46,7 @@ gateway API key; hev-shop does not need Layer PostgreSQL credentials.
 ## Karpenter NodePools
 
 The chart can also own the app's Karpenter capacity. This keeps node scaling
-with the workload whose KEDA ScaledObjects create pod demand from Layer
+with the workload whose Pipeline resources create pod demand from Layer
 pipeline metrics.
 
 Karpenter and its CRDs must already be installed. Enable the app NodePools with:

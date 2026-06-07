@@ -4,7 +4,8 @@ Web service:
   kubectl get svc {{ include "hev-shop.fullname" . }}-web -n {{ .Release.Namespace }}
 
 Indexer API:
-  kubectl port-forward svc/{{ include "hev-shop.fullname" . }}-api 8090:8080 -n {{ .Release.Namespace }}
+  kubectl port-forward svc/{{ include "hev-shop.fullname" . }}-indexer-api 8090:8080 -n {{ .Release.Namespace }}
 
-Autoscaling:
-  kubectl get scaledobject -n {{ .Release.Namespace }}
+Workers (operator-owned via Pipeline resources):
+  kubectl apply -f indexer/pipelines/
+  kubectl get pipelines.hevlayer.com -n {{ .Release.Namespace }}

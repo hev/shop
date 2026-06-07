@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from hevlayer import HevlayerError, PipelineStatus
 
-from app.main import app
+from app import app
 from tests._fakes import make_settings
 
 

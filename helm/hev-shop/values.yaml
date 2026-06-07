@@ -2,13 +2,11 @@ namespace:
   create: false
 
 indexerImage:
-  # Worker + indexer control plane image. Bakes CLIP-image by default.
-  # Built from indexer/Dockerfile.
+  # Indexer control plane image — `api` target of indexer/Dockerfile.
+  # Worker images (extract-chunk/embed targets) are deployed by the Layer
+  # operator via the Pipeline resources in indexer/pipelines/.
   repository: ghcr.io/hev/hev-shop-indexer
   tag: latest
-  # Optional slim image tag for the always-on indexer API. When unset, the API
-  # uses `tag`. Workers always use `tag`.
-  apiTag: ""
   pullPolicy: Always
 
 searchImage:
@@ -56,30 +54,17 @@ pipeline:
     id: hev-shop-product-images
     namespace: amazon-products
 
+# Env for the API pods (search + indexer control plane). Worker pods are
+# operator-owned and configured by injected env + code defaults instead.
 config:
   DEFAULT_CATEGORY: Electronics
   DISTANCE_METRIC: cosine_distance
-  HF_DATASET: McAuley-Lab/Amazon-Reviews-2023
-  DATA_DIR: /data
-  DATASET_DIR: /data/dataset
-  MODEL_CACHE_DIR: /opt/model-cache
   CLIP_MODEL_NAME: openai/clip-vit-large-patch14
   CLIP_DEVICE: auto
   PREWARM_TEXT_EMBEDDER: "true"
   META_CACHE_TTL_SECONDS: "30"
   HTTP_TIMEOUT_SECONDS: "300"
   EXTRACTION_JOB_SIZE: "10000"
-  EXTRACTION_CONCURRENCY: "16"
-  EMBEDDING_BATCH_SIZE: "16"
-  EMBEDDING_CLAIM_SIZE: "2000"
-  WORKER_POLL_SECONDS: "5"
-  CLAIM_LEASE_SECONDS: "900"
-  CLAIM_HEARTBEAT_SECONDS: "60"
-
-autoscaling:
-  enabled: true
-  apiVersion: keda.sh/v1alpha1
-  prometheusServerAddress: http://layer-gateway.layer.svc.cluster.local:8080/v2/metrics
 
 karpenter:
   enabled: false
@@ -266,89 +251,6 @@ web:
       cpu: "1"
       memory: 1Gi
 
-workers:
-  cpu:
-    enabled: true
-    nameSuffix: cpu-worker
-    component: cpu-worker
-    workerType: cpu
-    replicaCount: 0
-    command: ["python", "-m", "app.worker"]
-    nodeSelector:
-      mesh-role: app
-    tolerations:
-      - key: mesh-role
-        operator: Equal
-        value: app
-        effect: NoSchedule
-    resources:
-      requests:
-        cpu: "1"
-        memory: 2Gi
-        # Reserve enough ephemeral-storage so kubelet schedules at most
-        # one cpu-worker per 100 GiB Karpenter node. Leave headroom for
-        # image unpacking, dataset reads, OS, and logs.
-        ephemeral-storage: 35Gi
-      limits:
-        cpu: "4"
-        memory: 4Gi
-        ephemeral-storage: 40Gi
-    autoscaling:
-      enabled: true
-      pollingInterval: 10
-      cooldownPeriod: 60
-      minReplicaCount: 0
-      maxReplicaCount: 8
-      metricName: hev_shop_extraction_jobs
-      query: 'sum(layer_pipeline_stage_count{pipeline_id="{{ .Values.pipeline.extraction.id }}",stage=~"pending|extracting"}) or vector(0)'
-      threshold: "2"
-      activationThreshold: "0"
-
-  gpu:
-    enabled: true
-    nameSuffix: gpu-worker
-    component: gpu-worker
-    workerType: gpu
-    replicaCount: 0
-    command: ["python", "-m", "app.worker"]
-    strategy:
-      type: RollingUpdate
-      rollingUpdate:
-        maxSurge: 0
-        maxUnavailable: 1
-    nodeSelector:
-      mesh-role: gpu
-    affinity:
-      nodeAffinity:
-        requiredDuringSchedulingIgnoredDuringExecution:
-          nodeSelectorTerms:
-            - matchExpressions:
-                - key: karpenter.k8s.aws/instance-family
-                  operator: In
-                  values: ["g4dn", "g5"]
-                - key: karpenter.sh/capacity-type
-                  operator: In
-                  values: ["spot"]
-    tolerations:
-      - key: nvidia.com/gpu
-        operator: Exists
-        effect: NoSchedule
-    resources:
-      requests:
-        cpu: 250m
-        memory: 4Gi
-        nvidia.com/gpu: "1"
-      limits:
-        cpu: "2"
-        memory: 10Gi
-        nvidia.com/gpu: "1"
-    autoscaling:
-      enabled: true
-      pollingInterval: 15
-      cooldownPeriod: 300
-      minReplicaCount: 0
-      maxReplicaCount: 1
-      metricName: hev_shop_product_embedding_docs
-      query: 'sum(layer_pipeline_stage_count{pipeline_id="{{ .Values.pipeline.product.id }}",stage=~"pending|embedding"}) or vector(0)'
-      threshold: "10000"
-      activationThreshold: "0"
+# Workers are not deployed by this chart. The CPU extraction and GPU embed
+# workers are Pipeline resources under indexer/pipelines/; the Layer operator
+# owns their Deployments and KEDA scaling.

@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import httpx
 
-from app.pipeline import StageContext, _run_embed_products_once, setup_embed_products
+from embed import StageContext, _clip_image, _run_embed_products_once
 
 from _fakes import FakeClipImageEmbedder, FakeLayerClient, make_settings
 
@@ -33,18 +33,16 @@ class EmbedProductsPipelineTests(unittest.IsolatedAsyncioTestCase):
         if http is not None:
             await http.aclose()
 
-    async def test_setup_creates_product_pipeline_and_warms_clip(self) -> None:
+    async def test_clip_warms_lazily_without_touching_pipelines(self) -> None:
         layer = FakeLayerClient()
         embedder = FakeClipImageEmbedder()
         self.ctx = make_ctx(layer=layer, embedder=None)
 
         with patch("hev_shop_common.embedders.CLIPImageEmbedder", return_value=embedder) as ctor:
-            await setup_embed_products(self.ctx)
+            _clip_image(self.ctx)
 
-        self.assertEqual(
-            layer.create_pipeline_calls,
-            [("hev-shop-product-images", "amazon-products", "cosine_distance")],
-        )
+        # Queue creation is app.py's job (the worker assumes it exists).
+        self.assertEqual(layer.create_pipeline_calls, [])
         ctor.assert_called_once_with(self.ctx.settings)
         self.assertIs(self.ctx._clip_image, embedder)
 

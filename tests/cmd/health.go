@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/hev/shop/client/indexerapi"
+	"github.com/hev/shop/tests/client/indexerapi"
 	"github.com/spf13/cobra"
 )
 

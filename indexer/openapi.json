@@ -63,16 +63,6 @@
             "nullable": true,
             "title": "Job Size",
             "type": "integer"
-          },
-          "namespace": {
-            "nullable": true,
-            "title": "Namespace",
-            "type": "string"
-          },
-          "pipeline_id": {
-            "nullable": true,
-            "title": "Pipeline Id",
-            "type": "string"
           }
         },
         "title": "IndexRequest",

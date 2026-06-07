@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,11 +9,17 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     app_name: str = "hev-shop-indexer"
-    worker_type: str = Field(default="api", alias="WORKER_TYPE")
-    worker_id: str = Field(default="", alias="WORKER_ID")
+    # Pod name in cluster (HOSTNAME); the Layer operator does not inject a
+    # worker id, so the pod hostname is the stable per-replica identity.
+    worker_id: str = Field(
+        default="", validation_alias=AliasChoices("WORKER_ID", "HOSTNAME")
+    )
 
+    # HEVLAYER_BASE_URL is what the Layer operator injects into Pipeline CRD
+    # workers; LAYER_GATEWAY_URL is the name our own Helm chart uses.
     layer_gateway_url: str = Field(
-        default="http://localhost:8080", alias="LAYER_GATEWAY_URL"
+        default="http://localhost:8080",
+        validation_alias=AliasChoices("LAYER_GATEWAY_URL", "HEVLAYER_BASE_URL"),
     )
     layer_api_key: str | None = Field(default=None, alias="LAYER_GATEWAY_API_KEY")
     namespace: str = Field(default="amazon-products", alias="TURBOPUFFER_NAMESPACE")
@@ -65,9 +71,7 @@ class Settings(BaseSettings):
 
     @property
     def resolved_worker_id(self) -> str:
-        if self.worker_id:
-            return self.worker_id
-        return f"{self.worker_type}-worker"
+        return self.worker_id or "hev-shop-worker"
 
 
 @lru_cache

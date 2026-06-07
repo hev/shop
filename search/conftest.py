@@ -1,9 +1,9 @@
 """Test-time loader for the search service.
 
-Puts the hevlayer SDK + the hev_shop_common package + the local app/
-package on sys.path so pytest can resolve `from app.main import app`,
-`from hevlayer import ...`, and `from hev_shop_common.* import ...`
-without needing pip installs.
+Puts the hevlayer SDK + the hev_shop_common package + the flat service
+modules (app.py, models.py) on sys.path so pytest can resolve
+`from app import app`, `from hevlayer import ...`, and
+`from hev_shop_common.* import ...` without needing pip installs.
 
 In deployed environments `requirements.txt` pulls both sibling packages
 via `-e ../../layer/clients/python` and `-e ../common`.
@@ -17,7 +17,8 @@ from pathlib import Path
 _SERVICE_ROOT = Path(__file__).resolve().parent
 _REPO_ROOT = _SERVICE_ROOT.parent
 
-# `from app.main import app` works when search/ is on sys.path.
+# `from app import app` works when search/ is on sys.path, matching how the
+# modules run in the container with WORKDIR /app.
 if str(_SERVICE_ROOT) not in sys.path:
     sys.path.insert(0, str(_SERVICE_ROOT))
 

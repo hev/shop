@@ -1,5 +1,5 @@
 ARG BASE_IMAGE=python:3.12-slim
-FROM ${BASE_IMAGE}
+FROM ${BASE_IMAGE} AS base
 
 ENV PYTHONUNBUFFERED=1 \
     HF_HOME=/opt/model-cache \
@@ -18,16 +18,23 @@ COPY common /common
 COPY indexer/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pre-download model weights into the image so cold starts on autoscaled
-# pods don't pay the HF round-trip.
-ARG BAKE_CLIP=true
-ARG CLIP_MODEL=openai/clip-vit-large-patch14
-RUN if [ "$BAKE_CLIP" = "true" ]; then \
-      python -c "from huggingface_hub import snapshot_download; \
-snapshot_download('${CLIP_MODEL}', cache_dir='${HF_HOME}')" ; \
-    fi
-
-COPY indexer/app ./app
+COPY indexer/*.py ./
 
 EXPOSE 8080
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+
+# Control plane (/index, /status). No models load here.
+FROM base AS api
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
+
+# CPU extraction worker — pipelines/extract-chunk.yaml. No CLIP needed.
+FROM base AS extract-chunk
+CMD ["python", "extract_chunk.py"]
+
+# GPU embedding worker — pipelines/embed.yaml. Bake CLIP weights into the
+# image so cold starts on autoscaled pods don't pay the HF round-trip.
+FROM base AS embed
+ARG CLIP_MODEL=openai/clip-vit-large-patch14
+RUN python -c "from huggingface_hub import snapshot_download; \
+snapshot_download('${CLIP_MODEL}', cache_dir='${HF_HOME}')"
+ENV MODEL_CACHE_DIR=/opt/model-cache
+CMD ["python", "embed.py"]

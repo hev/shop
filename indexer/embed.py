@@ -1,7 +1,9 @@
-"""Product embedding worker for the Layer pipeline document lifecycle.
+"""GPU embedding stage: claim pending product docs, write CLIP vectors.
 
-CPU extraction workers stage product chunks into `pending`. GPU workers claim
-those documents into `embedding`, fetch image bytes in memory, and call
+Declared as the `embed` Pipeline resource in `pipelines/`; the Layer operator
+runs this script and injects `HEVLAYER_PIPELINE_ID` (the product queue) and
+`HEVLAYER_BASE_URL`. Documents arrive `pending` from `extract_chunk.py`; this
+worker claims them into `embedding`, fetches image bytes in memory, and calls
 `put_pipeline_document_vectors`, which writes vectors and marks the document
 `indexed`.
 """
@@ -10,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
@@ -19,7 +22,6 @@ import httpx
 from hevlayer import (
     AsyncHevlayer,
     ClaimDocumentsRequest,
-    CreatePipelineRequest,
     HeartbeatDocumentsRequest,
     PutVectorsRequest,
     VectorEntry,
@@ -56,19 +58,8 @@ async def _http_client(ctx: StageContext) -> AsyncIterator[httpx.AsyncClient]:
         await client.aclose()
 
 
-async def setup_embed_products(ctx: StageContext) -> None:
-    await ctx.layer.ensure_pipeline(
-        CreatePipelineRequest(
-            id=ctx.settings.default_pipeline_id,
-            target_namespace=ctx.settings.namespace,
-            distance_metric=ctx.settings.distance_metric,
-        )
-    )
-    _clip_image(ctx)
-
-
 async def run_embed_products(ctx: StageContext, stop: asyncio.Event) -> None:
-    await setup_embed_products(ctx)
+    _clip_image(ctx)  # warm CLIP before claiming work
     async with _http_client(ctx):
         while not stop.is_set():
             n = await _run_embed_products_once(ctx)
@@ -224,6 +215,8 @@ def _batches[T](items: list[T], size: int) -> list[list[T]]:
 async def amain() -> None:
     logging.basicConfig(level=logging.INFO)
     settings = get_settings()
+    if pipeline_id := os.environ.get("HEVLAYER_PIPELINE_ID"):
+        settings.default_pipeline_id = pipeline_id
     layer = AsyncHevlayer(
         api_key=settings.layer_api_key,
         base_url=settings.layer_gateway_url,

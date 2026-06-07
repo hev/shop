@@ -26,7 +26,7 @@ RUN if [ "$BAKE_CLIP" = "true" ]; then \
 snapshot_download('${CLIP_MODEL}', cache_dir='${HF_HOME}')" ; \
     fi
 
-COPY search/app ./app
+COPY search/*.py ./
 
 EXPOSE 8080
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]

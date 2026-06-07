@@ -7,12 +7,14 @@
 openapi:
 	python3 scripts/dump_openapi.py
 
-# Regenerate the Go API clients from the committed OpenAPI specs.
+# Regenerate the Go API clients (tests/client/*) from the committed
+# OpenAPI specs.
 codegen:
-	go generate ./...
+	cd tests && go generate ./...
 
-# Convenience: run every pytest tree.
+# Convenience: run every pytest tree plus the Go smoke-CLI tests.
 test:
 	cd common  && python3 -m pytest tests/ --tb=short
 	cd search  && python3 -m pytest tests/ --tb=short
 	cd indexer && python3 -m pytest tests/ --tb=short
+	cd tests   && go test ./... -count=1

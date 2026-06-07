@@ -37,15 +37,20 @@ written through Layer, and reads expose gateway perf/freshness signals.
 ## Pipeline Authoring
 
 hev layer supports two equal authoring surfaces for pipelines: declarative
-config (CRD/YAML) and SDK calls in app code. Shop currently uses SDK calls in
-the indexer control plane and workers because the product pipeline shape lives
-next to the code that stages chunks and writes vectors.
+config (CRD/YAML) and SDK calls in app code. Shop uses both, split by what
+each surface owns:
 
-If shop later moves source plumbing into declarative Pipeline CRDs, the SDK and
-YAML surfaces should still round-trip through one schema. Drift between what the
-SDK can express and what YAML can express is a Layer bug, not a shop choice to
-work around.
+- Worker shape (image, compute pool, scaling) is declarative: the `Pipeline`
+  resources under `indexer/pipelines/` are reconciled by the Layer operator,
+  which owns the worker Deployments and KEDA scaling.
+- Queue creation and the document lifecycle stay in SDK calls
+  (`ensure_pipeline` in `indexer/app.py`, chunk/claim/vector calls in the
+  stage scripts), because gateway state lives next to the code that uses it.
 
-App-owned Pipeline/UDF YAML belongs under `indexer/app/crds/` when it exists.
-The Helm chart owns Kubernetes deployments and config injection, not Layer
+The SDK and YAML surfaces should round-trip through one schema. Drift between
+what the SDK can express and what YAML can express is a Layer bug, not a shop
+choice to work around.
+
+App-owned Pipeline/UDF YAML lives under `indexer/pipelines/`. The Helm chart
+owns the always-on API/web Deployments and their config injection, not Layer
 pipeline shape.

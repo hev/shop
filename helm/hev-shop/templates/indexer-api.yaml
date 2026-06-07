@@ -33,13 +33,13 @@ spec:
       {{- end }}
       containers:
         - name: indexer-api
-          image: {{ include "hev-shop.indexerApiImage" . | quote }}
+          image: {{ include "hev-shop.indexerImage" . | quote }}
           imagePullPolicy: {{ .Values.indexerImage.pullPolicy }}
-          # The control plane (/index, /status) just enqueues
-          # jobs into Layer pipelines — no model loads, no warm task.
-          # The same indexer image is used so worker pods and the control
-          # plane stay version-locked on the pipeline driver code.
-          command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+          # The control plane (/index, /status) just enqueues jobs into Layer
+          # pipelines — no model loads, no warm task. Worker pods are owned by
+          # the Layer operator via the Pipeline resources in indexer/pipelines/
+          # and run the extract-chunk/embed targets of the same Dockerfile.
+          command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
           ports:
             - name: http
               containerPort: 8080

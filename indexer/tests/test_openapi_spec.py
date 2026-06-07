@@ -20,7 +20,7 @@ for _p in (_SERVICE_ROOT, _REPO_ROOT):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from app.main import app  # noqa: E402
+from app import app  # noqa: E402
 from scripts.dump_openapi import _normalize_for_3_0, _serialize  # noqa: E402
 
 SPEC_PATH = _SERVICE_ROOT / "openapi.json"

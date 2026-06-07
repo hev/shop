@@ -20,7 +20,7 @@ from hevlayer import (
     QueryResult,
 )
 
-from app.main import app
+from app import app
 from tests._fakes import (
     FakeClipTextEmbedder,
     FakeLayerClient,

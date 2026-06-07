@@ -35,10 +35,8 @@ type IndexRequest struct {
 	Category   *string   `json:"category,omitempty"`
 
 	// Count -1 indexes all rows in one job
-	Count      *int    `json:"count,omitempty"`
-	JobSize    *int    `json:"job_size,omitempty"`
-	Namespace  *string `json:"namespace,omitempty"`
-	PipelineId *string `json:"pipeline_id,omitempty"`
+	Count   *int `json:"count,omitempty"`
+	JobSize *int `json:"job_size,omitempty"`
 }
 
 // IndexResponse defines model for IndexResponse.

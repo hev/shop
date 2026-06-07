@@ -24,20 +24,28 @@ SDK_SRC = REPO_ROOT.parent / "layer" / "clients" / "python" / "src"
 COMMON_SRC = REPO_ROOT / "common"
 
 
+# Flat modules each service may define. Dropped between dumps so the second
+# service's imports aren't shadowed by the first's.
+_SERVICE_MODULES = ("app", "models", "dataset", "extract_chunk", "embed")
+
+
 def _prepare_sys_path(service_dir: Path) -> None:
-    """Mirror the conftest sys.path setup so `from app.main import app` works
-    without `pip install -e`."""
-    for path in (service_dir, SDK_SRC, COMMON_SRC):
+    """Mirror the conftest sys.path setup so `from app import app` works
+    without `pip install -e`. The service dir goes first so its flat modules
+    win over the other service's."""
+    for path in (SDK_SRC, COMMON_SRC, service_dir):
         s = str(path)
-        if path.is_dir() and s not in sys.path:
+        if s in sys.path:
+            sys.path.remove(s)
+        if path.is_dir():
             sys.path.insert(0, s)
 
 
-def _drop_app_module() -> None:
-    """Both services expose a package named `app`. Drop it between dumps so
-    the second import isn't shadowed by the first service's modules."""
+def _drop_service_modules() -> None:
     for name in list(sys.modules):
-        if name == "app" or name.startswith("app."):
+        if name in _SERVICE_MODULES or any(
+            name.startswith(f"{mod}.") for mod in _SERVICE_MODULES
+        ):
             del sys.modules[name]
 
 
@@ -84,10 +92,10 @@ def _serialize(spec: dict) -> str:
 
 
 def dump_one(service_dir: Path) -> Path:
-    _drop_app_module()
+    _drop_service_modules()
     _prepare_sys_path(service_dir)
-    main = import_module("app.main")
-    spec = _normalize_for_3_0(main.app.openapi())
+    module = import_module("app")
+    spec = _normalize_for_3_0(module.app.openapi())
     out_path = service_dir / "openapi.json"
     out_path.write_text(_serialize(spec))
     return out_path

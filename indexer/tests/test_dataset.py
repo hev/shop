@@ -1,6 +1,6 @@
 import unittest
 
-from app.dataset import (
+from dataset import (
     dataset_config,
     metadata_url,
     pick_image_url,

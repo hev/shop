@@ -44,15 +44,12 @@ app.kubernetes.io/name: {{ include "hev-shop.name" . }}
 {{- end -}}
 
 {{- /*
-  Worker + indexer control plane image. Bakes CLIP-image by default.
-  Built from indexer/Dockerfile.
+  Indexer control plane image — the `api` target of indexer/Dockerfile.
+  Worker images (extract-chunk/embed targets) are referenced by the Pipeline
+  resources in indexer/pipelines/, not by this chart.
 */ -}}
 {{- define "hev-shop.indexerImage" -}}
 {{- printf "%s:%s" .Values.indexerImage.repository (.Values.indexerImage.tag | default .Chart.AppVersion) -}}
-{{- end -}}
-
-{{- define "hev-shop.indexerApiImage" -}}
-{{- printf "%s:%s" .Values.indexerImage.repository (.Values.indexerImage.apiTag | default .Values.indexerImage.tag | default .Chart.AppVersion) -}}
 {{- end -}}
 
 {{- /*

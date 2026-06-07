@@ -8,7 +8,7 @@ Read-only surface in front of Layer's vector gateway:
 - GET  /healthz          — liveness
 
 The indexer control plane (POST /index, GET /status) lives in
-`../indexer/app/`. Everything shared (Settings, records, embedders) is in
+`../indexer/`. Everything shared (Settings, records, embedders) is in
 `hev_shop_common`.
 """
 
@@ -30,7 +30,7 @@ from hevlayer import (
 )
 
 from hev_shop_common.config import get_settings
-from .models import (
+from models import (
     CategoryBucket,
     CountInfo,
     LayerPerf,

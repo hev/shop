@@ -1,0 +1,36 @@
+# CPU extraction stage. The operator owns the worker Deployment + KEDA
+# scaling; the pod runs extract_chunk.py against the injected
+# HEVLAYER_PIPELINE_ID job queue. Apply with:
+#
+#   kubectl apply -f indexer/pipelines/
+#
+# scripts/deploy.sh substitutes worker.image with the freshly pushed tag.
+apiVersion: hevlayer.com/v1alpha1
+kind: Pipeline
+metadata:
+  name: hev-shop-extract-chunk
+  namespace: hev-shop
+spec:
+  pipelineId: hev-shop-extraction-jobs
+  target:
+    namespace: amazon-products
+  sourceRef:
+    kind: huggingface
+    dataset: McAuley-Lab/Amazon-Reviews-2023
+  worker:
+    image: ghcr.io/hev/hev-shop-indexer:latest-extract
+    podSpec:
+      nodeSelector:
+        mesh-role: app
+      tolerations:
+        - key: mesh-role
+          operator: Equal
+          value: app
+          effect: NoSchedule
+  scaling:
+    # cpu-large reserves ephemeral-storage for the per-pod dataset cache.
+    pool: cpu-large
+    mode: autoscale
+    replicas:
+      min: 0
+      max: 8

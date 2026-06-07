@@ -9,13 +9,13 @@ class SettingsTests(unittest.TestCase):
 
         self.assertEqual(settings.layer_gateway_url, "https://example.test")
 
-    def test_resolved_worker_id_defaults_to_worker_type(self):
-        settings = Settings(WORKER_TYPE="gpu")
+    def test_gateway_url_accepts_operator_injected_alias(self):
+        settings = Settings(HEVLAYER_BASE_URL="https://gateway.test/")
 
-        self.assertEqual(settings.resolved_worker_id, "gpu-worker")
+        self.assertEqual(settings.layer_gateway_url, "https://gateway.test")
 
     def test_explicit_worker_id_wins(self):
-        settings = Settings(WORKER_TYPE="gpu", WORKER_ID="pod-1")
+        settings = Settings(WORKER_ID="pod-1")
 
         self.assertEqual(settings.resolved_worker_id, "pod-1")
 

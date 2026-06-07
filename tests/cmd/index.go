@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/hev/shop/client/indexerapi"
+	"github.com/hev/shop/tests/client/indexerapi"
 	"github.com/spf13/cobra"
 )
 
@@ -12,9 +12,7 @@ var (
 	indexCount      int
 	indexCategory   string
 	indexCategories []string
-	indexPipelineID string
 	indexJobSize    int
-	indexNamespace  string
 )
 
 var indexCmd = &cobra.Command{
@@ -36,14 +34,6 @@ var indexCmd = &cobra.Command{
 		body.Count = &count
 		jobSize := indexJobSize
 		body.JobSize = &jobSize
-		if indexPipelineID != "" {
-			pid := indexPipelineID
-			body.PipelineId = &pid
-		}
-		if indexNamespace != "" {
-			ns := indexNamespace
-			body.Namespace = &ns
-		}
 
 		c, err := newIndexerClient()
 		if err != nil {
@@ -69,8 +59,6 @@ func init() {
 		nil,
 		"Amazon Reviews 2023 metadata categories (comma-separated or repeatable)",
 	)
-	indexCmd.Flags().StringVar(&indexPipelineID, "pipeline-id", "", "pipeline id (defaults to indexer PIPELINE_ID)")
 	indexCmd.Flags().IntVar(&indexJobSize, "job-size", 10000, "products per extraction job")
-	indexCmd.Flags().StringVar(&indexNamespace, "namespace", "", "target namespace (defaults to indexer NAMESPACE)")
 	rootCmd.AddCommand(indexCmd)
 }

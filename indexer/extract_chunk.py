@@ -1,25 +1,129 @@
+"""CPU extraction stage: claim an index job, read the source, stage chunks.
+
+Declared as the `extract-chunk` Pipeline resource in `pipelines/`; the Layer
+operator runs this script and injects `HEVLAYER_PIPELINE_ID` (the job queue)
+and `HEVLAYER_BASE_URL`. Each job document carries the target product
+pipeline and namespace in its chunk metadata, staged by `app.py` /index.
+"""
+
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import signal
 from contextlib import suppress
+from dataclasses import dataclass
+from typing import Any
+from uuid import uuid4
 
 from hevlayer import (
     AsyncHevlayer,
     Chunk,
     ClaimDocumentsRequest,
-    CreatePipelineRequest,
     HeartbeatDocumentsRequest,
     PutChunksRequest,
 )
 
-from hev_shop_common.config import Settings
+from hev_shop_common.config import Settings, get_settings
 from hev_shop_common.records import ProductRecord
 
-from .dataset import AmazonProductDataset
-from .jobs import ExtractionJob, extraction_job_from_chunks
+from dataset import AmazonProductDataset
 
 logger = logging.getLogger(__name__)
+
+
+# --- Extraction job shape ---------------------------------------------------
+
+EXTRACTION_JOB_CHUNK_ID = "extraction-job"
+
+
+@dataclass(frozen=True)
+class ExtractionJob:
+    id: str
+    pipeline_id: str
+    namespace: str
+    category: str
+    row_offset: int
+    row_limit: int
+
+
+def build_index_jobs(
+    *,
+    pipeline_id: str,
+    namespace: str,
+    category: str,
+    count: int,
+    job_size: int,
+) -> list[ExtractionJob]:
+    if count == 0:
+        return []
+    if count < -1:
+        raise ValueError("count must be -1 or non-negative")
+    if job_size <= 0:
+        raise ValueError("job_size must be positive")
+
+    if count == -1:
+        return [
+            ExtractionJob(
+                id=new_extraction_job_id(),
+                pipeline_id=pipeline_id,
+                namespace=namespace,
+                category=category,
+                row_offset=0,
+                row_limit=-1,
+            )
+        ]
+
+    jobs: list[ExtractionJob] = []
+    offset = 0
+    while offset < count:
+        limit = min(job_size, count - offset)
+        jobs.append(
+            ExtractionJob(
+                id=new_extraction_job_id(),
+                pipeline_id=pipeline_id,
+                namespace=namespace,
+                category=category,
+                row_offset=offset,
+                row_limit=limit,
+            )
+        )
+        offset += limit
+    return jobs
+
+
+def new_extraction_job_id() -> str:
+    return f"index:{uuid4().hex}"
+
+
+def extraction_job_metadata(job: ExtractionJob) -> dict[str, Any]:
+    return {
+        "pipeline_id": job.pipeline_id,
+        "namespace": job.namespace,
+        "category": job.category,
+        "row_offset": job.row_offset,
+        "row_limit": job.row_limit,
+    }
+
+
+def extraction_job_from_chunks(
+    document_id: str, chunks: list[dict[str, Any]]
+) -> ExtractionJob:
+    if not chunks:
+        raise ValueError(f"extraction job {document_id!r} has no chunks")
+    metadata = chunks[0].get("metadata") or {}
+    return ExtractionJob(
+        id=document_id,
+        pipeline_id=str(metadata["pipeline_id"]),
+        namespace=str(metadata["namespace"]),
+        category=str(metadata["category"]),
+        row_offset=int(metadata.get("row_offset") or 0),
+        row_limit=int(metadata["row_limit"]),
+    )
+
+
+# --- Worker -----------------------------------------------------------------
 
 
 async def stage_product(
@@ -150,16 +254,6 @@ class ExtractionWorker:
             )
 
     async def process_job(self, job: ExtractionJob) -> int:
-        await self.layer.ensure_pipeline(
-            CreatePipelineRequest(
-                id=job.pipeline_id,
-                target_namespace=job.namespace,
-                distance_metric=self.settings.distance_metric,
-            )
-        )
-        return await self.process_index_job(job)
-
-    async def process_index_job(self, job: ExtractionJob) -> int:
         products = list(
             self.dataset.iter_products(
                 category=job.category, offset=job.row_offset, limit=job.row_limit
@@ -217,3 +311,43 @@ class ExtractionWorker:
         )
         results = await asyncio.gather(*(worker() for _ in range(concurrency)))
         return sum(results)
+
+
+# --- Entrypoint --------------------------------------------------------------
+
+
+async def amain() -> None:
+    logging.basicConfig(level=logging.INFO)
+    settings = get_settings()
+    if pipeline_id := os.environ.get("HEVLAYER_PIPELINE_ID"):
+        settings.extraction_pipeline_id = pipeline_id
+    stop = asyncio.Event()
+    _install_signals(stop)
+    layer = AsyncHevlayer(
+        api_key=settings.layer_api_key,
+        base_url=settings.layer_gateway_url,
+        timeout=settings.http_timeout_seconds,
+    )
+    worker = ExtractionWorker(
+        settings=settings,
+        layer=layer,
+        dataset=AmazonProductDataset(settings),
+    )
+    try:
+        await worker.run_forever(stop)
+    finally:
+        await worker.close()
+        await layer.aclose()
+
+
+def _install_signals(stop: asyncio.Event) -> None:
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, stop.set)
+        except NotImplementedError:
+            signal.signal(sig, lambda *_: loop.call_soon_threadsafe(stop.set))
+
+
+if __name__ == "__main__":
+    asyncio.run(amain())

@@ -5,25 +5,31 @@ design, and strategic context, read `CLAUDE.md`.
 
 ## Repo Layout
 
-Two Python services + shared Python library + one Next.js app:
+Two Python services + shared Python library + one Next.js app + a Go
+smoke-test CLI. The Python services are flat modules (no `app/` package),
+matching the layout in https://hevlayer.com/docs/api/pipelines/:
 
 ```text
 hev-shop/
+  app/                    # Next.js storefront
   search/                 # read API: /search, /recommend, /product, /meta
-    app/{main,models}.py
+    app.py, models.py
     tests/
-    Dockerfile, requirements.txt
-  indexer/                # control plane + CPU/GPU workers
-    app/                  # /index, /status + product extraction/embedding
-      crds/               # app-owned Layer Pipeline/UDF YAML, if/when used
+    Dockerfile, requirements.txt, openapi.json
+  indexer/                # control plane + pipeline worker scripts
+    pipelines/            # Layer Pipeline resources (extract-chunk, embed)
+    app.py                # /index, /status; creates the Layer queues
+    extract_chunk.py      # CPU stage: claim job, read source, stage chunks
+    embed.py              # GPU stage: claim pending docs, write CLIP vectors
+    dataset.py            # HuggingFace product metadata reader
     tests/
-    Dockerfile, requirements.txt
+    Dockerfile (api / extract-chunk / embed targets), requirements.txt
   common/                 # shared Settings, ProductRecord, CLIP embedders
     hev_shop_common/{config,records,embedders}.py
     tests/
     pyproject.toml
-  web/                    # Next.js storefront
-  helm/hev-shop/          # chart for search, indexer-api, web, workers
+  tests/                  # Go `shop` CLI + generated clients (smoke tests)
+  helm/hev-shop/          # chart for search, indexer-api, web pods only
 ```
 
 Search and indexer both pull `hev_shop_common` via `pip install -e ../common`.
@@ -71,9 +77,9 @@ curl -s -X POST -H 'content-type: application/json' \
 curl -s "https://api.hev-shop.com/status?pipeline_id=hev-shop-product-images" | jq .
 ```
 
-The read-API request/response contract is in `search/app/main.py` (mirrored on
-the storefront in `web/lib/backend.ts`); the indexer control-plane contract is
-in `indexer/app/main.py`.
+The read-API request/response contract is in `search/models.py` (mirrored on
+the storefront in `app/lib/backend.ts`); the indexer control-plane contract is
+in `indexer/app.py`.
 
 Layer gateway checks:
 
@@ -102,14 +108,19 @@ kubectl get pods -n hev-shop
 kubectl logs     -n hev-shop deploy/hev-shop-search       --tail=200
 kubectl logs     -n hev-shop deploy/hev-shop-indexer-api  --tail=200
 kubectl logs     -n hev-shop deploy/hev-shop-web          --tail=200
-kubectl logs     -n hev-shop deploy/hev-shop-cpu-worker   --tail=200
-kubectl logs     -n hev-shop deploy/hev-shop-gpu-worker   --tail=200
+
+# Worker Deployments are created by the Layer operator from the Pipeline
+# resources; list them by the operator's pipeline label instead of fixed names.
+kubectl get pipelines.hevlayer.com -n hev-shop
+kubectl get deploy -n hev-shop -l layer.hev.dev/component=worker 2>/dev/null \
+  || kubectl get deploy -n hev-shop
 ```
 
 ## `shop` CLI
 
-Every hev-shop endpoint has a matching subcommand. The binary is `shop`
-(installable with `go install github.com/hev/shop@latest`).
+The smoke-test CLI lives in `tests/` and drives the nightly + e2e workflows.
+Every hev-shop endpoint has a matching subcommand. Build or run it from there
+(`cd tests && go run . <cmd>`, or `go build -o /tmp/shop .`).
 
 | Command | Endpoint |
 |---|---|
@@ -138,7 +149,7 @@ Pydantic model:
 
 ```sh
 make openapi    # dumps both specs deterministically
-make codegen    # regenerates client/searchapi + client/indexerapi
+make codegen    # regenerates tests/client/searchapi + tests/client/indexerapi
 ```
 
 `tests/test_openapi_spec.py` in each service fails CI-like checks if the
@@ -146,11 +157,11 @@ committed spec drifts from the FastAPI app.
 
 ## Search Service Layout
 
-`search/app/`:
+`search/`:
 
 | File | Purpose |
 |---|---|
-| `main.py` | FastAPI app: `/search`, `/recommend`, `/product/{asin}`, `/meta`, `/healthz` |
+| `app.py` | FastAPI app: `/search`, `/recommend`, `/product/{asin}`, `/meta`, `/healthz` |
 | `models.py` | Pydantic HTTP contracts for the read API |
 
 Heavy lifting (Settings and CLIP embedder wrappers) is in `hev_shop_common`.
@@ -158,18 +169,21 @@ The search pod loads `CLIPTextEmbedder` to embed query strings.
 
 ## Indexer Service Layout
 
-`indexer/app/`:
+`indexer/`:
 
 | File | Purpose |
 |---|---|
-| `main.py` | FastAPI control plane: `/index`, `/status`, `/healthz` |
-| `worker.py` | Process entrypoint; `WORKER_TYPE=cpu` or `gpu` |
-| `extraction.py` | CPU worker for extraction jobs and product chunk staging |
-| `pipeline.py` | GPU product embedding worker using `put_pipeline_document_vectors` |
-| `jobs.py` | Extraction job document shape |
+| `app.py` | FastAPI control plane: `/index`, `/status`, `/healthz` + the HTTP contracts. The only place that creates the Layer queues (`ensure_pipeline`) |
+| `extract_chunk.py` | CPU stage script: claims extraction jobs, reads the source, stages product chunks. Carries the job document shape |
+| `embed.py` | GPU stage script: claims pending product docs, writes vectors with `put_pipeline_document_vectors` |
 | `dataset.py` | HuggingFace `McAuley-Lab/Amazon-Reviews-2023` product metadata reader |
-| `models.py` | Pydantic HTTP contracts for `/index` and `/status` |
-| `crds/` | Home for app-owned Layer Pipeline/UDF manifests if shop moves a pipeline to declarative ownership |
+| `pipelines/` | Layer `Pipeline` resources declaring the two worker stages (image, pool, scaling). `kubectl apply -f indexer/pipelines/` |
+
+Worker pods are owned by the Layer operator, which injects
+`HEVLAYER_PIPELINE_ID`, `HEVLAYER_BASE_URL`, and `LAYER_GATEWAY_API_KEY`;
+everything else rides on `Settings` code defaults. There is no `WORKER_TYPE`
+dispatch — each stage script is its own container command (see the
+`extract-chunk` and `embed` targets in `indexer/Dockerfile`).
 
 ## Common Library
 
@@ -190,15 +204,22 @@ CPU extraction: product metadata row -> put_pipeline_document_chunks -> pending
 GPU embedding: claim pending -> fetch image bytes -> put_pipeline_document_vectors -> indexed
 ```
 
-Extraction jobs are small control documents in `EXTRACTION_PIPELINE_ID`.
-`WORKER_TYPE=cpu` claims those jobs and stages product chunks into `PIPELINE_ID`.
-`WORKER_TYPE=gpu` claims pending product documents from `PIPELINE_ID` and writes
+Extraction jobs are small control documents in the `hev-shop-extraction-jobs`
+queue, staged by `POST /index`. The `extract-chunk` Pipeline's workers claim
+those jobs and stage product chunks into `hev-shop-product-images`; the
+`embed` Pipeline's workers claim pending product documents from it and write
 vectors. Product images are fetched in memory by the GPU worker and are not
 cached on local disk.
 
-App-owned Layer Pipeline/UDF YAML belongs under `indexer/app/crds/`. The Helm
-chart should pass IDs/config and deploy Kubernetes workloads; it should not carry
-pipeline shape definitions.
+Worker deployment shape (image, compute pool, scaling) is declared in the
+Pipeline resources under `indexer/pipelines/` and reconciled by the Layer
+operator — including the KEDA ScaledObjects. The queues themselves are still
+created via the SDK (`ensure_pipeline` in `indexer/app.py`), since the
+operator manages Kubernetes objects, not gateway state. The Helm chart only
+deploys the always-on API/web pods; it carries no worker or pipeline shape.
+The `cpu-large` and `gpu` compute pools referenced by `scaling.pool` are
+defined in the Layer chart's `InfraRules/default`
+(`../layer/infra/helm/layer/values.yaml`).
 
 ## Tests
 
@@ -214,10 +235,11 @@ cd indexer && python3 -m pytest tests/ --tb=short   # product pipeline, /index, 
 Go and frontend checks:
 
 ```sh
-go test ./...
-cd web && npm run build
+cd tests && go test ./... -count=1
+cd app && npm run build
 helm lint ./helm/hev-shop
 helm template hev-shop ./helm/hev-shop --namespace hev-shop >/tmp/hev-shop-rendered.yaml
+kubectl apply --dry-run=client -f indexer/pipelines/
 ```
 
 Each Python `conftest.py` puts the sibling `common/` and local hev layer SDK
@@ -228,8 +250,8 @@ checkout on `sys.path` so tests do not need pip installs.
 - Prefer public DNS for laptop checks unless the task specifically needs an
   in-cluster bypass.
 - Keep the Python service boundaries intact:
-  - Read-API HTTP contracts live in `search/app/`.
-  - Indexer HTTP contracts and pipeline code live in `indexer/app/`.
+  - Read-API HTTP contracts live in `search/`.
+  - Indexer HTTP contracts and pipeline code live in `indexer/`.
   - Anything shared (Settings, records, embedders) goes in `common/hev_shop_common/`.
   Don't import indexer modules from search or vice versa.
 - Run the narrowest meaningful tests for code changes, or explain why they
