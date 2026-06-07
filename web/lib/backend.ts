@@ -297,6 +297,45 @@ export async function backendProduct(asin: string): Promise<ProductWithPerf | nu
   return { product, layer_perf: parsePerf(json.layer_perf) };
 }
 
+export type DropInfo = {
+  run_id: string;
+  product_count: number;
+  stable_as_of: number | null;
+};
+
+export type DropsResult = {
+  drops: DropInfo[]; // newest first
+  layer_perf: LayerPerf | null;
+};
+
+// GET /drops — recent nightly catalog runs (see docs/FRONTEND_0.1_DESIGN.md;
+// endpoint lands with launch-plan WS4).
+export async function backendDrops(): Promise<DropsResult> {
+  if (!API_BASE) throw new Error("HEV_SHOP_API_BASE not set");
+  const res = await fetchWithTimeout(
+    `${API_BASE}/drops`,
+    { cache: "no-store" },
+    META_TIMEOUT_MS,
+  );
+  if (!res.ok) {
+    await logUpstreamFailure("drops", res);
+    throw new Error(`drops upstream ${res.status}`);
+  }
+  const json = (await res.json()) as {
+    drops?: Array<Record<string, unknown>>;
+    layer_perf?: unknown;
+  };
+  const drops = (json.drops ?? [])
+    .filter((d) => typeof d.run_id === "string")
+    .map((d) => ({
+      run_id: d.run_id as string,
+      product_count: parseNum(d.product_count),
+      stable_as_of:
+        typeof d.stable_as_of === "number" ? d.stable_as_of : null,
+    }));
+  return { drops, layer_perf: parsePerf(json.layer_perf) };
+}
+
 export type CategoryBucket = {
   value: string;
   doc_count: number;

@@ -27,6 +27,13 @@ export function Header() {
 
         <nav className="flex shrink-0 items-center gap-5 text-sm text-ink-700">
           <Link href="/" className="hover:text-ink-900">Shop</Link>
+          <Link href="/drops" className="relative hover:text-ink-900">
+            Drops
+            <span
+              aria-hidden
+              className="absolute -right-2 top-0 h-1.5 w-1.5 rounded-full bg-accent"
+            />
+          </Link>
           <Link href="/search?q=" className="hover:text-ink-900">All</Link>
           <button
             aria-label="Cart"

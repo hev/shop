@@ -1,4 +1,5 @@
 import { PRODUCTS } from "./mock-data";
+import { DROP_SIZE, dropSeed } from "./drops";
 import type { Product } from "./types";
 
 function tokenize(s: string): string[] {
@@ -22,11 +23,29 @@ function score(product: Product, tokens: string[]): number {
   return s;
 }
 
-export function searchProducts(query: string, limit = 24, tags: string[] = []): Product[] {
+// Demo-mode slice for one drop: a deterministic rotation of the mock catalog
+// seeded by run_id, capped at the configured drop size. Different drops show
+// different (overlapping) product windows.
+export function dropProducts(runId: string, size = DROP_SIZE): Product[] {
+  const start = dropSeed(runId) % PRODUCTS.length;
+  const n = Math.min(size, PRODUCTS.length);
+  const out: Product[] = [];
+  for (let i = 0; i < n; i++) {
+    out.push(PRODUCTS[(start + i) % PRODUCTS.length]);
+  }
+  return out;
+}
+
+export function searchProducts(
+  query: string,
+  limit = 24,
+  tags: string[] = [],
+  pool: Product[] = PRODUCTS,
+): Product[] {
   const tokens = tokenize(query);
   const products = tags.length
-    ? PRODUCTS.filter((p) => p.tags?.some((tag) => tags.includes(tag)))
-    : PRODUCTS;
+    ? pool.filter((p) => p.tags?.some((tag) => tags.includes(tag)))
+    : pool;
   if (tokens.length === 0) {
     return [...products].sort((a, b) => b.rating_count - a.rating_count).slice(0, limit);
   }
