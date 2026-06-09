@@ -13,7 +13,7 @@ BUILDER="${BUILDER:-depot}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 TF_DIR="${TF_DIR:-../layer/infra/terraform}"
 KEDA_NAMESPACE="${KEDA_NAMESPACE:-keda}"
-KEDA_NODE_ROLE="${KEDA_NODE_ROLE:-infra}"
+KEDA_NODE_ROLE="${KEDA_NODE_ROLE:-system}"
 LAYER_CLIENT_CONTEXT="${LAYER_CLIENT_CONTEXT:-../layer/clients/python}"
 HELM_VALUES="${HELM_VALUES:-}"
 HELM_SET="${HELM_SET:-}"
@@ -71,13 +71,13 @@ log "Updating kubeconfig for ${CLUSTER_NAME}..."
 aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION"
 
 if ! kubectl get crd scaledobjects.keda.sh >/dev/null 2>&1; then
-  log "KEDA is not installed; installing it on mesh-role=${KEDA_NODE_ROLE} nodes..."
+  log "KEDA is not installed; installing it on layer.hev.dev/node-role=${KEDA_NODE_ROLE} nodes..."
   helm repo add kedacore https://kedacore.github.io/charts >/dev/null 2>&1 || true
   helm repo update kedacore
   helm upgrade --install keda kedacore/keda \
     -n "$KEDA_NAMESPACE" --create-namespace \
-    --set "nodeSelector.mesh-role=${KEDA_NODE_ROLE}" \
-    --set 'tolerations[0].key=mesh-role' \
+    --set "nodeSelector.layer\\.hev\\.dev/node-role=${KEDA_NODE_ROLE}" \
+    --set 'tolerations[0].key=layer.hev.dev/node-role' \
     --set 'tolerations[0].operator=Equal' \
     --set "tolerations[0].value=${KEDA_NODE_ROLE}" \
     --set 'tolerations[0].effect=NoSchedule'

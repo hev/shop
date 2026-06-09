@@ -208,5 +208,6 @@ helm upgrade --install hev-shop ./helm/hev-shop \
   --set karpenter.nodeInstanceProfile=<karpenter-node-instance-profile>
 ```
 
-The default NodePools provide `mesh-role=app` CPU nodes and `mesh-role=gpu`
-GPU nodes, matching the worker selectors in the chart.
+The default NodePools provide `layer.hev.dev/node-role=worker-cpu` CPU nodes
+and `layer.hev.dev/node-role=worker-gpu` GPU nodes, matching the worker
+selectors in the chart.

@@ -50,10 +50,10 @@ helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter \
   --set "settings.clusterEndpoint=${CLUSTER_ENDPOINT}" \
   --set "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn=${KARPENTER_ROLE_ARN}" \
   --set replicas=1 \
-  --set nodeSelector.mesh-role=infra \
-  --set tolerations[0].key=mesh-role \
+  --set "nodeSelector.layer\\.hev\\.dev/node-role=system" \
+  --set tolerations[0].key=layer.hev.dev/node-role \
   --set tolerations[0].operator=Equal \
-  --set tolerations[0].value=infra \
+  --set tolerations[0].value=system \
   --set tolerations[0].effect=NoSchedule \
   --wait
 
@@ -64,10 +64,14 @@ if [[ "$INSTALL_NVIDIA_PLUGIN" == "1" ]]; then
   helm upgrade --install nvidia-device-plugin nvdp/nvidia-device-plugin \
     --namespace nvidia-device-plugin \
     --create-namespace \
-    --set nodeSelector.mesh-role=gpu \
-    --set tolerations[0].key=nvidia.com/gpu \
-    --set tolerations[0].operator=Exists \
+    --set "nodeSelector.layer\\.hev\\.dev/node-role=worker-gpu" \
+    --set tolerations[0].key=layer.hev.dev/node-role \
+    --set tolerations[0].operator=Equal \
+    --set tolerations[0].value=worker-gpu \
     --set tolerations[0].effect=NoSchedule \
+    --set tolerations[1].key=nvidia.com/gpu \
+    --set tolerations[1].operator=Exists \
+    --set tolerations[1].effect=NoSchedule \
     --wait
 fi
 

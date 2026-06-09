@@ -1,7 +1,7 @@
 # GPU embedding stage. The operator owns the worker Deployment + KEDA
 # scaling; the pod runs embed.py against the injected HEVLAYER_PIPELINE_ID
 # product queue. Requires the `gpu` compute pool in InfraRules/default
-# (defined in the layer chart) and the hev-shop Karpenter GPU nodepool.
+# (defined in the layer chart) and the worker-gpu Karpenter NodePool.
 apiVersion: hevlayer.com/v1alpha1
 kind: Pipeline
 metadata:
@@ -13,8 +13,9 @@ spec:
     namespace: amazon-products
   worker:
     image: ghcr.io/hev/hev-shop-indexer:latest-embed
-    # The gpu pool carries the mesh-role=gpu selector, nvidia tolerations,
-    # and GPU resources; this podSpec only adds the spot/instance preference.
+    # The gpu pool carries the worker-gpu selector, the node-role and nvidia
+    # tolerations, and GPU resources; this podSpec only adds the
+    # spot/instance preference.
     podSpec:
       affinity:
         nodeAffinity:

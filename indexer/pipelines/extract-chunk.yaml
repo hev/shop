@@ -18,15 +18,9 @@ spec:
     kind: huggingface
     dataset: McAuley-Lab/Amazon-Reviews-2023
   worker:
+    # The cpu-large pool (layer chart) carries the worker-cpu selector and
+    # toleration, so no podSpec placement override is needed.
     image: ghcr.io/hev/hev-shop-indexer:latest-extract
-    podSpec:
-      nodeSelector:
-        mesh-role: app
-      tolerations:
-        - key: mesh-role
-          operator: Equal
-          value: app
-          effect: NoSchedule
   scaling:
     # cpu-large reserves ephemeral-storage for the per-pod dataset cache.
     pool: cpu-large

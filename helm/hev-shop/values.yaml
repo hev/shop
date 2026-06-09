@@ -88,11 +88,12 @@ karpenter:
       httpPutResponseHopLimit: 1
       httpTokens: required
     labels:
-      mesh-role: app
+      layer.hev.dev/node-role: worker-cpu
+      layer.hev.dev/compute: cpu
       workload: hev-shop
     taints:
-      - key: mesh-role
-        value: app
+      - key: layer.hev.dev/node-role
+        value: worker-cpu
         effect: NoSchedule
     requirements:
       - key: kubernetes.io/arch
@@ -130,9 +131,13 @@ karpenter:
       httpPutResponseHopLimit: 1
       httpTokens: required
     labels:
-      mesh-role: gpu
+      layer.hev.dev/node-role: worker-gpu
+      layer.hev.dev/compute: gpu
       workload: hev-shop
     taints:
+      - key: layer.hev.dev/node-role
+        value: worker-gpu
+        effect: NoSchedule
       - key: nvidia.com/gpu
         value: "true"
         effect: NoSchedule
@@ -173,14 +178,15 @@ search:
     rollingUpdate:
       maxSurge: 1
       maxUnavailable: 1
-  # Search carries the baked CLIP image, so keep it on the Karpenter app
-  # nodepool with larger root volumes instead of the small shared infra node.
+  # Search carries the baked CLIP image, so keep it on the elastic worker-cpu
+  # pool with larger root volumes instead of the small shared system node.
   nodeSelector:
-    mesh-role: app
+    layer.hev.dev/node-role: worker-cpu
+    layer.hev.dev/compute: cpu
   tolerations:
-    - key: mesh-role
+    - key: layer.hev.dev/node-role
       operator: Equal
-      value: app
+      value: worker-cpu
       effect: NoSchedule
   # Request the full expected CLIP working set so Karpenter provisions a node
   # large enough for CLIP startup and reserves image-disk headroom.
@@ -213,11 +219,11 @@ indexerApi:
       maxSurge: 1
       maxUnavailable: 0
   nodeSelector:
-    mesh-role: app
+    layer.hev.dev/node-role: system
   tolerations:
-    - key: mesh-role
+    - key: layer.hev.dev/node-role
       operator: Equal
-      value: app
+      value: system
       effect: NoSchedule
   resources:
     requests:
@@ -237,11 +243,11 @@ web:
     annotations:
       service.beta.kubernetes.io/aws-load-balancer-type: nlb
   nodeSelector:
-    mesh-role: infra
+    layer.hev.dev/node-role: system
   tolerations:
-    - key: mesh-role
+    - key: layer.hev.dev/node-role
       operator: Equal
-      value: infra
+      value: system
       effect: NoSchedule
   resources:
     requests:

@@ -63,8 +63,10 @@ helm upgrade --install hev-shop ./helm/hev-shop \
 
 Defaults:
 
-- CPU NodePool: `mesh-role=app`, on-demand `c`/`m` instances, `32` CPU limit.
-- GPU NodePool: `mesh-role=gpu`, `g4dn`/`g5` spot or on-demand instances,
+- CPU NodePool: `layer.hev.dev/node-role=worker-cpu`, on-demand `c`/`m`
+  instances, `32` CPU limit.
+- GPU NodePool: `layer.hev.dev/node-role=worker-gpu`, `g4dn`/`g5` spot or
+  on-demand instances,
   `32` CPU limit.
 
 Override `karpenter.cpu` or `karpenter.gpu` in `values.yaml` to change labels,
