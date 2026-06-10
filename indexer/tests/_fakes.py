@@ -43,6 +43,13 @@ class FakeLayerClient:
         self.stage_document_calls: list[dict[str, Any]] = []
         self.pipeline_vector_calls: list[dict[str, Any]] = []
 
+        # RFC 0040 trending reduce test doubles (indexer/tests/test_trending.py).
+        self.search_history_events: list[Any] = []
+        self.clickstream_events: list[Any] = []
+        self.list_search_history_calls: list[dict[str, Any]] = []
+        self.list_clickstream_calls: list[dict[str, Any]] = []
+        self.upsert_calls: list[dict[str, Any]] = []
+
     async def ensure_pipeline(self, body: CreatePipelineRequest | dict[str, Any]) -> Pipeline:
         if isinstance(body, CreatePipelineRequest):
             pid = body.id
@@ -260,6 +267,45 @@ class FakeLayerClient:
         )
         return _attach_perf(StatusResponse(status="ok"), with_perf)
 
+    async def list_search_history(
+        self,
+        namespace: str,
+        *,
+        tags: Any = None,
+        from_: Any = None,
+        to: Any = None,
+        limit: int | None = None,
+        with_perf: bool = False,
+    ) -> Any:
+        """RFC 0040 test double — returns scripted search-history events."""
+        self.list_search_history_calls.append(
+            {"namespace": namespace, "tags": tags, "from_": from_, "to": to, "limit": limit}
+        )
+        return _attach_perf(list(self.search_history_events), with_perf)
+
+    async def list_clickstream(
+        self,
+        namespace: str,
+        *,
+        trace_id: str | None = None,
+        from_: Any = None,
+        to: Any = None,
+        limit: int | None = None,
+        with_perf: bool = False,
+    ) -> Any:
+        """RFC 0040 test double — returns scripted clickstream events."""
+        self.list_clickstream_calls.append(
+            {"namespace": namespace, "trace_id": trace_id, "from_": from_, "to": to, "limit": limit}
+        )
+        return _attach_perf(list(self.clickstream_events), with_perf)
+
+    async def write_namespace(
+        self, namespace: str, body: Any, *, with_perf: bool = False
+    ) -> Any:
+        """Records RFC 0040 trending rows written through RFC 0039's surface."""
+        self.upsert_calls.append({"namespace": namespace, "body": body})
+        return _attach_perf(SimpleNamespace(status="ok"), with_perf)
+
 
 class FakeClipImageEmbedder:
     def __init__(self) -> None:
@@ -292,6 +338,15 @@ def make_settings(**overrides) -> SimpleNamespace:
         hf_dataset="repo",
         hf_token=None,
         dataset_cache_dir=None,
+        # RFC 0040 trending reduce knobs (indexer/trending.py).
+        trending_quality_weight=0.0,
+        trending_min_count=2,
+        trending_top_n=12,
+        trending_window_hours=24,
+        trending_history_tag="page:first",
+        trending_interval_seconds=0.01,
+        trending_namespace="amazon-products-trending",
+        resolved_trending_namespace="amazon-products-trending",
     )
     for key, value in overrides.items():
         setattr(settings, key, value)

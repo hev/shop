@@ -30,6 +30,10 @@ CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
 FROM base AS extract-chunk
 CMD ["python", "extract_chunk.py"]
 
+# Scheduled trending reduce — udfs/trending.yaml. CPU-only, no CLIP needed.
+FROM base AS trending
+CMD ["python", "trending.py"]
+
 # GPU embedding worker — pipelines/embed.yaml. Bake CLIP weights into the
 # image so cold starts on autoscaled pods don't pay the HF round-trip.
 FROM base AS embed

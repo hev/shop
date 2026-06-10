@@ -1,0 +1,35 @@
+# Trending reduce (RFC 0040) — the first inhabitant of udfs/.
+#
+# Unlike the map UDFs the operator runs today (discover rows missing a marker →
+# patch each row), this is a *reduce*: invoked once per tick, the worker
+# (indexer/trending.py) reads the whole search-history window and writes one
+# ranked summary into the `amazon-products-trending` namespace. The worker owns
+# the reads and the upsert via the injected hev layer client — there is
+# deliberately NO `spec.sources` / `spec.output` here, matching the CLAUDE.md
+# authoring split (the operator owns worker shape + triggering; the document
+# lifecycle stays in SDK calls next to the code that uses it).
+#
+# BLOCKED on layer: `trigger: schedule` is not yet in the Function CRD /
+# operator (UdfTrigger is discovery|write only — RFC 0040 §2). The `schedule`
+# field shape below is provisional and will track whatever the operator lands.
+# Until then, run the worker directly (TRENDING_RUN_ONCE=1) or on its dev
+# interval loop. See docs/TRENDING_DESIGN.md → "Layer dependency".
+#
+apiVersion: hevlayer.com/v1alpha1
+kind: Function
+metadata:
+  name: hev-shop-trending
+  namespace: hev-shop
+spec:
+  # A reduce has no per-row discovery, so no targetNamespaces / filter.
+  triggers: [schedule]            # PENDING layer support (RFC 0040 §2)
+  schedule:
+    cron: "0 * * * *"             # hourly; field name provisional (see header)
+  worker:
+    image: ghcr.io/hev/hev-shop-indexer:latest-trending
+  scaling:
+    pool: cpu-large               # reduce is CPU-only; must name a pool in InfraRules/default
+    mode: autoscale
+    replicas:
+      min: 0
+      max: 1

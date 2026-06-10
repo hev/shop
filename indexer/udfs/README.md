@@ -1,8 +1,9 @@
 # Layer UDFs (Functions)
 
 Home for app-owned Layer `Function` resources, the sibling of the `Pipeline`
-resources in `../pipelines/`. There are none today — this directory marks
-where they go when shop adds one.
+resources in `../pipelines/`. The first is `trending.yaml` (RFC 0040; see
+`../../docs/TRENDING_DESIGN.md`) — a scheduled *reduce* over search-history,
+currently blocked on the `trigger: schedule` CRD shape landing in layer.
 
 A `Function` (UDF) is the declarative surface for derived/enrichment work that
 runs *over indexed namespaces* rather than a staged ingest queue: it's

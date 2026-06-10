@@ -64,6 +64,21 @@ class Settings(BaseSettings):
     claim_lease_seconds: int = Field(default=900, alias="CLAIM_LEASE_SECONDS")
     claim_heartbeat_seconds: float = Field(default=60.0, alias="CLAIM_HEARTBEAT_SECONDS")
 
+    # Trending reduce (RFC 0040 / indexer/trending.py). trending_namespace
+    # defaults to "<namespace>-trending" (see resolved_trending_namespace).
+    # quality_weight=0.0 is Phase 1 (frequency-only); >0 turns on NDCG (Phase 2).
+    trending_namespace: str | None = Field(default=None, alias="TRENDING_NAMESPACE")
+    trending_window_hours: int = Field(default=24, alias="TRENDING_WINDOW_HOURS")
+    trending_quality_weight: float = Field(
+        default=0.0, alias="TRENDING_QUALITY_WEIGHT"
+    )
+    trending_min_count: int = Field(default=2, alias="TRENDING_MIN_COUNT")
+    trending_top_n: int = Field(default=12, alias="TRENDING_TOP_N")
+    trending_history_tag: str = Field(default="page:first", alias="TRENDING_HISTORY_TAG")
+    trending_interval_seconds: float = Field(
+        default=3600.0, alias="TRENDING_INTERVAL_SECONDS"
+    )
+
     @field_validator("layer_gateway_url")
     @classmethod
     def trim_gateway_url(cls, value: str) -> str:
@@ -72,6 +87,10 @@ class Settings(BaseSettings):
     @property
     def resolved_worker_id(self) -> str:
         return self.worker_id or "hev-shop-worker"
+
+    @property
+    def resolved_trending_namespace(self) -> str:
+        return self.trending_namespace or f"{self.namespace}-trending"
 
 
 @lru_cache
