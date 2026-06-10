@@ -1,9 +1,9 @@
-# Frontend 0.1 design — Drops & Recent searches
+# Frontend 0.1 design — Drops & Personal recent searches
 
 UI design notes for the two storefront surfaces around catalog drops and
 recent searches. The implementation lives in `app/app/drops/page.tsx`,
-`app/components/DropBand.tsx`, `app/components/RecentSearches.tsx`, and
-`app/lib/backend.ts`.
+`app/components/DropBand.tsx`, `app/components/SearchBar.tsx`,
+`app/components/RecordSearch.tsx`, and `app/lib/recent-searches-local.ts`.
 
 Design constraints carried over from `CLAUDE.md`:
 
@@ -68,16 +68,13 @@ catalog_run_id — click through to browse only those vectors.   [/drops perf ba
 
 `/search?drop={run_id}`:
 
-- `backendSearch` gains `catalogRunId?: string`, sent as `catalog_run_id`
-  (WS2 adds it to `SearchRequest`).
+- `backendSearch` accepts `catalogRunId?: string`, sent as `catalog_run_id`.
 - An active-filter chip renders above results, visually distinct (mono label):
   `drop: catalog-2026-06-07 ×`. Clicking × removes the param. The drop filter
   composes with `q` through the same URLSearchParams plumbing used by search
   pagination.
-- An empty `q` with a `drop` param is valid: "everything in this drop".
-  (Backend note: this needs `/search` to accept filter-only queries, or
-  the page substitutes the drop's category as the query — decide when
-  WS2 lands; the UI contract is just "the URL works".)
+- An empty `q` with a `drop` param is valid: `/search` uses a filtered
+  namespace query for drop-only browsing, and vector search when `q` is present.
 
 ### Response contract consumed by the frontend
 
@@ -104,66 +101,90 @@ Frontend treats `drops` as newest-first; tolerates missing
 
 ---
 
-## 2. Recent searches
+## 2. Personal recent searches
 
-### What the user can do
+RFC 0040 split the old "recent searches" idea into:
 
-See what people are actually asking the index, and run one of those
-queries with a click.
+- **Your recent searches** — this browser's submitted queries, private and
+  client-side.
+- **Trending** — everyone's queries, aggregated by the Layer reduce UDF; see
+  `docs/TRENDING_DESIGN.md`.
 
-### Placement
+This section covers the personal half only.
 
-Homepage, directly under the hero CTA buttons — a single restrained chip
-row in the existing pill style:
+### Header dropdown (search-bar suggestions)
 
-```
-RECENTLY ASKED   [cozy reading corner] [wireless headphones] [something brass and warm] …
-```
+#### What the user can do
 
-- Uppercase kicker matches the categories row (`filter` kicker).
-- Chips are the existing pill pattern (`rounded-full border border-ink-200
-  bg-white px-4 py-1.5 text-sm`), each linking to `/search?q={query}`.
-- Cap at 8 chips, single line of wrap; truncate individual queries at
-  ~40 chars with ellipsis.
-- Server component with a short timeout (match `META_TIMEOUT_MS`);
-  hidden on error, empty list, or endpoint missing.
+Focus the search bar with an empty field and see queries this browser has run
+before. Arrow-key or click one to run it again.
 
-Not in the header for 0.1: a dropdown under `SearchBar` needs client
-focus-state work and competes with the announcement bar. The homepage row
-is the restrained version; the header dropdown is a natural follow-up.
+#### Interaction
 
-### Response contract consumed by the frontend
+- **Open** on input focus *when the field is empty* (suggestions, not
+  autocomplete — 0.1 does not filter the list against the typed prefix; that's
+  a later refinement). Re-opens on focus, closes on blur/submit.
+- **Keyboard:** ↓/↑ move a highlight through the rows, Enter runs the
+  highlighted query (falls back to the typed text when nothing is highlighted),
+  Esc closes without losing focus. Reuse the outside-click + Esc pattern already
+  in `FeatureExplainer`.
+- **Anchor:** absolutely positioned under the input inside `SearchBar`'s
+  existing `relative w-full` wrapper, matched to the input width, `z-50`. This
+  is the fix for the original "competes with the announcement bar" blocker — the
+  dropdown overlays at a high z-index rather than pushing layout.
+- **Invisible-when-empty:** no local history → no dropdown, ever. The search
+  bar is unchanged when there's nothing to suggest.
 
-```jsonc
-// GET /search/recent?limit=8
-{
-  "queries": ["cozy reading corner", "wireless headphones"],
-  "layer_perf": { "latency_ms": 9, "cache_status": null }  // nullable
-}
-```
+#### Data path
 
-Backend owns normalization (dedupe, case/whitespace, drop empty/overlong);
-the frontend renders verbatim.
+No backend route is involved.
 
-### Files (when built)
+- `RecordSearch` mounts on `/search` and records the active submitted query.
+- `recent-searches-local.ts` trims, collapses whitespace, dedupes
+  case-insensitively, caps at 8, persists to localStorage, and dispatches a
+  window event.
+- `SearchBar` reads that local list on mount, on focus, and whenever the event
+  fires.
 
-- `app/components/RecentSearches.tsx` — new server component
-- `app/app/page.tsx` — mount under hero CTAs
-- `app/lib/backend.ts` — `backendRecentSearches()`
+#### Reuse
+
+The dropdown uses `searchHref()` and `truncateQuery()` from
+`app/lib/search-ui.ts`. It intentionally carries no `FeatureExplainer`: this is
+a private UX nicety, not a Layer capability. The Layer story is the homepage
+`Trending` section.
+
+#### Forward compatibility
+
+This is the literal interaction that becomes the chat input's suggested-prompt
+chips in the agentic rewrite (issue #3, §3 below).
+
+### Files
+
+- `app/lib/recent-searches-local.ts` — localStorage personal history
+- `app/components/RecordSearch.tsx` — records submitted queries from `/search`
+- `app/components/SearchBar.tsx` — focus-state listbox + keyboard nav
+- `app/lib/search-ui.ts` — `searchHref()` + `truncateQuery()`, shared client-safe
+  helpers used by the dropdown and Trending chips
 
 ---
 
 ## 3. Forward compatibility
 
 - **Agentic homepage (issue #3).** Both surfaces survive the chat-first
-  rewrite: recent searches become the suggested-prompt chips above the
-  chat input (same component, same data), and the drop band becomes a
+  rewrite: personal recent searches become the suggested-prompt chips above the
+  chat input (same local data), and the drop band becomes a
   rail above or beside the chat column. Neither should be built as
   hero-internal markup — keep them as standalone components mounted by
   the page so the rewrite re-mounts rather than re-implements them.
-- **Browsing rail (issue #7).** Reserved slot: below "Visually similar"
-  on `/product/[asin]`. No work now; blocked on layer-gateway
-  query-by-document-ID.
+- **Browsing rail (issue #7).** Built — see `docs/BROWSING_RAIL_DESIGN.md`.
+  Landed on the **homepage** (under the drop band) rather than the originally
+  reserved `/product/[asin]` slot: it's a session-wide taste signal seeded by
+  the whole browsing history, so it's strongest where there is no single seed
+  product. Powered by the hev layer TypeScript client's array `searchById`
+  (multi-query + RRF over the localStorage history); mock-only for 0.1, with a
+  contained swap to gateway-backed queries when the `hevlayer` TypeScript
+  package is available to the storefront build. Each result set now carries a
+  "How it works" explainer — see
+  `docs/FEATURE_EXPLAINERS.md`.
 - **`/drops` ingress.** The top-level path routes to `hev-shop-search` in
-  `../layer/infra/ingress/hev-shop/`. `/search/recent` rides the existing
-  `/search*` prefix.
+  `../layer/infra/ingress/hev-shop/`.

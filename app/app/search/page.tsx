@@ -10,6 +10,7 @@ import {
 } from "@/lib/backend";
 import { LayerPerfBadge, StableAsOfBadge } from "@/components/LayerPerfBadge";
 import { FeatureExplainer } from "@/components/FeatureExplainer";
+import { RecordSearch } from "@/components/RecordSearch";
 import type { Product } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -132,6 +133,7 @@ export default async function SearchPage({
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
+      <RecordSearch query={q} />
       <div className="mb-8 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
