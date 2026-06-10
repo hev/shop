@@ -10,6 +10,7 @@ without unwrapping pydantic models.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 from hevlayer import (
@@ -46,10 +47,13 @@ class FakeLayerClient:
         self.next_query_response: QueryResponse | None = None
         self.documents_by_namespace: dict[tuple[str, str], dict[str, Any]] = {}
         self.snapshot_values_by_namespace: dict[str, dict[str, list[dict[str, Any]]]] = {}
+        self.snapshot_watermarks_by_namespace: dict[str, int] = {}
         self.namespace_metadata_data: Any = None
         self.scan_calls: list[dict[str, Any]] = []
         self.next_scan_response: ScanCountResponse | None = None
         self.scan_raises: bool = False
+        self.turbopuffer_query_calls: list[dict[str, Any]] = []
+        self.next_turbopuffer_query_response: Any = None
 
     async def query_namespace(
         self,
@@ -134,6 +138,20 @@ class FakeLayerClient:
             served_by="origin",
             elapsed_ms=0,
         )
+        return _attach_perf(response, with_perf)
+
+    async def query_turbopuffer_namespace(
+        self,
+        namespace: str,
+        body: Any,
+        *,
+        with_perf: bool = False,
+    ) -> Any:
+        payload = body if isinstance(body, dict) else body.model_dump(exclude_none=True)
+        self.turbopuffer_query_calls.append(
+            {"namespace": namespace, "body": dict(payload)}
+        )
+        response = self.next_turbopuffer_query_response or SimpleNamespace(rows=[])
         return _attach_perf(response, with_perf)
 
     async def fetch_document(
@@ -242,7 +260,7 @@ class FakeLayerClient:
         rows = self.snapshot_values_by_namespace.get(namespace, {}).get(field, [])
         body = SnapshotBody(
             namespace=namespace,
-            watermark_ms=0,
+            watermark_ms=self.snapshot_watermarks_by_namespace.get(namespace, 0),
             sha=sha,
             fields=[
                 SnapshotField(

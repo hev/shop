@@ -197,6 +197,7 @@ export type SearchOptions = {
   cursor?: string | null;
   withCount?: boolean;
   maxDistance?: number;
+  catalogRunId?: string | null;
 };
 
 export async function backendSearch(
@@ -205,7 +206,8 @@ export async function backendSearch(
 ): Promise<SearchResult> {
   if (!API_BASE) throw new Error("HEV_SHOP_API_BASE not set");
   const trimmed = query.trim();
-  if (!trimmed) {
+  const catalogRunId = options.catalogRunId?.trim() || null;
+  if (!trimmed && !catalogRunId) {
     return {
       products: [],
       layer_perf: null,
@@ -220,6 +222,7 @@ export async function backendSearch(
     query: trimmed,
     top_k: Math.min(topK, 200),
   };
+  if (catalogRunId) payload.catalog_run_id = catalogRunId;
   if (cursor) payload.cursor = cursor;
   if (withCount) payload.with_count = true;
   if (typeof maxDistance === "number") payload.max_distance = maxDistance;
@@ -277,8 +280,8 @@ export type DropsResult = {
   layer_perf: LayerPerf | null;
 };
 
-// GET /drops — recent nightly catalog runs (see docs/FRONTEND_0.1_DESIGN.md;
-// endpoint lands with launch-plan WS4).
+// GET /drops — recent nightly catalog runs materialized from catalog_run_id
+// vector attributes (see docs/FRONTEND_0.1_DESIGN.md).
 export async function backendDrops(): Promise<DropsResult> {
   if (!API_BASE) throw new Error("HEV_SHOP_API_BASE not set");
   const res = await fetchWithTimeout(

@@ -27,7 +27,7 @@ var rootCmd = &cobra.Command{
 	Use:   "shop",
 	Short: "CLI for the hev-shop search + indexer APIs",
 	Long: `shop is the command-line client for hev-shop's read API (search,
-product, meta, recommend) and indexer control plane (index, status).
+product, meta, drops, recommend) and indexer control plane (index, status).
 Every endpoint described in search/openapi.json and indexer/openapi.json
 has a matching subcommand here.`,
 }

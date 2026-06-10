@@ -26,11 +26,22 @@ class LayerPerf(BaseModel):
 
 
 class SearchRequest(BaseModel):
-    query: str = Field(..., min_length=1, description="Free-text search query")
+    query: str = Field(
+        ...,
+        min_length=0,
+        description=(
+            "Free-text search query. May be empty only when catalog_run_id is "
+            "set, which browses that catalog drop without vector ranking."
+        ),
+    )
     top_k: int = Field(default=10, ge=1, le=200)
     namespace: str | None = None
     include_attributes: list[str] | None = None
     category: str | None = None
+    catalog_run_id: str | None = Field(
+        default=None,
+        description="Filter results to a specific catalog drop/run id.",
+    )
     cursor: str | None = Field(
         default=None,
         description=(
@@ -160,3 +171,17 @@ class MetaResponse(BaseModel):
             "(not the category snapshot)."
         ),
     )
+
+
+class DropInfo(BaseModel):
+    run_id: str
+    product_count: int
+    stable_as_of: int | None = None
+
+
+class DropsResponse(BaseModel):
+    namespace: str
+    drops: list[DropInfo]
+    stable_as_of: int | None = None
+    layer_perf: LayerPerf | None = None
+

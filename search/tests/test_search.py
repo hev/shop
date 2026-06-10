@@ -9,6 +9,7 @@ app.state, so nothing reaches a real gateway or model.
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -115,6 +116,25 @@ class TestSearchCursor:
         assert layer.query_calls[-1]["raw_query"] is None
         assert layer.query_calls[-1]["history_tags"] is None
 
+    def test_catalog_run_filter_is_sent_to_vector_query(self, client_with_fakes):
+        client, layer, _ = client_with_fakes
+        layer.next_query_response = _query_response(["B0001"])
+
+        resp = client.post(
+            "/search",
+            json={
+                "query": "wireless headphones",
+                "catalog_run_id": "catalog-2026-06-09",
+            },
+        )
+        assert resp.status_code == 200
+
+        assert layer.query_calls[-1]["filters"] == [
+            "catalog_run_id",
+            "Eq",
+            "catalog-2026-06-09",
+        ]
+
     def test_omits_next_cursor_when_gateway_returns_short_page(
         self, client_with_fakes
     ):
@@ -125,6 +145,58 @@ class TestSearchCursor:
         assert resp.status_code == 200
         body = resp.json()
         assert body["next_cursor"] is None
+
+    def test_empty_query_requires_catalog_run_id(self, client_with_fakes):
+        client, _, _ = client_with_fakes
+
+        resp = client.post("/search", json={"query": ""})
+
+        assert resp.status_code == 422
+
+    def test_empty_query_with_catalog_run_uses_filtered_namespace_query(
+        self, client_with_fakes
+    ):
+        client, layer, clip = client_with_fakes
+        layer.next_turbopuffer_query_response = SimpleNamespace(
+            rows=[
+                {
+                    "id": "B0001",
+                    "asin": "B0001",
+                    "title": "Fresh Camera",
+                    "catalog_run_id": "catalog-2026-06-09",
+                }
+            ],
+            stable_as_of=67890,
+            next_cursor="drop-page-2",
+        )
+
+        resp = client.post(
+            "/search",
+            json={
+                "query": "",
+                "top_k": 4,
+                "cursor": "drop-page-1",
+                "catalog_run_id": "catalog-2026-06-09",
+            },
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["hits"][0]["id"] == "B0001"
+        assert body["stable_as_of"] == 67890
+        assert body["next_cursor"] == "drop-page-2"
+        assert body["count"] is None
+        assert clip.calls == []
+        assert layer.query_calls == []
+        assert layer.turbopuffer_query_calls[-1] == {
+            "namespace": "amazon-products",
+            "body": {
+                "top_k": 4,
+                "include_attributes": True,
+                "filters": ["catalog_run_id", "Eq", "catalog-2026-06-09"],
+                "cursor": "drop-page-1",
+            },
+        }
 
 
 class TestSearchCount:
@@ -223,4 +295,49 @@ class TestMeta:
         assert layer.snapshot_calls[-1] == {
             "namespace": "amazon-products",
             "field": "category",
+        }
+
+
+class TestDrops:
+    def test_catalog_run_buckets_come_from_snapshot(self, client_with_fakes):
+        client, layer, _ = client_with_fakes
+        layer.namespace_metadata_data = NamespaceMetadata(
+            id="amazon-products",
+            schema={},
+            approx_logical_bytes=0,
+            approx_row_count=12,
+            created_at="2026-05-20T00:00:00Z",
+            updated_at="2026-05-20T00:00:00Z",
+            layer={"stable_as_of": 12345, "is_stable": True},
+        )
+        layer.snapshot_watermarks_by_namespace["amazon-products"] = 1780000000000
+        layer.snapshot_values_by_namespace["amazon-products"] = {
+            "catalog_run_id": [
+                {"value": "catalog-2026-06-08", "doc_count": 7},
+                {"value": "catalog-2026-06-09", "doc_count": 5},
+                {"value": "catalog-2026-06-07", "doc_count": 3},
+            ]
+        }
+
+        resp = client.get("/drops?limit=2")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["namespace"] == "amazon-products"
+        assert body["stable_as_of"] == 1780000000000
+        assert body["drops"] == [
+            {
+                "run_id": "catalog-2026-06-09",
+                "product_count": 5,
+                "stable_as_of": 1780000000000,
+            },
+            {
+                "run_id": "catalog-2026-06-08",
+                "product_count": 7,
+                "stable_as_of": 1780000000000,
+            },
+        ]
+        assert layer.snapshot_calls[-1] == {
+            "namespace": "amazon-products",
+            "field": "catalog_run_id",
         }

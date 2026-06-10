@@ -7,8 +7,8 @@ import {
 
 export type { DropInfo, DropsResult };
 
-// The nightly reindex CronJob fires at 02:00 UTC (launch-plan WS4). The
-// countdown and the mock ledger are both anchored to this hour.
+// The nightly reindex CronJob fires at 02:00 UTC. The countdown and the mock
+// ledger are both anchored to this hour.
 export const DROP_HOUR_UTC = 2;
 
 // New products per drop — the ops knob. In production this is the nightly

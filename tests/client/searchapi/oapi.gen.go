@@ -44,6 +44,28 @@ type CountInfo struct {
 	TimedOut        *bool      `json:"timed_out,omitempty"`
 }
 
+// DropInfo defines model for DropInfo.
+type DropInfo struct {
+	ProductCount int    `json:"product_count"`
+	RunId        string `json:"run_id"`
+	StableAsOf   *int   `json:"stable_as_of,omitempty"`
+}
+
+// DropsResponse defines model for DropsResponse.
+type DropsResponse struct {
+	Drops []DropInfo `json:"drops"`
+
+	// LayerPerf One Layer gateway round-trip's timing + cache disposition,
+	// surfaced to the UI so the showcase can render `42ms · cache hit`
+	// inline. `cache_status` is the gateway's `x-layer-cache` header
+	// (`"hit"`, `"miss"`, or `"miss-on-error"`); `None` when the gateway
+	// didn't attach the header — the `query` endpoint doesn't go through
+	// the document cache, so query perfs always have `cache_status=None`.
+	LayerPerf  *LayerPerf `json:"layer_perf,omitempty"`
+	Namespace  string     `json:"namespace"`
+	StableAsOf *int       `json:"stable_as_of,omitempty"`
+}
+
 // HTTPValidationError defines model for HTTPValidationError.
 type HTTPValidationError struct {
 	Detail *[]ValidationError `json:"detail,omitempty"`
@@ -128,7 +150,9 @@ type SearchHit struct {
 
 // SearchRequest defines model for SearchRequest.
 type SearchRequest struct {
-	Category *string `json:"category,omitempty"`
+	// CatalogRunId Filter results to a specific catalog drop/run id.
+	CatalogRunId *string `json:"catalog_run_id,omitempty"`
+	Category     *string `json:"category,omitempty"`
 
 	// Cursor Opaque pagination cursor from a prior /search response's next_cursor. Re-send the same query/filters/top_k to keep paging consistent; the gateway re-applies the consistency watermark.
 	Cursor            *string   `json:"cursor,omitempty"`
@@ -138,7 +162,7 @@ type SearchRequest struct {
 	MaxDistance *float32 `json:"max_distance,omitempty"`
 	Namespace   *string  `json:"namespace,omitempty"`
 
-	// Query Free-text search query
+	// Query Free-text search query. May be empty only when catalog_run_id is set, which browses that catalog drop without vector ranking.
 	Query string `json:"query"`
 	TopK  *int   `json:"top_k,omitempty"`
 
@@ -190,6 +214,12 @@ type ValidationErrorLoc1 = int
 // ValidationError_Loc_Item defines model for ValidationError.loc.Item.
 type ValidationError_Loc_Item struct {
 	union json.RawMessage
+}
+
+// DropsDropsGetParams defines parameters for DropsDropsGet.
+type DropsDropsGetParams struct {
+	Namespace *string `form:"namespace,omitempty" json:"namespace,omitempty"`
+	Limit     *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // MetaMetaGetParams defines parameters for MetaMetaGet.
@@ -338,6 +368,9 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 
 // The interface specification for the client above.
 type ClientInterface interface {
+	// DropsDropsGet request
+	DropsDropsGet(ctx context.Context, params *DropsDropsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// HealthzHealthzGet request
 	HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -356,6 +389,18 @@ type ClientInterface interface {
 	SearchSearchPostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	SearchSearchPost(ctx context.Context, body SearchSearchPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+}
+
+func (c *Client) DropsDropsGet(ctx context.Context, params *DropsDropsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDropsDropsGetRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
 }
 
 func (c *Client) HealthzHealthzGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -440,6 +485,72 @@ func (c *Client) SearchSearchPost(ctx context.Context, body SearchSearchPostJSON
 		return nil, err
 	}
 	return c.Client.Do(req)
+}
+
+// NewDropsDropsGetRequest generates requests for DropsDropsGet
+func NewDropsDropsGetRequest(server string, params *DropsDropsGetParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/drops")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Namespace != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "namespace", *params.Namespace, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
 }
 
 // NewHealthzHealthzGetRequest generates requests for HealthzHealthzGet
@@ -680,6 +791,9 @@ func WithBaseURL(baseURL string) ClientOption {
 
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
+	// DropsDropsGetWithResponse request
+	DropsDropsGetWithResponse(ctx context.Context, params *DropsDropsGetParams, reqEditors ...RequestEditorFn) (*DropsDropsGetResponse, error)
+
 	// HealthzHealthzGetWithResponse request
 	HealthzHealthzGetWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*HealthzHealthzGetResponse, error)
 
@@ -698,6 +812,37 @@ type ClientWithResponsesInterface interface {
 	SearchSearchPostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SearchSearchPostResponse, error)
 
 	SearchSearchPostWithResponse(ctx context.Context, body SearchSearchPostJSONRequestBody, reqEditors ...RequestEditorFn) (*SearchSearchPostResponse, error)
+}
+
+type DropsDropsGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *DropsResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r DropsDropsGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DropsDropsGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DropsDropsGetResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
 }
 
 type HealthzHealthzGetResponse struct {
@@ -854,6 +999,15 @@ func (r SearchSearchPostResponse) ContentType() string {
 	return ""
 }
 
+// DropsDropsGetWithResponse request returning *DropsDropsGetResponse
+func (c *ClientWithResponses) DropsDropsGetWithResponse(ctx context.Context, params *DropsDropsGetParams, reqEditors ...RequestEditorFn) (*DropsDropsGetResponse, error) {
+	rsp, err := c.DropsDropsGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDropsDropsGetResponse(rsp)
+}
+
 // HealthzHealthzGetWithResponse request returning *HealthzHealthzGetResponse
 func (c *ClientWithResponses) HealthzHealthzGetWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*HealthzHealthzGetResponse, error) {
 	rsp, err := c.HealthzHealthzGet(ctx, reqEditors...)
@@ -913,6 +1067,39 @@ func (c *ClientWithResponses) SearchSearchPostWithResponse(ctx context.Context, 
 		return nil, err
 	}
 	return ParseSearchSearchPostResponse(rsp)
+}
+
+// ParseDropsDropsGetResponse parses an HTTP response from a DropsDropsGetWithResponse call
+func ParseDropsDropsGetResponse(rsp *http.Response) (*DropsDropsGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DropsDropsGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DropsResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
 }
 
 // ParseHealthzHealthzGetResponse parses an HTTP response from a HealthzHealthzGetWithResponse call

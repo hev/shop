@@ -27,6 +27,10 @@ func resetCLIState() {
 	searchCursor = ""
 	searchWithCount = false
 	searchMaxDistance, searchNamespace = 0.4, ""
+	searchCatalogRun = ""
+
+	dropsNamespace = ""
+	dropsLimit = 7
 
 	recommendASIN, recommendTopK = "", 10
 	recommendCategory, recommendNamespace = "", ""
@@ -88,6 +92,7 @@ func TestSearchCmdSendsRequest(t *testing.T) {
 		"--search-url", srv.URL,
 		"--top-k", "3",
 		"--category", "Electronics",
+		"--catalog-run-id", "catalog-2026-06-09",
 	); err != nil {
 		t.Fatalf("search cmd failed: %v", err)
 	}
@@ -102,6 +107,9 @@ func TestSearchCmdSendsRequest(t *testing.T) {
 	}
 	if recorded.Body["category"] != "Electronics" {
 		t.Errorf("expected category=Electronics, got %v", recorded.Body["category"])
+	}
+	if recorded.Body["catalog_run_id"] != "catalog-2026-06-09" {
+		t.Errorf("expected catalog_run_id, got %v", recorded.Body["catalog_run_id"])
 	}
 }
 
@@ -166,5 +174,30 @@ func TestMetaCmdSendsRequest(t *testing.T) {
 	}
 	if recorded.Query.Get("namespace") != "amazon-products" {
 		t.Errorf("expected namespace query param, got %v", recorded.Query)
+	}
+}
+
+func TestDropsCmdSendsRequest(t *testing.T) {
+	resetCLIState()
+	srv, recorded := recordingServer(t, 200, map[string]any{
+		"namespace": "amazon-products",
+		"drops":     []any{},
+	})
+	if err := runArgs(t,
+		"drops",
+		"--search-url", srv.URL,
+		"--namespace", "amazon-products",
+		"--limit", "2",
+	); err != nil {
+		t.Fatalf("drops cmd failed: %v", err)
+	}
+	if recorded.Method != "GET" || recorded.Path != "/drops" {
+		t.Fatalf("unexpected request: %s %s", recorded.Method, recorded.Path)
+	}
+	if recorded.Query.Get("namespace") != "amazon-products" {
+		t.Errorf("expected namespace query param, got %v", recorded.Query)
+	}
+	if recorded.Query.Get("limit") != "2" {
+		t.Errorf("expected limit query param, got %v", recorded.Query)
 	}
 }

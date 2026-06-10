@@ -16,6 +16,7 @@ var (
 	searchWithCount   bool
 	searchMaxDistance float32
 	searchNamespace   string
+	searchCatalogRun  string
 )
 
 var searchCmd = &cobra.Command{
@@ -45,6 +46,9 @@ var searchCmd = &cobra.Command{
 		if searchNamespace != "" {
 			body.Namespace = &searchNamespace
 		}
+		if searchCatalogRun != "" {
+			body.CatalogRunId = &searchCatalogRun
+		}
 
 		c, err := newSearchClient()
 		if err != nil {
@@ -69,5 +73,6 @@ func init() {
 	searchCmd.Flags().BoolVar(&searchWithCount, "with-count", false, "fan out an extra /scans radius count to estimate matches within --max-distance")
 	searchCmd.Flags().Float32Var(&searchMaxDistance, "max-distance", 0.4, "cosine-distance ceiling for --with-count")
 	searchCmd.Flags().StringVar(&searchNamespace, "namespace", "", "override the target namespace")
+	searchCmd.Flags().StringVar(&searchCatalogRun, "catalog-run-id", "", "filter by catalog_run_id")
 	rootCmd.AddCommand(searchCmd)
 }

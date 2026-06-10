@@ -12,7 +12,7 @@ matching the layout in https://hevlayer.com/docs/api/pipelines/:
 ```text
 hev-shop/
   app/                    # Next.js storefront
-  search/                 # read API: /search, /recommend, /product, /meta
+  search/                 # read API: /search, /recommend, /product, /meta, /drops
     app.py, models.py
     tests/
     Dockerfile, requirements.txt, openapi.json
@@ -47,13 +47,13 @@ The app runs on EKS in namespace `hev-shop`, fronted by a shared ALB
 |---|---|---|
 | Storefront | https://hev-shop.com | `hev-shop-web` (port 80 to pod 3000) |
 | Storefront (www) | https://www.hev-shop.com redirects to apex | LBC `redirect-to-apex` action |
-| Read API | https://api.hev-shop.com/{search,recommend,product,meta,...} | `hev-shop-search` (port 8080) |
+| Read API | https://api.hev-shop.com/{search,recommend,product,meta,drops,...} | `hev-shop-search` (port 8080) |
 | Indexer API | https://api.hev-shop.com/{index,status} | `hev-shop-indexer-api` (port 8080) |
 | Layer gateway | https://aws-us-east-1.hevlayer.com | `layer-gateway` in namespace `layer` (port 8080) |
 
 `api.hev-shop.com` is path-routed by the ALB: `/search*`, `/recommend*`,
-`/product*`, and `/meta*` go to `hev-shop-search`; `/index` and `/status`
-go to `hev-shop-indexer-api`. Update the ingress under
+`/product*`, `/meta*`, and `/drops*` go to `hev-shop-search`; `/index` and
+`/status` go to `hev-shop-indexer-api`. Update the ingress under
 `../layer/infra/ingress/hev-shop/` when adding new routes.
 
 The web pod only calls read endpoints, so it talks to search in-cluster:
@@ -66,6 +66,7 @@ calling from a laptop.
 ```sh
 curl -s https://api.hev-shop.com/healthz
 curl -s https://api.hev-shop.com/meta | jq .
+curl -s https://api.hev-shop.com/drops | jq .
 curl -s "https://api.hev-shop.com/product/B00FI7TCGI" | jq .
 curl -s -X POST -H 'content-type: application/json' \
   -d '{"query":"wireless headphones","top_k":3}' \
@@ -129,6 +130,7 @@ Every hev-shop endpoint has a matching subcommand. Build or run it from there
 | `shop recommend B00FI7TCGI --top-k 3` | `POST /recommend` |
 | `shop product B00FI7TCGI` | `GET /product/{asin}` |
 | `shop meta` | `GET /meta` |
+| `shop drops --limit 7` | `GET /drops` |
 | `shop index --category Electronics --count 1000` | `POST /index` |
 | `shop status --pipeline-id hev-shop-product-images` | `GET /status` |
 | `shop health` | search `/healthz` + indexer `/status` |
@@ -162,7 +164,7 @@ committed spec drifts from the FastAPI app.
 
 | File | Purpose |
 |---|---|
-| `app.py` | FastAPI app: `/search`, `/recommend`, `/product/{asin}`, `/meta`, `/healthz` |
+| `app.py` | FastAPI app: `/search`, `/recommend`, `/product/{asin}`, `/meta`, `/drops`, `/healthz` |
 | `models.py` | Pydantic HTTP contracts for the read API |
 
 Heavy lifting (Settings and CLIP embedder wrappers) is in `hev_shop_common`.

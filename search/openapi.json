@@ -67,6 +67,59 @@
         "title": "CountInfo",
         "type": "object"
       },
+      "DropInfo": {
+        "properties": {
+          "product_count": {
+            "title": "Product Count",
+            "type": "integer"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "stable_as_of": {
+            "nullable": true,
+            "title": "Stable As Of",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "product_count"
+        ],
+        "title": "DropInfo",
+        "type": "object"
+      },
+      "DropsResponse": {
+        "properties": {
+          "drops": {
+            "items": {
+              "$ref": "#/components/schemas/DropInfo"
+            },
+            "title": "Drops",
+            "type": "array"
+          },
+          "layer_perf": {
+            "$ref": "#/components/schemas/LayerPerf",
+            "nullable": true
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "stable_as_of": {
+            "nullable": true,
+            "title": "Stable As Of",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "namespace",
+          "drops"
+        ],
+        "title": "DropsResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -273,6 +326,12 @@
       },
       "SearchRequest": {
         "properties": {
+          "catalog_run_id": {
+            "description": "Filter results to a specific catalog drop/run id.",
+            "nullable": true,
+            "title": "Catalog Run Id",
+            "type": "string"
+          },
           "category": {
             "nullable": true,
             "title": "Category",
@@ -306,8 +365,8 @@
             "type": "string"
           },
           "query": {
-            "description": "Free-text search query",
-            "minLength": 1,
+            "description": "Free-text search query. May be empty only when catalog_run_id is set, which browses that catalog drop without vector ranking.",
+            "minLength": 0,
             "title": "Query",
             "type": "string"
           },
@@ -427,6 +486,59 @@
   },
   "openapi": "3.0.3",
   "paths": {
+    "/drops": {
+      "get": {
+        "description": "Recent catalog runs discovered from the `catalog_run_id` vector field.",
+        "operationId": "drops_drops_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "nullable": true,
+              "title": "Namespace",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 7,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DropsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Drops"
+      }
+    },
     "/healthz": {
       "get": {
         "operationId": "healthz_healthz_get",

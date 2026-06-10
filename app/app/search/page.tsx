@@ -56,9 +56,8 @@ export default async function SearchPage({
     approx: approxParam,
     drop,
   } = await searchParams;
-  // Active drop filter (a catalog_run_id from /drops). Display-only until
-  // launch-plan WS2 adds catalog_run_id to SearchRequest — then thread it
-  // through backendSearch here.
+  // Active drop filter (a catalog_run_id from /drops). In backend mode this is
+  // sent to /search; demo mode uses the local mock drop slice below.
   const selectedDrop =
     drop && /^catalog-\d{4}-\d{2}-\d{2}$/.test(drop) ? drop : null;
   // Cursor pages carry the page-1 count forward in the URL so we don't re-run
@@ -77,7 +76,7 @@ export default async function SearchPage({
   let nextCursor: string | null = null;
   let count: CountInfo | null = null;
   let error: string | null = null;
-  if (backendEnabled() && q.trim()) {
+  if (backendEnabled() && (q.trim() || selectedDrop)) {
     try {
       // Only ask for a count on page 1 — the count is query-scoped, not
       // page-scoped, so re-running it on every "load more" click is wasted
@@ -87,6 +86,7 @@ export default async function SearchPage({
         topK: PAGE_SIZE,
         cursor: cursor || null,
         withCount: !cursor || carriedTotal === null,
+        catalogRunId: selectedDrop,
       });
       results = r.products;
       layerPerf = r.layer_perf;

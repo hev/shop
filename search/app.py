@@ -20,7 +20,7 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query as FastAPIQuery, Request
 from hevlayer import (
     AnnScan,
     AsyncHevlayer,
@@ -33,6 +33,8 @@ from hev_shop_common.config import get_settings
 from models import (
     CategoryBucket,
     CountInfo,
+    DropInfo,
+    DropsResponse,
     LayerPerf,
     MetaResponse,
     ProductResponse,
@@ -207,6 +209,30 @@ def row_to_hit(row: Any) -> SearchHit:
     )
 
 
+def _int_value(value: Any, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
+
+
+def _stable_as_of(payload: Any) -> int | None:
+    value = getattr(payload, "stable_as_of", None)
+    if isinstance(value, int):
+        return value
+    extra = getattr(payload, "model_extra", None) or {}
+    value = extra.get("stable_as_of")
+    return value if isinstance(value, int) else None
+
+
 async def _vector_count(
     layer: AsyncHevlayer,
     namespace: str,
@@ -286,13 +312,54 @@ async def search(request: Request, body: SearchRequest) -> SearchResponse:
     layer: AsyncHevlayer = request.app.state.layer
     namespace = body.namespace or settings.namespace
     include_attributes: list[str] | bool = body.include_attributes or True
+    query_text = body.query.strip()
     filters: list[list[object]] = []
     if body.category:
         filters.append(["category", "Eq", body.category])
+    if body.catalog_run_id:
+        filters.append(["catalog_run_id", "Eq", body.catalog_run_id])
     combined_filters = combine_filters(filters)
+    if not query_text and not body.catalog_run_id:
+        raise HTTPException(
+            status_code=422,
+            detail="query is required unless catalog_run_id is set",
+        )
+
+    if not query_text:
+        try:
+            raw_query: dict[str, Any] = {
+                "top_k": body.top_k,
+                "include_attributes": include_attributes,
+                "filters": combined_filters,
+            }
+            if body.cursor:
+                raw_query["cursor"] = body.cursor
+            response = await layer.query_turbopuffer_namespace(
+                namespace,
+                raw_query,
+                with_perf=True,
+            )
+        except Exception as exc:
+            logger.exception("drop browse failed: namespace=%s", namespace)
+            raise HTTPException(
+                status_code=502, detail="search upstream failed"
+            ) from exc
+
+        return SearchResponse(
+            query=body.query,
+            namespace=namespace,
+            hits=query_hits(response.data),
+            stable_as_of=_stable_as_of(response.data),
+            layer_perf=LayerPerf(
+                latency_ms=int(response.perf.latency_ms),
+                cache_status=response.perf.cache_status,
+            ),
+            next_cursor=_extract_next_cursor(response.data),
+            count=None,
+        )
 
     embedder = await get_text_embedder(request.app)
-    vector = await asyncio.to_thread(embedder.encode_text, body.query)
+    vector = await asyncio.to_thread(embedder.encode_text, query_text)
     query_kwargs: dict[str, Any] = {
         "vector": vector,
         "top_k": body.top_k,
@@ -306,7 +373,7 @@ async def search(request: Request, body: SearchRequest) -> SearchResponse:
             namespace,
             QueryRequest(**query_kwargs),
             **_search_history_kwargs(
-                body.query,
+                query_text,
                 cursor=body.cursor,
                 surface=request.headers.get(SEARCH_HISTORY_SURFACE_HEADER),
             ),
@@ -410,13 +477,14 @@ async def product(request: Request, asin: str) -> ProductResponse:
             settings.namespace,
             asin,
             include_attributes=[
-                "asin",
-                "title",
-                "description",
-                "category",
-                "image_url",
-                "avg_rating_txt",
-                "rating_cnt_txt",
+            "asin",
+            "title",
+            "description",
+            "category",
+            "catalog_run_id",
+            "image_url",
+            "avg_rating_txt",
+            "rating_cnt_txt",
             ],
             with_perf=True,
         )
@@ -494,3 +562,57 @@ async def meta(request: Request, namespace: str | None = None) -> MetaResponse:
         if cache_ttl > 0:
             request.app.state.meta_cache[cache_key] = (time.monotonic(), response)
         return response
+
+
+@app.get("/drops", response_model=DropsResponse)
+async def drops(
+    request: Request,
+    namespace: str | None = None,
+    limit: int = FastAPIQuery(default=7, ge=1, le=100),
+) -> DropsResponse:
+    """Recent catalog runs discovered from the `catalog_run_id` vector field."""
+    settings = request.app.state.settings
+    layer: AsyncHevlayer = request.app.state.layer
+    resolved_namespace = namespace or settings.namespace
+    try:
+        metadata_response, run_snapshot = await asyncio.gather(
+            layer.get_namespace_metadata(resolved_namespace, with_perf=True),
+            get_field_snapshot(
+                layer,
+                resolved_namespace,
+                "catalog_run_id",
+                timeout=settings.http_timeout_seconds,
+            ),
+        )
+    except Exception as exc:
+        logger.exception("drops read failed: namespace=%s", resolved_namespace)
+        raise HTTPException(status_code=502, detail="drops upstream failed") from exc
+
+    metadata = metadata_response.data
+    layer_block = (metadata.model_extra or {}).get("layer") or {}
+    stable_as_of = _int_value(layer_block.get("stable_as_of"), default=0) or None
+    snapshot_watermark = int(run_snapshot.watermark_ms or 0) or stable_as_of
+    run_values = [
+        value
+        for field in run_snapshot.fields
+        if field.name == "catalog_run_id"
+        for value in field.values
+        if value.v
+    ]
+    entries = [
+        DropInfo(
+            run_id=value.v,
+            product_count=int(value.n),
+            stable_as_of=snapshot_watermark,
+        )
+        for value in sorted(run_values, key=lambda item: item.v, reverse=True)
+    ][:limit]
+    return DropsResponse(
+        namespace=resolved_namespace,
+        drops=entries,
+        stable_as_of=snapshot_watermark,
+        layer_perf=LayerPerf(
+            latency_ms=int(metadata_response.perf.latency_ms),
+            cache_status=metadata_response.perf.cache_status,
+        ),
+    )
