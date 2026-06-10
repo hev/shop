@@ -308,38 +308,59 @@ export async function backendDrops(): Promise<DropsResult> {
   return { drops, layer_perf: parsePerf(json.layer_perf) };
 }
 
-export type RecentSearchesResult = {
-  queries: string[]; // newest first, deduped server-side
+export type TrendingMode = "frequency" | "quality";
+
+export type TrendingEntry = {
+  query: string;
+  count: number;
+  score: number;
+  ndcg: number;
+  sample_top_ids?: string[];
+};
+
+export type TrendingResult = {
+  entries: TrendingEntry[]; // ranked, highest score first
+  // "frequency" (Phase 1, volume) | "quality" (Phase 2, volume × NDCG). Drives
+  // the explainer's live stat so the UI never overclaims the ranking signal.
+  mode: TrendingMode;
+  stable_as_of: number | null;
   layer_perf: LayerPerf | null;
 };
 
-// GET /search/recent — recent distinct queries from Layer search-history
-// (raw_query via x-hevlayer-search-query; see docs/FRONTEND_0.1_DESIGN.md,
-// endpoint lands with launch-plan WS5).
-export async function backendRecentSearches(
-  limit = 8,
-): Promise<RecentSearchesResult> {
+// GET /search/trending — aggregate trending queries materialized by the Layer
+// reduce UDF into <ns>-trending (RFC 0040; see docs/TRENDING_DESIGN.md).
+export async function backendTrending(limit = 12): Promise<TrendingResult> {
   if (!API_BASE) throw new Error("HEV_SHOP_API_BASE not set");
-  const url = new URL(`${API_BASE}/search/recent`);
+  const url = new URL(`${API_BASE}/search/trending`);
   url.searchParams.set("limit", String(limit));
-  const res = await fetchWithTimeout(
-    url,
-    { cache: "no-store" },
-    META_TIMEOUT_MS,
-  );
+  const res = await fetchWithTimeout(url, { cache: "no-store" }, META_TIMEOUT_MS);
   if (!res.ok) {
-    await logUpstreamFailure("recent searches", res);
-    throw new Error(`recent searches upstream ${res.status}`);
+    await logUpstreamFailure("trending", res);
+    throw new Error(`trending upstream ${res.status}`);
   }
   const json = (await res.json()) as {
-    queries?: unknown[];
+    mode?: string;
+    entries?: Array<Record<string, unknown>>;
+    stable_as_of?: number | null;
     layer_perf?: unknown;
   };
-  const queries = (json.queries ?? []).filter(
-    (value): value is string =>
-      typeof value === "string" && value.trim().length > 0,
-  );
-  return { queries, layer_perf: parsePerf(json.layer_perf) };
+  const entries: TrendingEntry[] = (json.entries ?? [])
+    .filter((e) => typeof e.query === "string")
+    .map((e) => ({
+      query: e.query as string,
+      count: parseNum(e.count),
+      score: parseNum(e.score),
+      ndcg: parseNum(e.ndcg),
+      sample_top_ids: Array.isArray(e.sample_top_ids)
+        ? (e.sample_top_ids.filter((v) => typeof v === "string") as string[])
+        : undefined,
+    }));
+  return {
+    entries,
+    mode: json.mode === "quality" ? "quality" : "frequency",
+    stable_as_of: json.stable_as_of ?? null,
+    layer_perf: parsePerf(json.layer_perf),
+  };
 }
 
 export type CategoryBucket = {

@@ -3,7 +3,7 @@ import { ProductGrid } from "@/components/ProductGrid";
 import { ProductImage } from "@/components/ProductImage";
 import { LayerPerfBadge } from "@/components/LayerPerfBadge";
 import { DropBand } from "@/components/DropBand";
-import { RecentSearches } from "@/components/RecentSearches";
+import { Trending } from "@/components/Trending";
 import { FeatureExplainer } from "@/components/FeatureExplainer";
 import { PRODUCTS } from "@/lib/mock-data";
 import {
@@ -118,7 +118,7 @@ export default async function HomePage() {
                 Try "brass and warm"
               </Link>
             </div>
-            <RecentSearches />
+            <Trending />
             <p className="mt-6 text-xs text-ink-500">
               Built on{" "}
               <a
