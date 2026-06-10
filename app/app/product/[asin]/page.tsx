@@ -11,6 +11,7 @@ import {
 import { ProductGrid } from "@/components/ProductGrid";
 import { ProductImage } from "@/components/ProductImage";
 import { LayerPerfBadge } from "@/components/LayerPerfBadge";
+import { RecordView } from "@/components/RecordView";
 import { FeatureExplainer } from "@/components/FeatureExplainer";
 import type { Product } from "@/lib/types";
 
@@ -76,6 +77,9 @@ export default async function ProductPage({
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
+      {/* Record this view into the localStorage browsing history that seeds
+          the homepage "Similar to your browsing" rail. */}
+      <RecordView product={product} />
       <nav className="mb-6 text-xs text-ink-500">
         <Link href="/" className="hover:text-ink-900">
           hev·shop

@@ -3,6 +3,7 @@ import { ProductGrid } from "@/components/ProductGrid";
 import { ProductImage } from "@/components/ProductImage";
 import { LayerPerfBadge } from "@/components/LayerPerfBadge";
 import { DropBand } from "@/components/DropBand";
+import { BrowsingRail } from "@/components/BrowsingRail";
 import { Trending } from "@/components/Trending";
 import { FeatureExplainer } from "@/components/FeatureExplainer";
 import { PRODUCTS } from "@/lib/mock-data";
@@ -162,6 +163,10 @@ export default async function HomePage() {
 
       {/* Daily drop */}
       <DropBand />
+
+      {/* Similar to your browsing — hidden until you've viewed a couple of
+          products this session (localStorage history → TS client searchById). */}
+      <BrowsingRail />
 
       {/* Categories */}
       <section className="mx-auto max-w-7xl px-4 py-12">
