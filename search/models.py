@@ -185,3 +185,30 @@ class DropsResponse(BaseModel):
     stable_as_of: int | None = None
     layer_perf: LayerPerf | None = None
 
+
+class TrendingEntry(BaseModel):
+    """One materialized trending row, read back from `<ns>-trending` (RFC 0040).
+
+    Populated by the indexer reduce (`indexer/trending.py`); this service only
+    reads it. `ndcg` is 0 in frequency mode (Phase 1)."""
+
+    query: str
+    count: int
+    score: float
+    ndcg: float = 0.0
+    sample_top_ids: list[str] = Field(default_factory=list)
+
+
+class TrendingResponse(BaseModel):
+    namespace: str
+    mode: str = Field(
+        default="frequency",
+        description=(
+            "'frequency' (Phase 1, volume only) or 'quality' (Phase 2, volume × "
+            "NDCG). The storefront explainer reads this so it never claims a "
+            "quality signal that isn't being computed."
+        ),
+    )
+    entries: list[TrendingEntry]
+    stable_as_of: int | None = None
+    layer_perf: LayerPerf | None = None

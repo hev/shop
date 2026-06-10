@@ -438,6 +438,78 @@
         "title": "SearchResponse",
         "type": "object"
       },
+      "TrendingEntry": {
+        "description": "One materialized trending row, read back from `<ns>-trending` (RFC 0040).\n\nPopulated by the indexer reduce (`indexer/trending.py`); this service only\nreads it. `ndcg` is 0 in frequency mode (Phase 1).",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "ndcg": {
+            "default": 0.0,
+            "title": "Ndcg",
+            "type": "number"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "sample_top_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sample Top Ids",
+            "type": "array"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "query",
+          "count",
+          "score"
+        ],
+        "title": "TrendingEntry",
+        "type": "object"
+      },
+      "TrendingResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/TrendingEntry"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "layer_perf": {
+            "$ref": "#/components/schemas/LayerPerf",
+            "nullable": true
+          },
+          "mode": {
+            "default": "frequency",
+            "description": "'frequency' (Phase 1, volume only) or 'quality' (Phase 2, volume \u00d7 NDCG). The storefront explainer reads this so it never claims a quality signal that isn't being computed.",
+            "title": "Mode",
+            "type": "string"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "stable_as_of": {
+            "nullable": true,
+            "title": "Stable As Of",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "namespace",
+          "entries"
+        ],
+        "title": "TrendingResponse",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -716,6 +788,48 @@
           }
         },
         "summary": "Search"
+      }
+    },
+    "/search/trending": {
+      "get": {
+        "operationId": "trending_search_trending_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 12,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrendingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trending"
       }
     }
   }

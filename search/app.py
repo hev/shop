@@ -43,6 +43,8 @@ from models import (
     SearchHit,
     SearchRequest,
     SearchResponse,
+    TrendingEntry,
+    TrendingResponse,
 )
 
 logger = logging.getLogger("hev_shop.search")
@@ -224,6 +226,30 @@ def _int_value(value: Any, default: int = 0) -> int:
     return default
 
 
+def _float_value(value: Any, default: float = 0.0) -> float:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return default
+    return default
+
+
+def _query_rows(payload: Any) -> list[dict[str, Any]]:
+    rows = getattr(payload, "rows", None)
+    if isinstance(rows, list):
+        return [row for row in rows if isinstance(row, dict)]
+    if isinstance(payload, dict):
+        rows = payload.get("rows")
+        if isinstance(rows, list):
+            return [row for row in rows if isinstance(row, dict)]
+    return []
+
+
 def _stable_as_of(payload: Any) -> int | None:
     value = getattr(payload, "stable_as_of", None)
     if isinstance(value, int):
@@ -231,6 +257,12 @@ def _stable_as_of(payload: Any) -> int | None:
     extra = getattr(payload, "model_extra", None) or {}
     value = extra.get("stable_as_of")
     return value if isinstance(value, int) else None
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
 
 
 async def _vector_count(
@@ -614,5 +646,60 @@ async def drops(
         layer_perf=LayerPerf(
             latency_ms=int(metadata_response.perf.latency_ms),
             cache_status=metadata_response.perf.cache_status,
+        ),
+    )
+
+
+@app.get("/search/trending", response_model=TrendingResponse)
+async def trending(
+    request: Request,
+    limit: int = FastAPIQuery(default=12, ge=1, le=50),
+) -> TrendingResponse:
+    settings = request.app.state.settings
+    layer: AsyncHevlayer = request.app.state.layer
+    namespace = settings.resolved_trending_namespace
+    try:
+        response = await layer.query_turbopuffer_namespace(
+            namespace,
+            {
+                "rank_by": ["score", "desc"],
+                "top_k": limit,
+                "include_attributes": [
+                    "query",
+                    "count",
+                    "score",
+                    "ndcg",
+                    "sample_top_ids",
+                    "as_of",
+                ],
+            },
+            with_perf=True,
+        )
+    except Exception as exc:
+        logger.exception("trending read failed: namespace=%s", namespace)
+        raise HTTPException(
+            status_code=502, detail="trending upstream failed"
+        ) from exc
+
+    entries = [
+        TrendingEntry(
+            query=str(row["query"]),
+            count=_int_value(row.get("count")),
+            score=_float_value(row.get("score")),
+            ndcg=_float_value(row.get("ndcg")),
+            sample_top_ids=_string_list(row.get("sample_top_ids")),
+        )
+        for row in _query_rows(response.data)
+        if isinstance(row.get("query"), str)
+    ]
+    entries.sort(key=lambda entry: (-entry.score, entry.query))
+    return TrendingResponse(
+        namespace=namespace,
+        mode="quality" if settings.trending_quality_weight > 0 else "frequency",
+        entries=entries[:limit],
+        stable_as_of=_stable_as_of(response.data),
+        layer_perf=LayerPerf(
+            latency_ms=int(response.perf.latency_ms),
+            cache_status=response.perf.cache_status,
         ),
     )

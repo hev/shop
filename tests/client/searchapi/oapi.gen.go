@@ -196,6 +196,36 @@ type SearchResponse struct {
 	StableAsOf *int `json:"stable_as_of,omitempty"`
 }
 
+// TrendingEntry One materialized trending row, read back from `<ns>-trending` (RFC 0040).
+//
+// Populated by the indexer reduce (`indexer/trending.py`); this service only
+// reads it. `ndcg` is 0 in frequency mode (Phase 1).
+type TrendingEntry struct {
+	Count        int       `json:"count"`
+	Ndcg         *float32  `json:"ndcg,omitempty"`
+	Query        string    `json:"query"`
+	SampleTopIds *[]string `json:"sample_top_ids,omitempty"`
+	Score        float32   `json:"score"`
+}
+
+// TrendingResponse defines model for TrendingResponse.
+type TrendingResponse struct {
+	Entries []TrendingEntry `json:"entries"`
+
+	// LayerPerf One Layer gateway round-trip's timing + cache disposition,
+	// surfaced to the UI so the showcase can render `42ms · cache hit`
+	// inline. `cache_status` is the gateway's `x-layer-cache` header
+	// (`"hit"`, `"miss"`, or `"miss-on-error"`); `None` when the gateway
+	// didn't attach the header — the `query` endpoint doesn't go through
+	// the document cache, so query perfs always have `cache_status=None`.
+	LayerPerf *LayerPerf `json:"layer_perf,omitempty"`
+
+	// Mode 'frequency' (Phase 1, volume only) or 'quality' (Phase 2, volume × NDCG). The storefront explainer reads this so it never claims a quality signal that isn't being computed.
+	Mode       *string `json:"mode,omitempty"`
+	Namespace  string  `json:"namespace"`
+	StableAsOf *int    `json:"stable_as_of,omitempty"`
+}
+
 // ValidationError defines model for ValidationError.
 type ValidationError struct {
 	Ctx   *map[string]interface{}    `json:"ctx,omitempty"`
@@ -225,6 +255,11 @@ type DropsDropsGetParams struct {
 // MetaMetaGetParams defines parameters for MetaMetaGet.
 type MetaMetaGetParams struct {
 	Namespace *string `form:"namespace,omitempty" json:"namespace,omitempty"`
+}
+
+// TrendingSearchTrendingGetParams defines parameters for TrendingSearchTrendingGet.
+type TrendingSearchTrendingGetParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // RecommendRecommendPostJSONRequestBody defines body for RecommendRecommendPost for application/json ContentType.
@@ -389,6 +424,9 @@ type ClientInterface interface {
 	SearchSearchPostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	SearchSearchPost(ctx context.Context, body SearchSearchPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// TrendingSearchTrendingGet request
+	TrendingSearchTrendingGet(ctx context.Context, params *TrendingSearchTrendingGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 func (c *Client) DropsDropsGet(ctx context.Context, params *DropsDropsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -477,6 +515,18 @@ func (c *Client) SearchSearchPostWithBody(ctx context.Context, contentType strin
 
 func (c *Client) SearchSearchPost(ctx context.Context, body SearchSearchPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSearchSearchPostRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) TrendingSearchTrendingGet(ctx context.Context, params *TrendingSearchTrendingGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewTrendingSearchTrendingGetRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -748,6 +798,60 @@ func NewSearchSearchPostRequestWithBody(server string, contentType string, body 
 	return req, nil
 }
 
+// NewTrendingSearchTrendingGetRequest generates requests for TrendingSearchTrendingGet
+func NewTrendingSearchTrendingGetRequest(server string, params *TrendingSearchTrendingGetParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/search/trending")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -812,6 +916,9 @@ type ClientWithResponsesInterface interface {
 	SearchSearchPostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SearchSearchPostResponse, error)
 
 	SearchSearchPostWithResponse(ctx context.Context, body SearchSearchPostJSONRequestBody, reqEditors ...RequestEditorFn) (*SearchSearchPostResponse, error)
+
+	// TrendingSearchTrendingGetWithResponse request
+	TrendingSearchTrendingGetWithResponse(ctx context.Context, params *TrendingSearchTrendingGetParams, reqEditors ...RequestEditorFn) (*TrendingSearchTrendingGetResponse, error)
 }
 
 type DropsDropsGetResponse struct {
@@ -999,6 +1106,37 @@ func (r SearchSearchPostResponse) ContentType() string {
 	return ""
 }
 
+type TrendingSearchTrendingGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *TrendingResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r TrendingSearchTrendingGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r TrendingSearchTrendingGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r TrendingSearchTrendingGetResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // DropsDropsGetWithResponse request returning *DropsDropsGetResponse
 func (c *ClientWithResponses) DropsDropsGetWithResponse(ctx context.Context, params *DropsDropsGetParams, reqEditors ...RequestEditorFn) (*DropsDropsGetResponse, error) {
 	rsp, err := c.DropsDropsGet(ctx, params, reqEditors...)
@@ -1067,6 +1205,15 @@ func (c *ClientWithResponses) SearchSearchPostWithResponse(ctx context.Context, 
 		return nil, err
 	}
 	return ParseSearchSearchPostResponse(rsp)
+}
+
+// TrendingSearchTrendingGetWithResponse request returning *TrendingSearchTrendingGetResponse
+func (c *ClientWithResponses) TrendingSearchTrendingGetWithResponse(ctx context.Context, params *TrendingSearchTrendingGetParams, reqEditors ...RequestEditorFn) (*TrendingSearchTrendingGetResponse, error) {
+	rsp, err := c.TrendingSearchTrendingGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseTrendingSearchTrendingGetResponse(rsp)
 }
 
 // ParseDropsDropsGetResponse parses an HTTP response from a DropsDropsGetWithResponse call
@@ -1243,6 +1390,39 @@ func ParseSearchSearchPostResponse(rsp *http.Response) (*SearchSearchPostRespons
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest SearchResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseTrendingSearchTrendingGetResponse parses an HTTP response from a TrendingSearchTrendingGetWithResponse call
+func ParseTrendingSearchTrendingGetResponse(rsp *http.Response) (*TrendingSearchTrendingGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &TrendingSearchTrendingGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest TrendingResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
