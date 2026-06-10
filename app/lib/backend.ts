@@ -27,6 +27,10 @@ export type LayerPerf = {
 type BackendCountInfo = {
   count: number;
   bounded: boolean;
+  // True on every radius (ann) count: ANN recall makes the distance-ball
+  // membership itself fuzzy, independent of shard saturation (`bounded`).
+  // Sent by the gateway's /scans surface (RFC 0030); absent on older builds.
+  approximate?: boolean;
   timed_out?: boolean;
   shards_saturated?: number;
   shards_total?: number;
@@ -56,6 +60,9 @@ type BackendRecommendResponse = {
 export type CountInfo = {
   count: number;
   bounded: boolean;
+  // Radius (ann) count estimate flag — see BackendCountInfo. Independent of
+  // `bounded`: a count can be `bounded: false` yet still `approximate: true`.
+  approximate: boolean;
   max_distance: number;
   layer_perf: LayerPerf | null;
 };
@@ -98,6 +105,7 @@ function parseCount(c: unknown): CountInfo | null {
   return {
     count: obj.count,
     bounded: Boolean(obj.bounded),
+    approximate: Boolean(obj.approximate),
     max_distance: typeof obj.max_distance === "number" ? obj.max_distance : 0,
     layer_perf: parsePerf(obj.layer_perf),
   };

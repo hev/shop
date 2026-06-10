@@ -66,7 +66,7 @@ func init() {
 	searchCmd.Flags().IntVar(&searchTopK, "top-k", 10, "max results")
 	searchCmd.Flags().StringVar(&searchCategory, "category", "", "filter by product category")
 	searchCmd.Flags().StringVar(&searchCursor, "cursor", "", "opaque cursor from a prior /search response's next_cursor")
-	searchCmd.Flags().BoolVar(&searchWithCount, "with-count", false, "fan out an extra /result-count call to estimate matches within --max-distance")
+	searchCmd.Flags().BoolVar(&searchWithCount, "with-count", false, "fan out an extra /scans radius count to estimate matches within --max-distance")
 	searchCmd.Flags().Float32Var(&searchMaxDistance, "max-distance", 0.4, "cosine-distance ceiling for --with-count")
 	searchCmd.Flags().StringVar(&searchNamespace, "namespace", "", "override the target namespace")
 	rootCmd.AddCommand(searchCmd)

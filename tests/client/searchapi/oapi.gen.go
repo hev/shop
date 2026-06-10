@@ -22,12 +22,14 @@ type CategoryBucket struct {
 	Value    string `json:"value"`
 }
 
-// CountInfo Result of a /v2/namespaces/{ns}/result-count fan-out. `bounded=True` means
-// one or more shards saturated their top_k cap on this round, so `count`
-// is a lower bound — render it as "≥N" rather than "=N".
+// CountInfo Result of a /v2/namespaces/{ns}/scans radius (`ann`) count. `bounded=True`
+// means one or more shards saturated their top_k cap on this round, so `count`
+// is a lower bound. `approximate=True` means ANN recall makes the radius
+// membership itself approximate.
 type CountInfo struct {
-	Bounded bool `json:"bounded"`
-	Count   int  `json:"count"`
+	Approximate *bool `json:"approximate,omitempty"`
+	Bounded     bool  `json:"bounded"`
+	Count       int   `json:"count"`
 
 	// LayerPerf One Layer gateway round-trip's timing + cache disposition,
 	// surfaced to the UI so the showcase can render `42ms · cache hit`
@@ -140,15 +142,16 @@ type SearchRequest struct {
 	Query string `json:"query"`
 	TopK  *int   `json:"top_k,omitempty"`
 
-	// WithCount If true, fan out an extra /v2/namespaces/{ns}/result-count call against the same query vector + filters to estimate how many docs sit within max_distance. Costs one extra round-trip.
+	// WithCount If true, fan out an extra /v2/namespaces/{ns}/scans radius (`ann`) count against the same query vector + filters to estimate how many docs sit within max_distance. Costs one extra round-trip.
 	WithCount *bool `json:"with_count,omitempty"`
 }
 
 // SearchResponse defines model for SearchResponse.
 type SearchResponse struct {
-	// Count Result of a /v2/namespaces/{ns}/result-count fan-out. `bounded=True` means
-	// one or more shards saturated their top_k cap on this round, so `count`
-	// is a lower bound — render it as "≥N" rather than "=N".
+	// Count Result of a /v2/namespaces/{ns}/scans radius (`ann`) count. `bounded=True`
+	// means one or more shards saturated their top_k cap on this round, so `count`
+	// is a lower bound. `approximate=True` means ANN recall makes the radius
+	// membership itself approximate.
 	Count *CountInfo  `json:"count,omitempty"`
 	Hits  []SearchHit `json:"hits"`
 

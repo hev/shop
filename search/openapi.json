@@ -20,8 +20,13 @@
         "type": "object"
       },
       "CountInfo": {
-        "description": "Result of a /v2/namespaces/{ns}/result-count fan-out. `bounded=True` means\none or more shards saturated their top_k cap on this round, so `count`\nis a lower bound \u2014 render it as \"\u2265N\" rather than \"=N\".",
+        "description": "Result of a /v2/namespaces/{ns}/scans radius (`ann`) count. `bounded=True`\nmeans one or more shards saturated their top_k cap on this round, so `count`\nis a lower bound. `approximate=True` means ANN recall makes the radius\nmembership itself approximate.",
         "properties": {
+          "approximate": {
+            "default": false,
+            "title": "Approximate",
+            "type": "boolean"
+          },
           "bounded": {
             "title": "Bounded",
             "type": "boolean"
@@ -315,7 +320,7 @@
           },
           "with_count": {
             "default": false,
-            "description": "If true, fan out an extra /v2/namespaces/{ns}/result-count call against the same query vector + filters to estimate how many docs sit within max_distance. Costs one extra round-trip.",
+            "description": "If true, fan out an extra /v2/namespaces/{ns}/scans radius (`ann`) count against the same query vector + filters to estimate how many docs sit within max_distance. Costs one extra round-trip.",
             "title": "With Count",
             "type": "boolean"
           }

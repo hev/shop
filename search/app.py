@@ -22,11 +22,11 @@ from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request
 from hevlayer import (
+    AnnScan,
     AsyncHevlayer,
-    ResultCountRequest,
+    CreateScanRequest,
     CreateSnapshotRequest,
     QueryRequest,
-    VectorResultCountQuery,
 )
 
 from hev_shop_common.config import get_settings
@@ -168,6 +168,45 @@ def decode_dict_attrs(attrs: dict[str, Any] | None) -> dict[str, Any]:
     return dict(attrs or {})
 
 
+def query_hits(payload: Any) -> list[SearchHit]:
+    """Normalize current upstream-shaped `rows` and older Layer `results`."""
+    rows = getattr(payload, "rows", None)
+    if isinstance(rows, list):
+        return [row_to_hit(row) for row in rows]
+
+    results = getattr(payload, "results", None)
+    if isinstance(results, list):
+        return [
+            SearchHit(
+                id=str(result.id),
+                dist=getattr(result, "dist", None),
+                attributes=decode_dict_attrs(getattr(result, "attributes", None)),
+            )
+            for result in results
+        ]
+    return []
+
+
+def row_to_hit(row: Any) -> SearchHit:
+    if not isinstance(row, dict):
+        return SearchHit(id="", attributes={})
+    doc_id = str(row.get("id") or "")
+    dist = row.get("$dist", row.get("dist"))
+    attributes = row.get("attributes")
+    if not isinstance(attributes, dict):
+        attributes = {
+            key: value
+            for key, value in row.items()
+            if key not in {"id", "$dist", "dist", "vector"}
+            and not key.startswith("$")
+        }
+    return SearchHit(
+        id=doc_id,
+        dist=dist if isinstance(dist, (int, float)) else None,
+        attributes=decode_dict_attrs(attributes),
+    )
+
+
 async def _vector_count(
     layer: AsyncHevlayer,
     namespace: str,
@@ -177,14 +216,15 @@ async def _vector_count(
     *,
     label: str,
 ) -> CountInfo | None:
-    """Best-effort fan-out to /v2/namespaces/{ns}/result-count. On failure the
+    """Best-effort fan-out to /v2/namespaces/{ns}/scans. On failure the
     handler still returns hits — count is supplementary signal, not the
     contract."""
     try:
-        response = await layer.result_count(
+        response = await layer.create_scan(
             namespace,
-            ResultCountRequest(
-                query=VectorResultCountQuery(vector=vector, max_distance=max_distance),
+            CreateScanRequest(
+                mode="count",
+                ann=AnnScan(vector=vector, radius=max_distance),
                 filters=filters,
             ),
             with_perf=True,
@@ -197,8 +237,9 @@ async def _vector_count(
         count=int(data.count),
         bounded=bool(data.bounded),
         timed_out=bool(data.timed_out),
-        shards_saturated=int(data.shards_saturated),
-        shards_total=int(data.shards_total),
+        shards_saturated=int(data.shards_saturated or 0),
+        shards_total=int(data.shards_total or 0),
+        approximate=bool(data.approximate),
         max_distance=max_distance,
         layer_perf=LayerPerf(
             latency_ms=int(response.perf.latency_ms),
@@ -292,14 +333,7 @@ async def search(request: Request, body: SearchRequest) -> SearchResponse:
         # 2026-05-19 incident where httpx echoed the gateway key).
         logger.exception("search upstream failed: namespace=%s", namespace)
         raise HTTPException(status_code=502, detail="search upstream failed") from exc
-    hits = [
-        SearchHit(
-            id=result.id,
-            dist=result.dist,
-            attributes=decode_dict_attrs(result.attributes),
-        )
-        for result in response.data.results
-    ]
+    hits = query_hits(response.data)
     return SearchResponse(
         query=body.query,
         namespace=namespace,
@@ -336,7 +370,7 @@ async def recommend(request: Request, body: RecommendRequest) -> RecommendRespon
         response = await layer.query_namespace(
             namespace,
             QueryRequest(
-                nearest_to_id=body.asin,
+                nearest_to_id=[body.asin],
                 top_k=body.top_k,
                 include_attributes=include_attributes,
                 filters=combined_filters,
@@ -353,14 +387,7 @@ async def recommend(request: Request, body: RecommendRequest) -> RecommendRespon
             status_code=502, detail="recommend upstream failed"
         ) from exc
 
-    hits = [
-        SearchHit(
-            id=result.id,
-            dist=result.dist,
-            attributes=decode_dict_attrs(result.attributes),
-        )
-        for result in response.data.results
-    ]
+    hits = query_hits(response.data)
     return RecommendResponse(
         asin=body.asin,
         namespace=namespace,

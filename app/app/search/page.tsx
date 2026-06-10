@@ -26,6 +26,14 @@ function parsePageInt(value: string | undefined): number | null {
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
 }
 
+// Radius (ann) counts are fuzzy in two independent ways: `bounded` means a
+// shard hit its top_k cap so the value is a floor (≥); `approximate` means ANN
+// recall makes the distance-ball membership itself an estimate (~). Render both
+// markers so the "Showing of" total and the count detail read consistently.
+function countPrefix(bounded: boolean, approximate: boolean): string {
+  return `${bounded ? "≥" : ""}${approximate ? "~" : ""}`;
+}
+
 export default async function SearchPage({
   searchParams,
 }: {
@@ -35,6 +43,7 @@ export default async function SearchPage({
     offset?: string;
     total?: string;
     bounded?: string;
+    approx?: string;
     drop?: string;
   }>;
 }) {
@@ -44,6 +53,7 @@ export default async function SearchPage({
     offset: offsetParam,
     total: totalParam,
     bounded: boundedParam,
+    approx: approxParam,
     drop,
   } = await searchParams;
   // Active drop filter (a catalog_run_id from /drops). Display-only until
@@ -57,6 +67,7 @@ export default async function SearchPage({
   const offset = parsePageInt(offsetParam) ?? 0;
   const carriedTotal = parsePageInt(totalParam);
   const carriedBounded = boundedParam === "1";
+  const carriedApprox = approxParam === "1";
   // Kicked off before the search so the two fetches overlap.
   const dropsPromise = getDrops();
   const t0 = performance.now();
@@ -99,6 +110,8 @@ export default async function SearchPage({
   // the value carried forward from page 1.
   const total = count?.count ?? carriedTotal;
   const totalBounded = count ? count.bounded : carriedBounded;
+  const totalApprox = count ? count.approximate : carriedApprox;
+  const totalPrefix = countPrefix(totalBounded, totalApprox);
 
   const loadMoreHref = (() => {
     if (!nextCursor) return null;
@@ -111,6 +124,7 @@ export default async function SearchPage({
     if (total !== null) {
       params.set("total", String(total));
       if (totalBounded) params.set("bounded", "1");
+      if (totalApprox) params.set("approx", "1");
     }
     return `/search?${params.toString()}`;
   })();
@@ -145,7 +159,7 @@ export default async function SearchPage({
                   {(offset + 1).toLocaleString()}–
                   {(offset + results.length).toLocaleString()}
                 </span>{" "}
-                of {totalBounded ? "≥ " : ""}
+                of {totalPrefix ? `${totalPrefix} ` : ""}
                 <span className="font-mono text-ink-900">
                   {total.toLocaleString()}
                 </span>{" "}
@@ -161,7 +175,7 @@ export default async function SearchPage({
           </div>
           {count ? (
             <div className="text-xs text-ink-500">
-              {count.bounded ? "≥" : ""}
+              {countPrefix(count.bounded, count.approximate)}
               <span className="font-mono text-ink-900">
                 {count.count.toLocaleString()}
               </span>{" "}

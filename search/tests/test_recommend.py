@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from hevlayer import QueryResponse, QueryResult
+from hevlayer import QueryResponse
 
 from app import app
 from tests._fakes import FakeClipTextEmbedder, FakeLayerClient, make_settings
@@ -40,16 +40,14 @@ def client_with_fakes():
 def test_recommend_uses_nearest_to_id_and_excludes_seed(client_with_fakes):
     client, layer = client_with_fakes
     layer.next_query_response = QueryResponse(
-        results=[
-            QueryResult(
-                id="B0002",
-                dist=0.12,
-                attributes={
-                    "asin": "B0002",
-                    "title": "Similar product",
-                },
-            ),
-            QueryResult(id="B0003", dist=0.15, attributes={"asin": "B0003"}),
+        rows=[
+            {
+                "id": "B0002",
+                "$dist": 0.12,
+                "asin": "B0002",
+                "title": "Similar product",
+            },
+            {"id": "B0003", "$dist": 0.15, "asin": "B0003"},
         ],
         stable_as_of=99,
     )
@@ -64,7 +62,7 @@ def test_recommend_uses_nearest_to_id_and_excludes_seed(client_with_fakes):
     assert body["stable_as_of"] == 99
 
     call = layer.query_calls[-1]
-    assert call["nearest_to_id"] == "B0001"
+    assert call["nearest_to_id"] == ["B0001"]
     assert call["vector"] is None
     assert call["top_k"] == 5
     # Seed-exclusion filter is the sole filter when no category is set.
@@ -73,7 +71,7 @@ def test_recommend_uses_nearest_to_id_and_excludes_seed(client_with_fakes):
 
 def test_recommend_with_category_combines_filters(client_with_fakes):
     client, layer = client_with_fakes
-    layer.next_query_response = QueryResponse(results=[], stable_as_of=None)
+    layer.next_query_response = QueryResponse(rows=[], stable_as_of=None)
 
     resp = client.post(
         "/recommend",

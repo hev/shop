@@ -1,6 +1,6 @@
 """Endpoint-level tests for /search.
 
-These exist primarily to lock down the new cursor/result-count plumbing on the
+These exist primarily to lock down the cursor/scan-count plumbing on the
 SearchRequest and SearchResponse contract. The handler is exercised through
 FastAPI's TestClient with a fake layer client + fake embedder swapped onto
 app.state, so nothing reaches a real gateway or model.
@@ -14,10 +14,9 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from hevlayer import (
-    ResultCountResponse,
     NamespaceMetadata,
     QueryResponse,
-    QueryResult,
+    ScanCountResponse,
 )
 
 from app import app
@@ -56,7 +55,7 @@ def client_with_fakes():
 
 def _query_response(ids: list[str], *, next_cursor: str | None = None) -> QueryResponse:
     payload: dict[str, Any] = {
-        "results": [QueryResult(id=i, dist=0.1, attributes={"asin": i}) for i in ids],
+        "rows": [{"id": i, "$dist": 0.1, "asin": i} for i in ids],
         "stable_as_of": 12345,
     }
     if next_cursor is not None:
@@ -129,15 +128,17 @@ class TestSearchCursor:
 
 
 class TestSearchCount:
-    def test_with_count_fans_out_to_result_count(self, client_with_fakes):
+    def test_with_count_fans_out_to_scan_count(self, client_with_fakes):
         client, layer, _ = client_with_fakes
         layer.next_query_response = _query_response(["B0001", "B0002"])
-        layer.next_count_response = ResultCountResponse(
+        layer.next_scan_response = ScanCountResponse(
             count=42,
+            served_by="origin",
             bounded=False,
             timed_out=False,
             shards_saturated=0,
             shards_total=4,
+            approximate=True,
             elapsed_ms=12,
         )
 
@@ -154,14 +155,17 @@ class TestSearchCount:
         body = resp.json()
         assert body["count"]["count"] == 42
         assert body["count"]["bounded"] is False
+        assert body["count"]["approximate"] is True
         assert body["count"]["max_distance"] == 0.35
 
         # The count call must see the same filters as the query call so the
         # number actually reflects "matches you'd page through".
-        assert len(layer.count_calls) == 1
-        count_call = layer.count_calls[0]
-        assert count_call["query"]["max_distance"] == 0.35
-        assert count_call["filters"] == ["category", "Eq", "Electronics"]
+        assert len(layer.scan_calls) == 1
+        scan_call = layer.scan_calls[0]
+        assert scan_call["mode"] == "count"
+        assert scan_call["radius"] == 0.35
+        assert scan_call["vector"] == [0.1, 0.2, 0.3]
+        assert scan_call["filters"] == ["category", "Eq", "Electronics"]
 
     def test_without_with_count_skips_count_fanout(self, client_with_fakes):
         client, layer, _ = client_with_fakes
@@ -170,12 +174,12 @@ class TestSearchCount:
         resp = client.post("/search", json={"query": "headphones"})
         assert resp.status_code == 200
         assert resp.json()["count"] is None
-        assert layer.count_calls == []
+        assert layer.scan_calls == []
 
     def test_count_failure_does_not_fail_the_search(self, client_with_fakes):
         client, layer, _ = client_with_fakes
         layer.next_query_response = _query_response(["B0001"])
-        layer.count_raises = True
+        layer.scan_raises = True
 
         resp = client.post(
             "/search", json={"query": "headphones", "with_count": True}

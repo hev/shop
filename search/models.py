@@ -42,9 +42,10 @@ class SearchRequest(BaseModel):
     with_count: bool = Field(
         default=False,
         description=(
-            "If true, fan out an extra /v2/namespaces/{ns}/result-count call against "
-            "the same query vector + filters to estimate how many docs sit "
-            "within max_distance. Costs one extra round-trip."
+            "If true, fan out an extra /v2/namespaces/{ns}/scans radius "
+            "(`ann`) count against the same query vector + filters to "
+            "estimate how many docs sit within max_distance. Costs one extra "
+            "round-trip."
         ),
     )
     max_distance: float = Field(
@@ -65,15 +66,17 @@ class SearchHit(BaseModel):
 
 
 class CountInfo(BaseModel):
-    """Result of a /v2/namespaces/{ns}/result-count fan-out. `bounded=True` means
-    one or more shards saturated their top_k cap on this round, so `count`
-    is a lower bound — render it as "≥N" rather than "=N"."""
+    """Result of a /v2/namespaces/{ns}/scans radius (`ann`) count. `bounded=True`
+    means one or more shards saturated their top_k cap on this round, so `count`
+    is a lower bound. `approximate=True` means ANN recall makes the radius
+    membership itself approximate."""
 
     count: int
     bounded: bool
     timed_out: bool = False
     shards_saturated: int = 0
     shards_total: int = 0
+    approximate: bool = False
     max_distance: float
     layer_perf: LayerPerf | None = None
 

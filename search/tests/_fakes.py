@@ -13,19 +13,18 @@ from __future__ import annotations
 from typing import Any
 
 from hevlayer import (
-    ResultCountRequest,
-    ResultCountResponse,
+    CreateScanRequest,
     CreateSnapshotRequest,
     Document,
     LayerPerf,
     LayerResponse,
     QueryRequest,
     QueryResponse,
-    QueryResult,
     SnapshotBody,
     SnapshotField,
     SnapshotJob,
     SnapshotValueCount,
+    ScanCountResponse,
 )
 
 
@@ -40,17 +39,17 @@ class FakeLayerClient:
 
     def __init__(self) -> None:
         self.query_calls: list[dict[str, Any]] = []
-        self.count_calls: list[dict[str, Any]] = []
         self.fetch_document_calls: list[dict[str, Any]] = []
         self.snapshot_calls: list[dict[str, Any]] = []
         self.namespace_metadata_calls: list[str] = []
 
         self.next_query_response: QueryResponse | None = None
-        self.next_count_response: ResultCountResponse | None = None
         self.documents_by_namespace: dict[tuple[str, str], dict[str, Any]] = {}
         self.snapshot_values_by_namespace: dict[str, dict[str, list[dict[str, Any]]]] = {}
         self.namespace_metadata_data: Any = None
-        self.count_raises: bool = False
+        self.scan_calls: list[dict[str, Any]] = []
+        self.next_scan_response: ScanCountResponse | None = None
+        self.scan_raises: bool = False
 
     async def query_namespace(
         self,
@@ -92,41 +91,47 @@ class FakeLayerClient:
             }
         self.query_calls.append(payload)
         response = self.next_query_response or QueryResponse(
-            results=[], stable_as_of=None
+            rows=[], stable_as_of=None
         )
         return _attach_perf(response, with_perf)
 
-    async def result_count(
+    async def create_scan(
         self,
         namespace: str,
-        body: ResultCountRequest | dict[str, Any],
+        body: Any,
         *,
         with_perf: bool = False,
-    ) -> ResultCountResponse | LayerResponse[ResultCountResponse]:
-        if self.count_raises:
-            raise RuntimeError("count upstream failure")
-        if isinstance(body, ResultCountRequest):
-            query = body.query.model_dump(exclude_none=True)
-            filters = body.filters
-            mode = body.mode
+    ) -> Any:
+        if self.scan_raises:
+            raise RuntimeError("scan upstream failure")
+        get = body.get if isinstance(body, dict) else (lambda k: getattr(body, k, None))
+        ann = get("ann")
+        if ann is None:
+            radius = None
+            vector = None
+        elif isinstance(ann, dict):
+            radius = ann.get("radius")
+            vector = ann.get("vector")
         else:
-            query = dict(body.get("query") or {})
-            filters = body.get("filters")
-            mode = body.get("mode")
-        self.count_calls.append(
+            radius = getattr(ann, "radius", None)
+            vector = getattr(ann, "vector", None)
+        self.scan_calls.append(
             {
                 "namespace": namespace,
-                "query": query,
-                "filters": filters,
-                "mode": mode,
+                "mode": get("mode"),
+                "radius": radius,
+                "vector": list(vector) if vector is not None else None,
+                "filters": get("filters"),
             }
         )
-        response = self.next_count_response or ResultCountResponse(
+        response = self.next_scan_response or ScanCountResponse(
             count=0,
             bounded=False,
             timed_out=False,
             shards_saturated=0,
             shards_total=1,
+            approximate=True,
+            served_by="origin",
             elapsed_ms=0,
         )
         return _attach_perf(response, with_perf)

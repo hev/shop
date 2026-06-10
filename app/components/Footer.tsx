@@ -43,7 +43,7 @@ export async function Footer() {
         </FooterCol>
         <FooterCol title="Search features">
           <FooterLink href={`${DOCS}/api/query`}>Vector query</FooterLink>
-          <FooterLink href={`${DOCS}/api/result-count`}>Result counts</FooterLink>
+          <FooterLink href={`${DOCS}/api/scans`}>Result counts</FooterLink>
           <FooterLink href={`${DOCS}/api/search-history`}>Search history</FooterLink>
           <FooterLink href={`${DOCS}/api/snapshots`}>Snapshots</FooterLink>
           <FooterLink href={`${DOCS}/api/warm-cache`}>Cache warming</FooterLink>
