@@ -67,7 +67,7 @@ def product_vector_attributes(metadata: dict[str, Any], doc_id: str) -> dict[str
     previously indexed rows that used string columns.
     """
     attrs: dict[str, Any] = {"asin": str(metadata.get("asin") or doc_id)}
-    for key in ("title", "category", "description", "image_url"):
+    for key in ("title", "category", "description", "image_url", "catalog_run_id"):
         value = metadata.get(key)
         if value is not None:
             attrs[key] = str(value)

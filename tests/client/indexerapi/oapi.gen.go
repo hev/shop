@@ -30,6 +30,9 @@ type IndexCategoryResponse struct {
 
 // IndexRequest defines model for IndexRequest.
 type IndexRequest struct {
+	// CatalogRunId Catalog drop/run identifier stamped onto every staged product vector. Defaults to catalog-YYYY-MM-DD in UTC.
+	CatalogRunId *string `json:"catalog_run_id,omitempty"`
+
 	// Categories Optional multi-category fan-out. Overrides category unless category is explicitly merged by the caller.
 	Categories *[]string `json:"categories,omitempty"`
 	Category   *string   `json:"category,omitempty"`
@@ -41,12 +44,13 @@ type IndexRequest struct {
 
 // IndexResponse defines model for IndexResponse.
 type IndexResponse struct {
-	Categories  *[]IndexCategoryResponse `json:"categories,omitempty"`
-	Category    string                   `json:"category"`
-	Count       int                      `json:"count"`
-	JobsCreated int                      `json:"jobs_created"`
-	Namespace   string                   `json:"namespace"`
-	PipelineId  string                   `json:"pipeline_id"`
+	CatalogRunId string                   `json:"catalog_run_id"`
+	Categories   *[]IndexCategoryResponse `json:"categories,omitempty"`
+	Category     string                   `json:"category"`
+	Count        int                      `json:"count"`
+	JobsCreated  int                      `json:"jobs_created"`
+	Namespace    string                   `json:"namespace"`
+	PipelineId   string                   `json:"pipeline_id"`
 }
 
 // StatusResponse defines model for StatusResponse.

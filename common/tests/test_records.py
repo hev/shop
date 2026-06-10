@@ -50,6 +50,7 @@ class ProductVectorAttributeTests(unittest.TestCase):
                 "category": "Electronics",
                 "description": "Small camera",
                 "image_url": "https://example.test/camera.jpg",
+                "catalog_run_id": "catalog-2026-06-09",
                 "avg_rating": 3.5,
                 "rating_count": 6,
             },
@@ -57,6 +58,7 @@ class ProductVectorAttributeTests(unittest.TestCase):
         )
 
         self.assertEqual(attrs["asin"], "B0123")
+        self.assertEqual(attrs["catalog_run_id"], "catalog-2026-06-09")
         self.assertEqual(attrs["avg_rating_txt"], "3.5")
         self.assertEqual(attrs["rating_cnt_txt"], "6")
         self.assertNotIn("avg_rating", attrs)
@@ -69,6 +71,7 @@ class ProductVectorAttributeTests(unittest.TestCase):
                 "category",
                 "description",
                 "image_url",
+                "catalog_run_id",
                 "avg_rating_txt",
                 "rating_cnt_txt",
             },

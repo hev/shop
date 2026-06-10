@@ -13,7 +13,8 @@ func TestIndexCmdSendsRequest(t *testing.T) {
 	resetCLIState()
 	srv, recorded := recordingServer(t, 200, map[string]any{
 		"pipeline_id": "p1", "namespace": "amazon-products",
-		"category": "Electronics", "count": 100, "jobs_created": 1,
+		"catalog_run_id": "catalog-2026-06-09",
+		"category":       "Electronics", "count": 100, "jobs_created": 1,
 	})
 	if err := runArgs(t,
 		"index",
@@ -21,6 +22,7 @@ func TestIndexCmdSendsRequest(t *testing.T) {
 		"--count", "100",
 		"--category", "Electronics",
 		"--job-size", "50",
+		"--catalog-run-id", "catalog-2026-06-09",
 	); err != nil {
 		t.Fatalf("index cmd failed: %v", err)
 	}
@@ -35,6 +37,9 @@ func TestIndexCmdSendsRequest(t *testing.T) {
 	}
 	if recorded.Body["job_size"].(float64) != 50 {
 		t.Errorf("expected job_size=50, got %v", recorded.Body["job_size"])
+	}
+	if recorded.Body["catalog_run_id"] != "catalog-2026-06-09" {
+		t.Errorf("expected catalog_run_id, got %v", recorded.Body["catalog_run_id"])
 	}
 }
 

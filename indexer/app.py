@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request
@@ -55,6 +56,13 @@ class IndexRequest(BaseModel):
         ),
     )
     job_size: int | None = None
+    catalog_run_id: str | None = Field(
+        default=None,
+        description=(
+            "Catalog drop/run identifier stamped onto every staged product "
+            "vector. Defaults to catalog-YYYY-MM-DD in UTC."
+        ),
+    )
 
     def resolved_categories(self, default_category: str) -> list[str]:
         if self.categories is not None:
@@ -62,6 +70,15 @@ class IndexRequest(BaseModel):
         else:
             categories = [self.category or default_category]
         return dedupe_categories(categories)
+
+    def resolved_catalog_run_id(self) -> str:
+        value = (self.catalog_run_id or "").strip()
+        return value or default_catalog_run_id()
+
+
+def default_catalog_run_id(now: datetime | None = None) -> str:
+    at = now or datetime.now(timezone.utc)
+    return f"catalog-{at.date().isoformat()}"
 
 
 class IndexCategoryResponse(BaseModel):
@@ -73,6 +90,7 @@ class IndexCategoryResponse(BaseModel):
 class IndexResponse(BaseModel):
     pipeline_id: str
     namespace: str
+    catalog_run_id: str
     category: str
     count: int
     jobs_created: int
@@ -122,6 +140,7 @@ async def index_products(request: Request, body: IndexRequest) -> IndexResponse:
     namespace = settings.namespace
     job_size = body.job_size or settings.extraction_job_size
     categories = body.resolved_categories(settings.default_category)
+    catalog_run_id = body.resolved_catalog_run_id()
     if not categories:
         raise HTTPException(status_code=422, detail="at least one category is required")
     if body.count < -1:
@@ -151,6 +170,7 @@ async def index_products(request: Request, body: IndexRequest) -> IndexResponse:
             category=category,
             count=body.count,
             job_size=job_size,
+            catalog_run_id=catalog_run_id,
         )
         for job in jobs:
             await layer.put_pipeline_document_chunks(
@@ -177,6 +197,7 @@ async def index_products(request: Request, body: IndexRequest) -> IndexResponse:
     return IndexResponse(
         pipeline_id=pipeline_id,
         namespace=namespace,
+        catalog_run_id=catalog_run_id,
         category=category_results[0].category,
         count=body.count,
         jobs_created=sum(result.jobs_created for result in category_results),

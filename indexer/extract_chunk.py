@@ -46,6 +46,7 @@ class ExtractionJob:
     category: str
     row_offset: int
     row_limit: int
+    catalog_run_id: str | None = None
 
 
 def build_index_jobs(
@@ -55,6 +56,7 @@ def build_index_jobs(
     category: str,
     count: int,
     job_size: int,
+    catalog_run_id: str | None = None,
 ) -> list[ExtractionJob]:
     if count == 0:
         return []
@@ -72,6 +74,7 @@ def build_index_jobs(
                 category=category,
                 row_offset=0,
                 row_limit=-1,
+                catalog_run_id=catalog_run_id,
             )
         ]
 
@@ -87,6 +90,7 @@ def build_index_jobs(
                 category=category,
                 row_offset=offset,
                 row_limit=limit,
+                catalog_run_id=catalog_run_id,
             )
         )
         offset += limit
@@ -98,13 +102,16 @@ def new_extraction_job_id() -> str:
 
 
 def extraction_job_metadata(job: ExtractionJob) -> dict[str, Any]:
-    return {
+    metadata = {
         "pipeline_id": job.pipeline_id,
         "namespace": job.namespace,
         "category": job.category,
         "row_offset": job.row_offset,
         "row_limit": job.row_limit,
     }
+    if job.catalog_run_id:
+        metadata["catalog_run_id"] = job.catalog_run_id
+    return metadata
 
 
 def extraction_job_from_chunks(
@@ -120,6 +127,11 @@ def extraction_job_from_chunks(
         category=str(metadata["category"]),
         row_offset=int(metadata.get("row_offset") or 0),
         row_limit=int(metadata["row_limit"]),
+        catalog_run_id=(
+            str(metadata["catalog_run_id"])
+            if metadata.get("catalog_run_id") is not None
+            else None
+        ),
     )
 
 
@@ -127,8 +139,15 @@ def extraction_job_from_chunks(
 
 
 async def stage_product(
-    layer: AsyncHevlayer, pipeline_id: str, product: ProductRecord
+    layer: AsyncHevlayer,
+    pipeline_id: str,
+    product: ProductRecord,
+    *,
+    catalog_run_id: str | None = None,
 ) -> None:
+    metadata = product.attributes()
+    if catalog_run_id:
+        metadata["catalog_run_id"] = catalog_run_id
     await layer.put_pipeline_document_chunks(
         pipeline_id,
         product.asin,
@@ -137,7 +156,7 @@ async def stage_product(
                 Chunk(
                     id=product.asin,
                     text=product.document_text(),
-                    metadata=product.attributes(),
+                    metadata=metadata,
                 )
             ]
         ),
@@ -289,7 +308,12 @@ class ExtractionWorker:
                 except asyncio.QueueEmpty:
                     break
                 try:
-                    await stage_product(self.layer, job.pipeline_id, product)
+                    await stage_product(
+                        self.layer,
+                        job.pipeline_id,
+                        product,
+                        catalog_run_id=job.catalog_run_id,
+                    )
                     processed += 1
                 except Exception:
                     logger.exception(

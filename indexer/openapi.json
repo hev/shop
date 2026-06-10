@@ -39,6 +39,12 @@
       },
       "IndexRequest": {
         "properties": {
+          "catalog_run_id": {
+            "description": "Catalog drop/run identifier stamped onto every staged product vector. Defaults to catalog-YYYY-MM-DD in UTC.",
+            "nullable": true,
+            "title": "Catalog Run Id",
+            "type": "string"
+          },
           "categories": {
             "description": "Optional multi-category fan-out. Overrides category unless category is explicitly merged by the caller.",
             "items": {
@@ -70,6 +76,10 @@
       },
       "IndexResponse": {
         "properties": {
+          "catalog_run_id": {
+            "title": "Catalog Run Id",
+            "type": "string"
+          },
           "categories": {
             "items": {
               "$ref": "#/components/schemas/IndexCategoryResponse"
@@ -101,6 +111,7 @@
         "required": [
           "pipeline_id",
           "namespace",
+          "catalog_run_id",
           "category",
           "count",
           "jobs_created"

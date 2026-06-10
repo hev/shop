@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from hevlayer import HevlayerError, PipelineStatus
 
 from app import app
-from tests._fakes import make_settings
+from tests._fakes import FakeLayerClient, make_settings
 
 
 class FakeStatusLayer:
@@ -75,3 +75,38 @@ def test_status_returns_empty_layer_state_when_product_pipeline_is_missing(
         "rate_window_seconds": 0,
     }
     assert body["jobs"] == {"pending": 3, "embedding": 2}
+
+
+def test_index_stamps_catalog_run_id_on_extraction_jobs() -> None:
+    prev = {
+        "settings": app.state.__dict__.get("settings"),
+        "layer": app.state.__dict__.get("layer"),
+    }
+    layer = FakeLayerClient()
+    app.state.settings = make_settings(extraction_job_size=2)
+    app.state.layer = layer
+
+    client = TestClient(app)
+    try:
+        response = client.post(
+            "/index",
+            json={
+                "category": "Electronics",
+                "count": 3,
+                "job_size": 2,
+                "catalog_run_id": "catalog-2026-06-09",
+            },
+        )
+    finally:
+        for key, value in prev.items():
+            setattr(app.state, key, value)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["catalog_run_id"] == "catalog-2026-06-09"
+    assert body["jobs_created"] == 2
+    assert len(layer.stage_document_calls) == 2
+    assert {
+        call["chunks"][0]["metadata"]["catalog_run_id"]
+        for call in layer.stage_document_calls
+    } == {"catalog-2026-06-09"}

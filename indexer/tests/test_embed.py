@@ -70,6 +70,7 @@ class EmbedProductsPipelineTests(unittest.IsolatedAsyncioTestCase):
                         "asin": "A1",
                         "title": "Camera",
                         "category": "Electronics",
+                        "catalog_run_id": "catalog-2026-06-09",
                         "image_url": "https://example.test/a.jpg",
                     },
                 }
@@ -88,6 +89,10 @@ class EmbedProductsPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call["document_id"], "A1")
         self.assertEqual(call["vectors"][0]["id"], "A1")
         self.assertEqual(call["vectors"][0]["attributes"]["asin"], "A1")
+        self.assertEqual(
+            call["vectors"][0]["attributes"]["catalog_run_id"],
+            "catalog-2026-06-09",
+        )
         self.assertEqual(call["vectors"][0]["attributes"]["image_url"], "https://example.test/a.jpg")
         self.assertEqual(layer.complete_calls, [])
         self.assertEqual(layer.release_calls, [])

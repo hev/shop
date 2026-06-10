@@ -13,6 +13,7 @@ var (
 	indexCategory   string
 	indexCategories []string
 	indexJobSize    int
+	indexCatalogRun string
 )
 
 var indexCmd = &cobra.Command{
@@ -34,6 +35,9 @@ var indexCmd = &cobra.Command{
 		body.Count = &count
 		jobSize := indexJobSize
 		body.JobSize = &jobSize
+		if indexCatalogRun != "" {
+			body.CatalogRunId = &indexCatalogRun
+		}
 
 		c, err := newIndexerClient()
 		if err != nil {
@@ -60,5 +64,6 @@ func init() {
 		"Amazon Reviews 2023 metadata categories (comma-separated or repeatable)",
 	)
 	indexCmd.Flags().IntVar(&indexJobSize, "job-size", 10000, "products per extraction job")
+	indexCmd.Flags().StringVar(&indexCatalogRun, "catalog-run-id", "", "override the catalog_run_id stamped onto queued products")
 	rootCmd.AddCommand(indexCmd)
 }
