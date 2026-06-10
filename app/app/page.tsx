@@ -4,6 +4,7 @@ import { ProductImage } from "@/components/ProductImage";
 import { LayerPerfBadge } from "@/components/LayerPerfBadge";
 import { DropBand } from "@/components/DropBand";
 import { RecentSearches } from "@/components/RecentSearches";
+import { FeatureExplainer } from "@/components/FeatureExplainer";
 import { PRODUCTS } from "@/lib/mock-data";
 import {
   backendEnabled,
@@ -165,9 +166,10 @@ export default async function HomePage() {
       {/* Categories */}
       <section className="mx-auto max-w-7xl px-4 py-12">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="mr-3 text-xs font-semibold uppercase tracking-widest text-ink-500">
+          <span className="text-xs font-semibold uppercase tracking-widest text-ink-500">
             filter
           </span>
+          <FeatureExplainer id="categories" align="left" className="mr-3" />
           {categories.map((c) => (
             <Link
               key={c.value}

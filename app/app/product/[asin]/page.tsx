@@ -11,6 +11,7 @@ import {
 import { ProductGrid } from "@/components/ProductGrid";
 import { ProductImage } from "@/components/ProductImage";
 import { LayerPerfBadge } from "@/components/LayerPerfBadge";
+import { FeatureExplainer } from "@/components/FeatureExplainer";
 import type { Product } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -182,6 +183,7 @@ export default async function ProductPage({
               <span className="font-mono text-xs text-ink-400">
                 GET /v2/namespaces/amazon-products/documents/{product.asin}
               </span>
+              <FeatureExplainer id="product-fetch" />
             </dd>
             <dt className="text-ink-500">Similar query</dt>
             <dd className="flex flex-wrap items-center gap-1.5">
@@ -218,9 +220,7 @@ export default async function ProductPage({
                 You might also like
               </h2>
             </div>
-            <span className="hidden text-xs text-ink-500 sm:inline">
-              via CLIP image embeddings
-            </span>
+            <FeatureExplainer id="visually-similar" />
           </div>
           <ProductGrid products={similar} />
         </section>

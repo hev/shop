@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { LayerPerfBadge } from "@/components/LayerPerfBadge";
 import { DropCountdown } from "@/components/DropCountdown";
+import { FeatureExplainer } from "@/components/FeatureExplainer";
 import { dropDate, getDrops, DROP_HOUR_UTC, DROP_SIZE } from "@/lib/drops";
 import type { DropInfo } from "@/lib/drops";
 
@@ -109,6 +110,7 @@ export default async function DropsPage() {
               Drops
             </span>
             <LayerPerfBadge perf={result?.layer_perf ?? null} label="/drops" />
+            <FeatureExplainer id="drops" align="left" />
           </div>
           <h1 className="mt-2 font-display text-5xl leading-[1.05] tracking-tight text-ink-900">
             Fresh vectors, nightly.
