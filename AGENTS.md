@@ -18,7 +18,7 @@ hev-shop/
     Dockerfile, requirements.txt, openapi.json
   indexer/                # control plane + pipeline worker scripts
     pipelines/            # Layer Pipeline resources (extract-chunk, embed)
-    udfs/                 # Layer Function/UDF resources (empty placeholder)
+    udfs/                 # Layer Function/UDF resources (trending reduce + README)
     app.py                # /index, /status; creates the Layer queues
     extract_chunk.py      # CPU stage: claim job, read source, stage chunks
     embed.py              # GPU stage: claim pending docs, write CLIP vectors
@@ -181,7 +181,7 @@ The search pod loads `CLIPTextEmbedder` to embed query strings.
 | `embed.py` | GPU stage script: claims pending product docs, writes vectors with `put_pipeline_document_vectors` |
 | `dataset.py` | HuggingFace `McAuley-Lab/Amazon-Reviews-2023` product metadata reader |
 | `pipelines/` | Layer `Pipeline` resources declaring the two worker stages (image, pool, scaling). `kubectl apply -f indexer/pipelines/` |
-| `udfs/` | Layer `Function`/UDF resources — empty placeholder; sibling of `pipelines/` for derived/enrichment work over indexed namespaces |
+| `udfs/` | Layer `Function`/UDF resources for derived/enrichment work over indexed namespaces. Holds `trending.yaml` (the RFC 0040 trending reduce, blocked on `trigger: schedule`) + a `README.md` sketch; sibling of `pipelines/`. `kubectl apply -f indexer/udfs/` |
 
 Worker pods are owned by the Layer operator, which injects
 `HEVLAYER_PIPELINE_ID`, `HEVLAYER_BASE_URL`, and `LAYER_GATEWAY_API_KEY`;
