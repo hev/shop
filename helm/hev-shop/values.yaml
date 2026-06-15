@@ -5,18 +5,18 @@ indexerImage:
   # Indexer control plane image — `api` target of indexer/Dockerfile.
   # Worker images (extract-chunk/embed targets) are deployed by the Layer
   # operator via the Pipeline resources in indexer/pipelines/.
-  repository: ghcr.io/hev/hev-shop-indexer
+  repository: 186219257916.dkr.ecr.us-east-1.amazonaws.com/hev-shop-indexer
   tag: latest
   pullPolicy: Always
 
 searchImage:
   # Search read-API image. CLIP-text only. Built from search/Dockerfile.
-  repository: ghcr.io/hev/hev-shop-search
+  repository: 186219257916.dkr.ecr.us-east-1.amazonaws.com/hev-shop-search
   tag: latest
   pullPolicy: Always
 
 webImage:
-  repository: ghcr.io/hev/hev-shop-web
+  repository: 186219257916.dkr.ecr.us-east-1.amazonaws.com/hev-shop-web
   tag: latest
   pullPolicy: Always
 

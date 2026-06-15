@@ -12,7 +12,7 @@ spec:
   target:
     namespace: amazon-products
   worker:
-    image: ghcr.io/hev/hev-shop-indexer:latest-embed
+    image: 186219257916.dkr.ecr.us-east-1.amazonaws.com/hev-shop-indexer:latest-embed
     # The gpu pool carries the worker-gpu selector, the node-role and nvidia
     # tolerations, and GPU resources; this podSpec only adds the
     # spot/instance preference.

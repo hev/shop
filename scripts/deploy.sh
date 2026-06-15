@@ -196,12 +196,12 @@ log "Deploying ${RELEASE} with Helm..."
 helm "${helm_args[@]}"
 
 # Worker Deployments + scaling are owned by the Layer operator. The committed
-# manifests pin ghcr.io/hev/hev-shop-indexer:latest*; swap in the image we
-# just pushed (`:latest-extract` -> `:${IMAGE_TAG}-extract`, same for embed).
+# manifests pin the ECR indexer image at :latest*; swap in the repo/tag we just
+# pushed (`:latest-extract` -> `:${IMAGE_TAG}-extract`, same for embed).
 log "Applying Layer Pipeline resources from indexer/pipelines/..."
 for manifest in indexer/pipelines/*.yaml; do
   if [[ -n "$INDEXER_IMAGE_REPOSITORY" ]]; then
-    sed "s|ghcr.io/hev/hev-shop-indexer:latest|${INDEXER_IMAGE_REPOSITORY}:${IMAGE_TAG}|" "$manifest" \
+    sed "s|186219257916.dkr.ecr.us-east-1.amazonaws.com/hev-shop-indexer:latest|${INDEXER_IMAGE_REPOSITORY}:${IMAGE_TAG}|" "$manifest" \
       | kubectl apply -n "$NAMESPACE" -f -
   else
     kubectl apply -n "$NAMESPACE" -f "$manifest"

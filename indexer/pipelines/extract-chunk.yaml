@@ -20,7 +20,7 @@ spec:
   worker:
     # The cpu-large pool (layer chart) carries the worker-cpu selector and
     # toleration, so no podSpec placement override is needed.
-    image: ghcr.io/hev/hev-shop-indexer:latest-extract
+    image: 186219257916.dkr.ecr.us-east-1.amazonaws.com/hev-shop-indexer:latest-extract
   scaling:
     # cpu-large reserves ephemeral-storage for the per-pod dataset cache.
     pool: cpu-large

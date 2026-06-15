@@ -179,9 +179,9 @@ Install:
 helm upgrade --install hev-shop ./helm/hev-shop \
   --namespace hev-shop \
   --create-namespace \
-  --set indexerImage.repository=ghcr.io/hev/hev-shop-indexer \
-  --set searchImage.repository=ghcr.io/hev/hev-shop-search \
-  --set webImage.repository=ghcr.io/hev/hev-shop-web
+  --set indexerImage.repository=186219257916.dkr.ecr.us-east-1.amazonaws.com/hev-shop-indexer \
+  --set searchImage.repository=186219257916.dkr.ecr.us-east-1.amazonaws.com/hev-shop-search \
+  --set webImage.repository=186219257916.dkr.ecr.us-east-1.amazonaws.com/hev-shop-web
 kubectl apply -f indexer/pipelines/
 ```
 

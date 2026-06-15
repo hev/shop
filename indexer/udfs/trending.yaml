@@ -26,7 +26,7 @@ spec:
   schedule:
     cron: "0 * * * *"             # hourly; field name provisional (see header)
   worker:
-    image: ghcr.io/hev/hev-shop-indexer:latest-trending
+    image: 186219257916.dkr.ecr.us-east-1.amazonaws.com/hev-shop-indexer:latest-trending
   scaling:
     pool: cpu-large               # reduce is CPU-only; must name a pool in InfraRules/default
     mode: autoscale

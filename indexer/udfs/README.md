@@ -36,7 +36,7 @@ spec:
   targetNamespaces: [amazon-products]
   triggers: [discovery]          # discovery | write
   worker:
-    image: ghcr.io/hev/hev-shop-indexer:latest-<name>
+    image: 186219257916.dkr.ecr.us-east-1.amazonaws.com/hev-shop-indexer:latest-<name>
   scaling:
     pool: cpu                     # must name a pool in InfraRules/default
     replicas:
