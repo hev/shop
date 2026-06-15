@@ -139,6 +139,8 @@ fi
 
 if [[ "$BUILD_WEB" == "1" ]]; then
   docker_login "$WEB_IMAGE_REPOSITORY"
+  # The web image bundles the hev layer TypeScript client, vendored in-tree at
+  # app/vendor/hevlayer (see app/Dockerfile; refresh with sync-ts-client.sh).
   build_image app/Dockerfile app "${WEB_IMAGE_REPOSITORY}:${IMAGE_TAG}"
 fi
 

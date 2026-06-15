@@ -1,41 +1,54 @@
-import { findByAsin } from "./mock-data";
-import { similarProducts } from "./search";
+import { Hevlayer } from "hevlayer";
 import type { Product } from "./types";
 
-// Stand-in for the hev layer TypeScript client. The real client now exists in
-// the layer repo (clients/typescript, exported as the `hevlayer` package; older
-// drafts assumed a scoped package name) but is not published to npm, so this
-// mock still backs the rail for 0.1. It mirrors the method surface so the
-// storefront adopts the real client as a near-drop-in once it publishes — same
-// `searchById` shape; only the body swaps to gateway calls.
+// "Similar to your browsing" runs on the real hev layer TypeScript client
+// (`hevlayer`, vendored in-tree at app/vendor/hevlayer until it publishes to
+// npm; refresh with scripts/sync-ts-client.sh). `searchById` is the array
+// expansion of the single-seed `/recommend` path: hand the client the products
+// you've viewed and get one merged "more like these" rail.
 //
-// Gateway-later swap (see docs/BROWSING_RAIL_DESIGN.md → "Gateway-later path"):
-//   1. add `hevlayer` to package.json (file: path dep until npm publish);
-//   2. construct `new Hevlayer({ baseURL, apiKey })` from LAYER_GATEWAY_URL /
-//      LAYER_GATEWAY_API_KEY (the web pod already holds these);
-//   3. implement searchById as: fetchDocument(seed) per seed to resolve its
-//      vector, one multiQueryTurbopufferNamespace round trip with a
-//      ["vector","ANN",vec] leg per seed, then the SAME RRF fusion below.
-//   The signature does not change; fusion stays client-side (the point of
-//   choosing multi-query over centroid).
-//
-// `searchById` powers "Similar to your browsing": given the array of products
-// you've viewed, it returns one merged "more like these" rail. It models the
-// gateway's **multi-query** overload (docs/api/query#multi-query): one
-// nearest-neighbor query per seed, batched into a single round trip, then
-// fused with reciprocal rank fusion (RRF).
+// It models the gateway's **multi-query** overload (docs/api/query#multi-query):
+// one nearest-neighbor query per viewed product, batched into a single round
+// trip, then fused client-side with reciprocal rank fusion (RRF). Each leg uses
+// the Layer `nearest_to_id` single-query shape — the gateway resolves each
+// seed's stored vector per leg before it goes upstream (docs/api/query, "A leg
+// may use … the Layer vector / nearest_to_id single-query shape; nearest_to_id
+// is resolved before the leg is sent upstream"), so the web pod never has to
+// fetch and ship 768-d vectors itself.
 //
 // Why multi-query and not array `nearest_to_id` (centroid)? Centroid averages
 // the seed vectors into one query and loses each seed's identity; multi-query
 // keeps N independent rankings ("because you viewed X" *and* "because you
-// viewed Y") and fuses them. Note the gateway caveat: multi-query does not
-// resolve `nearest_to_id` per leg — each leg needs an explicit
-// `["vector","ANN", <vec>]`, so the gateway build first resolves every seed's
-// vector via fetch (NVMe cache), then issues the batch.
+// viewed Y") and fuses them. RRF is why fusion stays client-side — it's the
+// point of choosing multi-query over centroid.
 //
-// This 0.1 build is mock-only: it fuses per-seed neighbor lists from the local
-// catalog instead of touching the gateway. The header above is the contained
-// swap path once the TypeScript client is available to the storefront build.
+// Strategic constraint ([[project-strategic-goals]]): the storefront talks to
+// Layer only, never a direct turbopuffer client — the gateway adds the doc
+// cache and the `_upserted_at` freshness watermark this app depends on. So the
+// client is built with `fallbackToTurbopuffer: false`: a gateway outage fails
+// the rail (which degrades to invisible) rather than silently bypassing Layer.
+
+const GATEWAY_URL = process.env.LAYER_GATEWAY_URL ?? "";
+const GATEWAY_API_KEY = (process.env.LAYER_GATEWAY_API_KEY ?? "").trim();
+const PRODUCT_NAMESPACE =
+  process.env.LAYER_PRODUCT_NAMESPACE ?? "amazon-products";
+
+// Attributes we map into a Product card — mirrors the search service's
+// hitToProduct contract (search/ returns avg_rating_txt / rating_cnt_txt and
+// no price). Requesting an explicit list keeps the multi-query payload tight.
+const PRODUCT_ATTRIBUTES = [
+  "asin",
+  "title",
+  "description",
+  "category",
+  "image_url",
+  "avg_rating_txt",
+  "rating_cnt_txt",
+];
+
+// The gateway accepts 2..16 legs per multi-query batch. The rail caps seeds at
+// 6 upstream; clamp here too so a longer history can't 422 the batch.
+const MAX_LEGS = 16;
 
 export type SearchByIdOptions = {
   // How many fused results to return.
@@ -48,7 +61,7 @@ export type SearchByIdOptions = {
 export type ExpansionSummary = {
   strategy: "multi-query";
   fusion: "rrf";
-  // The seed IDs actually queried (deduped, unknown ASINs dropped).
+  // The seed IDs actually queried (deduped).
   seeds: string[];
   // One ANN query leg per seed, batched into a single multi-query round trip.
   legs: number;
@@ -57,9 +70,17 @@ export type ExpansionSummary = {
   fused: number;
 };
 
+// Gateway round-trip signal for the multi-query batch, shaped like the rest of
+// the app's perf badges (see lib/backend.ts).
+export type LayerPerf = {
+  latency_ms: number;
+  cache_status: string | null;
+};
+
 export type SearchByIdResult = {
   products: Product[];
   expansion: ExpansionSummary;
+  layer_perf: LayerPerf | null;
 };
 
 // Reciprocal rank fusion constant. 60 is the value from the original RRF paper
@@ -67,40 +88,100 @@ export type SearchByIdResult = {
 // small enough that the top of each leg dominates.
 const RRF_K = 60;
 
+// Whether the gateway-direct path is configured. Locally this needs both
+// LAYER_GATEWAY_URL and LAYER_GATEWAY_API_KEY in .env.local; the prod web pod
+// holds both already. When false the rail degrades to invisible.
+export function browsingClientEnabled(): boolean {
+  return GATEWAY_URL.length > 0 && GATEWAY_API_KEY.length > 0;
+}
+
+let singleton: Hevlayer | null = null;
+
+function gateway(): Hevlayer {
+  if (!singleton) {
+    singleton = new Hevlayer({
+      baseUrl: GATEWAY_URL,
+      apiKey: GATEWAY_API_KEY,
+      // Layer-only: never fall through to a direct turbopuffer client.
+      fallbackToTurbopuffer: false,
+    });
+  }
+  return singleton;
+}
+
 export class HevlayerClient {
-  constructor(private readonly namespace = "amazon-products") {}
+  constructor(private readonly namespace = PRODUCT_NAMESPACE) {}
 
   async searchById(
     ids: string[],
     options: SearchByIdOptions = {},
   ): Promise<SearchByIdResult> {
     const { topK = 8, perSeedTopK = 8 } = options;
-    const seeds = dedupe(ids).filter((id) => findByAsin(id));
-    const seedSet = new Set(seeds);
+    const namespace = options.namespace ?? this.namespace;
+    const seeds = dedupe(ids).slice(0, MAX_LEGS);
 
-    // One ranking per seed. In the gateway build these are the legs of a single
-    //   POST /v2/namespaces/{this.namespace}/query?stainless_overload=multiQuery
-    //   { "queries": [ { "rank_by": ["vector","ANN", <seed vec>], "top_k": … }, … ] }
-    // call — after resolving each seed's vector via fetch, since multi-query
-    // does not expand `nearest_to_id` per leg. The gateway returns a parallel
-    // `results` array (one ranking per leg) that we fuse below.
-    // Gateway build: replace this with fetchDocument(seed) per seed + one
-    // multiQueryTurbopufferNamespace round trip (see header "Gateway-later swap").
-    const legs = seeds.map((seed) => similarProducts(seed, perSeedTopK));
+    // A union needs at least two seeds; below that there is nothing to fuse.
+    // (The product page's single-seed "Visually similar" rail covers one seed.)
+    if (seeds.length < 2 || !browsingClientEnabled()) {
+      return emptyResult(seeds, perSeedTopK);
+    }
 
-    const products = fuseRRF(legs, seedSet, topK);
+    // One leg per seed, batched into a single multi-query round trip:
+    //   POST /v2/namespaces/{ns}/query?stainless_overload=multiQuery
+    //   { "queries": [ { "nearest_to_id": ["<seed>"], "top_k": … }, … ] }
+    // The gateway resolves each seed's stored vector per leg and returns a
+    // parallel `results` array (one ranking per leg) that we fuse below. Each
+    // leg filters out its own seed so a product never recommends itself.
+    const body: Record<string, unknown> = {
+      queries: seeds.map((seed) => ({
+        nearest_to_id: [seed],
+        top_k: perSeedTopK,
+        include_attributes: PRODUCT_ATTRIBUTES,
+        filters: ["id", "NotEq", seed],
+      })),
+    };
+
+    const batch = await gateway().multiQueryTurbopufferNamespace(
+      namespace,
+      body,
+      { withPerf: true },
+    );
+
+    const results = Array.isArray(batch.data.results) ? batch.data.results : [];
+    const legs = results.map((leg) => rowsToProducts(leg.rows ?? []));
+    const products = fuseRRF(legs, new Set(seeds), topK);
+
     return {
       products,
       expansion: {
         strategy: "multi-query",
         fusion: "rrf",
         seeds,
-        legs: seeds.length,
+        legs: legs.length,
         perSeedTopK,
         fused: products.length,
       },
+      layer_perf: {
+        latency_ms: Math.round(batch.perf.latencyMs),
+        cache_status: batch.perf.cacheStatus,
+      },
     };
   }
+}
+
+function emptyResult(seeds: string[], perSeedTopK: number): SearchByIdResult {
+  return {
+    products: [],
+    expansion: {
+      strategy: "multi-query",
+      fusion: "rrf",
+      seeds,
+      legs: 0,
+      perSeedTopK,
+      fused: 0,
+    },
+    layer_perf: null,
+  };
 }
 
 function dedupe(ids: string[]): string[] {
@@ -112,6 +193,38 @@ function dedupe(ids: string[]): string[] {
     out.push(id);
   }
   return out;
+}
+
+function asStr(v: unknown): string {
+  return typeof v === "string" ? v : "";
+}
+
+function asNum(v: unknown): number {
+  if (typeof v === "number") return v;
+  if (typeof v === "string") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
+
+// A multi-query row is turbopuffer-shaped: top-level `id`, `$dist`, and the
+// requested attributes flattened alongside them. Mirrors the search service's
+// hitToProduct so cards render identically to /search and /recommend results.
+function rowsToProducts(rows: Record<string, unknown>[]): Product[] {
+  return rows.map((row) => {
+    const asin = asStr(row.asin) || asStr(row.id);
+    return {
+      asin,
+      title: asStr(row.title),
+      description: asStr(row.description),
+      category: asStr(row.category),
+      image_url: asStr(row.image_url),
+      price: null,
+      rating: asNum(row.avg_rating_txt),
+      rating_count: asNum(row.rating_cnt_txt),
+    };
+  });
 }
 
 // Reciprocal rank fusion: a document's score is the sum, over every leg it
@@ -128,7 +241,7 @@ function fuseRRF(
   const byId = new Map<string, Product>();
   for (const leg of legs) {
     leg.forEach((p, rank) => {
-      if (exclude.has(p.asin)) return;
+      if (!p.asin || exclude.has(p.asin)) return;
       byId.set(p.asin, p);
       score.set(p.asin, (score.get(p.asin) ?? 0) + 1 / (RRF_K + rank + 1));
     });

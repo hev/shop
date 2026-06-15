@@ -10,7 +10,7 @@ import {
   type ViewedProduct,
 } from "@/lib/recently-viewed";
 import type { Product } from "@/lib/types";
-import type { ExpansionSummary } from "@/lib/hevlayer-client";
+import type { ExpansionSummary, LayerPerf } from "@/lib/hevlayer-client";
 
 // Need at least two viewed products for a *union* to mean anything — a single
 // seed is just the product page's "Visually similar" rail. Cap the seeds we
@@ -27,6 +27,7 @@ export function BrowsingRail() {
   const [viewed, setViewed] = useState<ViewedProduct[]>([]);
   const [results, setResults] = useState<Product[]>([]);
   const [expansion, setExpansion] = useState<ExpansionSummary | null>(null);
+  const [perf, setPerf] = useState<LayerPerf | null>(null);
 
   const refresh = useCallback(async () => {
     const recent = getRecentlyViewed();
@@ -35,15 +36,18 @@ export function BrowsingRail() {
     if (ids.length < MIN_SEEDS) {
       setResults([]);
       setExpansion(null);
+      setPerf(null);
       return;
     }
     try {
       const res = await fetchBrowsingSimilar(ids, 8);
       setResults(res.results);
       setExpansion(res.expansion);
+      setPerf(res.layer_perf);
     } catch {
       setResults([]);
       setExpansion(null);
+      setPerf(null);
     }
   }, []);
 
@@ -75,7 +79,8 @@ export function BrowsingRail() {
           id="browsing-rail"
           stat={
             expansion
-              ? `${expansion.legs} queries → RRF → ${expansion.fused} results · TS client (mock)`
+              ? `${expansion.legs} queries → RRF → ${expansion.fused} results` +
+                (perf ? ` · ${perf.latency_ms}ms` : "")
               : undefined
           }
         />

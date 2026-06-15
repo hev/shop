@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "hevlayer": "file:vendor/hevlayer",
     "next": "^15.1.6",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

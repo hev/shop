@@ -26,3 +26,9 @@ web/tsconfig.tsbuildinfo
 # Build output
 dist/
 build/
+
+# Exception: the vendored hev layer TypeScript client ships its build. The web
+# image bundles it at `next build` time, so its dist/ is tracked despite the
+# global dist/ ignore above. Refresh with scripts/sync-ts-client.sh.
+!app/vendor/hevlayer/dist/
+!app/vendor/hevlayer/dist/**

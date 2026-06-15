@@ -1,15 +1,16 @@
 import type { Product } from "./types";
-import type { ExpansionSummary } from "./hevlayer-client";
+import type { ExpansionSummary, LayerPerf } from "./hevlayer-client";
 
 // Client-side adapter for the "Similar to your browsing" rail. Posts the
 // browsing-history ids to /api/browsing, which drives the hev layer TS client
-// stand-in server-side. Type-only imports keep the mock catalog out of the
+// server-side. Type-only imports keep the server-only client out of the
 // browser bundle.
 
 export type BrowsingResult = {
   seeds: string[];
   results: Product[];
   expansion: ExpansionSummary | null;
+  layer_perf: LayerPerf | null;
   source: string;
 };
 
@@ -31,6 +32,7 @@ export async function fetchBrowsingSimilar(
     seeds: Array.isArray(obj.seeds) ? (obj.seeds as string[]) : [],
     results: Array.isArray(obj.results) ? (obj.results as Product[]) : [],
     expansion: (obj.expansion as ExpansionSummary | null) ?? null,
-    source: typeof obj.source === "string" ? obj.source : "mock",
+    layer_perf: (obj.layer_perf as LayerPerf | null) ?? null,
+    source: typeof obj.source === "string" ? obj.source : "gateway",
   };
 }
