@@ -178,15 +178,14 @@ search:
     rollingUpdate:
       maxSurge: 1
       maxUnavailable: 1
-  # Search carries the baked CLIP image, so keep it on the elastic worker-cpu
-  # pool with larger root volumes instead of the small shared system node.
+  # Search is part of the baseline serving path. Keep it on the always-on
+  # system/cache node; extraction and embedding workers own elastic capacity.
   nodeSelector:
-    layer.hev.dev/node-role: worker-cpu
-    layer.hev.dev/compute: cpu
+    layer.hev.dev/node-role: system
   tolerations:
     - key: layer.hev.dev/node-role
       operator: Equal
-      value: worker-cpu
+      value: system
       effect: NoSchedule
   # Request the full expected CLIP working set so Karpenter provisions a node
   # large enough for CLIP startup and reserves image-disk headroom.
