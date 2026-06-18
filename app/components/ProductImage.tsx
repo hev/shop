@@ -22,11 +22,12 @@ export function ProductImage({
   width,
   height,
 }: Props) {
-  if (!product.image_url) return null;
+  const src = imageSrc(product);
+  if (!src) return null;
 
   return (
     <Image
-      src={product.image_url}
+      src={src}
       alt={alt ?? product.title}
       fill={fill}
       width={fill ? undefined : width}
@@ -36,4 +37,15 @@ export function ProductImage({
       className={className}
     />
   );
+}
+
+function imageSrc(product: Product): string {
+  const blob = product.image_blob?.trim();
+  if (blob?.startsWith("blob://")) {
+    const parsed = blob.slice("blob://".length).split("/");
+    if (parsed.length === 2 && parsed[0] && parsed[1]) {
+      return `/api/blobs/${encodeURIComponent(parsed[0])}/${encodeURIComponent(parsed[1])}`;
+    }
+  }
+  return product.image_url;
 }

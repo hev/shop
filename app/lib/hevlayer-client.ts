@@ -42,6 +42,7 @@ const PRODUCT_ATTRIBUTES = [
   "description",
   "category",
   "image_url",
+  "image_blob",
   "avg_rating_txt",
   "rating_cnt_txt",
 ];
@@ -220,6 +221,7 @@ function rowsToProducts(rows: Record<string, unknown>[]): Product[] {
       description: asStr(row.description),
       category: asStr(row.category),
       image_url: asStr(row.image_url),
+      image_blob: asStr(row.image_blob) || undefined,
       price: null,
       rating: asNum(row.avg_rating_txt),
       rating_count: asNum(row.rating_cnt_txt),

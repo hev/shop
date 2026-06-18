@@ -19,7 +19,7 @@ export const RECENTLY_VIEWED_EVENT = "hev-shop:recently-viewed-changed";
 // mock catalog) re-hydrates the neighbors.
 export type ViewedProduct = Pick<
   Product,
-  "asin" | "title" | "image_url" | "category"
+  "asin" | "title" | "image_url" | "image_blob" | "category"
 >;
 
 function read(): ViewedProduct[] {
@@ -56,6 +56,7 @@ export function recordView(product: ViewedProduct): void {
       asin: product.asin,
       title: product.title,
       image_url: product.image_url,
+      image_blob: product.image_blob,
       category: product.category,
     },
     ...existing,

@@ -17,6 +17,7 @@ class ProductRecordTests(unittest.TestCase):
             asin="B0123",
             category="Electronics",
             image_url="https://example.test/camera.jpg",
+            image_blob="blob://amazon-products/abc",
             title="Camera",
             description="Small camera",
             avg_rating=3.5,
@@ -27,12 +28,14 @@ class ProductRecordTests(unittest.TestCase):
 
         self.assertEqual(product.document_text(), "Camera\nSmall camera")
         self.assertEqual(attrs["image_url"], "https://example.test/camera.jpg")
+        self.assertEqual(attrs["image_blob"], "blob://amazon-products/abc")
         self.assertEqual(
             set(attrs),
             {
                 "asin",
                 "category",
                 "image_url",
+                "image_blob",
                 "title",
                 "description",
                 "avg_rating",
@@ -50,6 +53,7 @@ class ProductVectorAttributeTests(unittest.TestCase):
                 "category": "Electronics",
                 "description": "Small camera",
                 "image_url": "https://example.test/camera.jpg",
+                "image_blob": "blob://amazon-products/abc",
                 "catalog_run_id": "catalog-2026-06-09",
                 "avg_rating": 3.5,
                 "rating_count": 6,
@@ -58,7 +62,7 @@ class ProductVectorAttributeTests(unittest.TestCase):
         )
 
         self.assertEqual(attrs["asin"], "B0123")
-        self.assertEqual(attrs["catalog_run_id"], "catalog-2026-06-09")
+        self.assertNotIn("catalog_run_id", attrs)
         self.assertEqual(attrs["avg_rating_txt"], "3.5")
         self.assertEqual(attrs["rating_cnt_txt"], "6")
         self.assertNotIn("avg_rating", attrs)
@@ -71,7 +75,7 @@ class ProductVectorAttributeTests(unittest.TestCase):
                 "category",
                 "description",
                 "image_url",
-                "catalog_run_id",
+                "image_blob",
                 "avg_rating_txt",
                 "rating_cnt_txt",
             },

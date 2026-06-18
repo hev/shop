@@ -145,10 +145,16 @@ async def _embed_claimed_products(ctx: StageContext, doc_ids: list[str]) -> int:
                     release.extend(doc_id for doc_id, _image_url, _attrs in batch)
                     continue
 
-                for (doc_id, _image_url, attrs), vector in zip(
-                    batch, vectors, strict=True
+                for (doc_id, _image_url, attrs), image_bytes, vector in zip(
+                    batch, images, vectors, strict=True
                 ):
                     try:
+                        blob = await ctx.layer.put_blob(
+                            ctx.settings.namespace,
+                            image_bytes,
+                        )
+                        vector_attrs = dict(attrs)
+                        vector_attrs["image_blob"] = blob.ref
                         await ctx.layer.put_pipeline_document_vectors(
                             ctx.settings.default_pipeline_id,
                             doc_id,
@@ -157,7 +163,7 @@ async def _embed_claimed_products(ctx: StageContext, doc_ids: list[str]) -> int:
                                     VectorEntry(
                                         id=doc_id,
                                         vector=vector,
-                                        attributes=attrs,
+                                        attributes=vector_attrs,
                                     )
                                 ]
                             ),

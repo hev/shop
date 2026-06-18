@@ -172,6 +172,7 @@ export function hitToProduct(hit: BackendHit): Product {
     description: asStr(a.description),
     category: asStr(a.category),
     image_url: asStr(a.image_url),
+    image_blob: asStr(a.image_blob) || undefined,
     price: null,
     rating: parseNum(a.avg_rating_txt),
     rating_count: parseNum(a.rating_cnt_txt),
@@ -186,6 +187,7 @@ export function attributesToProduct(asin: string, a: Record<string, unknown>): P
     description: asStr(a.description),
     category: asStr(a.category),
     image_url: asStr(a.image_url),
+    image_blob: asStr(a.image_blob) || undefined,
     price: null,
     rating: parseNum(a.avg_rating_txt),
     rating_count: parseNum(a.rating_cnt_txt),
@@ -197,6 +199,8 @@ export type SearchOptions = {
   cursor?: string | null;
   withCount?: boolean;
   maxDistance?: number;
+  // Existing wire name retained for compatibility; the backend resolves this
+  // as a Layer checkpoint label and applies a temporal window.
   catalogRunId?: string | null;
 };
 

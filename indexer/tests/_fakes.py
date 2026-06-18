@@ -2,21 +2,29 @@
 
 from __future__ import annotations
 
+import hashlib
 from types import SimpleNamespace
 from typing import Any
 
 from hevlayer import (
+    BlobPutResponse,
     ClaimDocumentsRequest,
     ClaimDocumentsResponse,
+    Checkpoint,
+    CheckpointList,
     Chunk,
     CreatePipelineRequest,
+    Document,
     DocumentsStageResponse,
     HeartbeatDocumentsRequest,
+    HevlayerError,
     LayerPerf,
     LayerResponse,
     Pipeline,
+    PipelineStatus,
     PutChunksRequest,
     PutVectorsRequest,
+    SetDocumentsStageRequest,
     StageDocumentResponse,
     StatusResponse,
 )
@@ -33,6 +41,7 @@ class FakeLayerClient:
         self.next_claim: list[str] = []
         self.chunks_by_doc_id: dict[str, list[dict[str, Any]]] = {}
         self.raise_on_get_chunks = False
+        self.raise_on_put_blob = False
 
         self.create_pipeline_calls: list[tuple[str, str, str]] = []
         self.claim_calls: list[dict[str, Any]] = []
@@ -41,7 +50,15 @@ class FakeLayerClient:
         self.release_calls: list[dict[str, Any]] = []
         self.heartbeat_calls: list[dict[str, Any]] = []
         self.stage_document_calls: list[dict[str, Any]] = []
+        self.set_stage_calls: list[dict[str, Any]] = []
         self.pipeline_vector_calls: list[dict[str, Any]] = []
+        self.put_blob_calls: list[dict[str, Any]] = []
+        self.schema_calls: list[dict[str, Any]] = []
+        self.checkpoint_calls: list[dict[str, Any]] = []
+        self.checkpoints: list[Checkpoint] = []
+        self.existing_documents: set[tuple[str, str]] = set()
+        self.fetch_document_calls: list[dict[str, Any]] = []
+        self.pipeline_statuses: dict[str, PipelineStatus] = {}
 
         # RFC 0040 trending reduce test doubles (indexer/tests/test_trending.py).
         self.search_history_events: list[Any] = []
@@ -66,6 +83,86 @@ class FakeLayerClient:
             distance_metric=metric,
             created_at="2026-05-20T00:00:00Z",
         )
+
+    async def update_turbopuffer_namespace_schema(
+        self, namespace: str, body: dict[str, Any], *, with_perf: bool = False
+    ) -> dict[str, Any]:
+        self.schema_calls.append(
+            {"namespace": namespace, "body": body, "with_perf": with_perf}
+        )
+        return {"schema": body}
+
+    async def get_pipeline_status(self, pipeline_id: str) -> PipelineStatus:
+        return self.pipeline_statuses.get(
+            pipeline_id,
+            PipelineStatus(
+                pipeline_id=pipeline_id,
+                counts={},
+                pending_count=0,
+                processing_count=0,
+                failed_count=0,
+                indexed_rate_per_min=0.0,
+                rate_window_seconds=60,
+            ),
+        )
+
+    async def create_checkpoint(
+        self, namespace: str, body: dict[str, Any], *, with_perf: bool = False
+    ) -> Checkpoint | LayerResponse[Checkpoint]:
+        label = str(body["label"])
+        self.checkpoint_calls.append({"namespace": namespace, "body": dict(body)})
+        checkpoint = Checkpoint(
+            namespace=namespace,
+            label=label,
+            watermark_ms=12345,
+            sha="abc123",
+            row_count=42,
+        )
+        if not any(existing.label == label for existing in self.checkpoints):
+            self.checkpoints.insert(0, checkpoint)
+        return _attach_perf(checkpoint, with_perf)
+
+    async def get_checkpoint(
+        self, namespace: str, label: str, *, with_perf: bool = False
+    ) -> Checkpoint | LayerResponse[Checkpoint]:
+        for checkpoint in self.checkpoints:
+            if checkpoint.namespace == namespace and checkpoint.label == label:
+                return _attach_perf(checkpoint, with_perf)
+        raise HevlayerError(404, f"checkpoint {label!r} not found")
+
+    async def list_checkpoints(
+        self,
+        namespace: str,
+        *,
+        limit: int | None = None,
+        before: str | None = None,
+        with_perf: bool = False,
+    ) -> CheckpointList | LayerResponse[CheckpointList]:
+        checkpoints = [c for c in self.checkpoints if c.namespace == namespace]
+        if limit is not None:
+            checkpoints = checkpoints[:limit]
+        return _attach_perf(
+            CheckpointList(checkpoints=checkpoints, next_cursor=None), with_perf
+        )
+
+    async def fetch_document(
+        self,
+        namespace: str,
+        doc_id: str,
+        *,
+        include_attributes: list[str] | None = None,
+        with_perf: bool = False,
+    ) -> Document | LayerResponse[Document]:
+        self.fetch_document_calls.append(
+            {
+                "namespace": namespace,
+                "doc_id": doc_id,
+                "include_attributes": include_attributes,
+            }
+        )
+        if (namespace, doc_id) not in self.existing_documents:
+            raise HevlayerError(404, f"document {doc_id!r} not found")
+        return _attach_perf(Document(id=doc_id, attributes={}), with_perf)
 
     async def claim_documents(
         self,
@@ -132,6 +229,51 @@ class FakeLayerClient:
                 pipeline_id=pipeline_id,
                 stage=stage or "pending",
                 updated=len(doc_ids),
+            ),
+            with_perf,
+        )
+
+    async def set_documents_stage(
+        self,
+        pipeline_id: str,
+        body: SetDocumentsStageRequest | dict[str, Any],
+        *,
+        with_perf: bool = False,
+    ) -> DocumentsStageResponse | LayerResponse[DocumentsStageResponse]:
+        if isinstance(body, SetDocumentsStageRequest):
+            doc_ids = list(body.document_ids)
+            stage = body.stage
+            create_missing = bool(body.create_missing)
+            from_stage = body.from_stage
+            worker_id = body.worker_id
+        else:
+            doc_ids = list(body["document_ids"])
+            stage = str(body["stage"])
+            create_missing = bool(body.get("create_missing"))
+            from_stage = body.get("from_stage")
+            worker_id = body.get("worker_id")
+        self.set_stage_calls.append(
+            {
+                "pipeline_id": pipeline_id,
+                "doc_ids": doc_ids,
+                "stage": stage,
+                "create_missing": create_missing,
+                "from_stage": from_stage,
+                "worker_id": worker_id,
+            }
+        )
+        created = 0
+        if create_missing:
+            for doc_id in doc_ids:
+                if doc_id not in self.chunks_by_doc_id:
+                    self.chunks_by_doc_id[doc_id] = []
+                    created += 1
+            updated = created
+        else:
+            updated = len(doc_ids)
+        return _attach_perf(
+            DocumentsStageResponse(
+                pipeline_id=pipeline_id, stage=stage, updated=updated
             ),
             with_perf,
         )
@@ -267,6 +409,29 @@ class FakeLayerClient:
         )
         return _attach_perf(StatusResponse(status="ok"), with_perf)
 
+    async def put_blob(
+        self,
+        namespace: str,
+        body: bytes,
+        *,
+        warm: bool | None = None,
+        with_perf: bool = False,
+    ) -> BlobPutResponse | LayerResponse[BlobPutResponse]:
+        if self.raise_on_put_blob:
+            raise RuntimeError("blob write failed")
+        sha = hashlib.sha256(body).hexdigest()
+        self.put_blob_calls.append(
+            {
+                "namespace": namespace,
+                "body": body,
+                "warm": warm,
+            }
+        )
+        return _attach_perf(
+            BlobPutResponse(ref=f"blob://{namespace}/{sha}", sha256=sha, size=len(body)),
+            with_perf,
+        )
+
     async def list_search_history(
         self,
         namespace: str,
@@ -335,6 +500,10 @@ def make_settings(**overrides) -> SimpleNamespace:
         extraction_concurrency=4,
         default_category="Electronics",
         extraction_job_size=10_000,
+        scheduled_pipeline=False,
+        scheduled_refresh_count=10_000,
+        scheduled_checkpoint_wait_seconds=0.01,
+        scheduled_checkpoint_poll_seconds=0.01,
         hf_dataset="repo",
         hf_token=None,
         dataset_cache_dir=None,

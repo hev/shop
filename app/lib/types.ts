@@ -4,6 +4,7 @@ export type Product = {
   description: string;
   category: string;
   image_url: string;
+  image_blob?: string;
   price: number | null;
   rating: number;
   rating_count: number;

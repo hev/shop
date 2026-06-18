@@ -196,6 +196,18 @@ images (the indexer Dockerfile has `api`, `extract-chunk`, and `embed`
 targets), runs `helm upgrade --install`, and applies `indexer/pipelines/`
 with the pushed image tags.
 
+Backfill Layer-owned image blobs for existing rows with `indexer/blob_backfill.py`.
+The command is dry-run by default; `--apply` writes blobs and patches
+`image_blob`. Use repeated `--id` flags for targeted demo rows, or `--all` for
+a full namespace scan.
+
+```sh
+PYTHONPATH=common:../layer/clients/python/src \
+  LAYER_GATEWAY_URL=http://127.0.0.1:8080 \
+  LAYER_GATEWAY_API_KEY=... \
+  python indexer/blob_backfill.py --id B0BN13GCLC --apply
+```
+
 Enable app-owned Karpenter NodePools:
 
 ```sh

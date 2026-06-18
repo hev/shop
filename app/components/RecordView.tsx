@@ -7,9 +7,9 @@ import { recordView, type ViewedProduct } from "@/lib/recently-viewed";
 // localStorage browsing history that seeds the homepage "Similar to your
 // browsing" rail. Renders nothing.
 export function RecordView({ product }: { product: ViewedProduct }) {
-  const { asin, title, image_url, category } = product;
+  const { asin, title, image_url, image_blob, category } = product;
   useEffect(() => {
-    recordView({ asin, title, image_url, category });
-  }, [asin, title, image_url, category]);
+    recordView({ asin, title, image_url, image_blob, category });
+  }, [asin, title, image_url, image_blob, category]);
   return null;
 }

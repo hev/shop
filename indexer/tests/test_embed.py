@@ -83,17 +83,25 @@ class EmbedProductsPipelineTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, 1)
         self.assertEqual(embedder.calls, [[b"image-bytes"]])
+        self.assertEqual(
+            layer.put_blob_calls,
+            [{"namespace": "amazon-products", "body": b"image-bytes", "warm": None}],
+        )
         self.assertEqual(len(layer.pipeline_vector_calls), 1)
         call = layer.pipeline_vector_calls[0]
         self.assertEqual(call["pipeline_id"], "hev-shop-product-images")
         self.assertEqual(call["document_id"], "A1")
         self.assertEqual(call["vectors"][0]["id"], "A1")
         self.assertEqual(call["vectors"][0]["attributes"]["asin"], "A1")
+        self.assertNotIn("catalog_run_id", call["vectors"][0]["attributes"])
         self.assertEqual(
-            call["vectors"][0]["attributes"]["catalog_run_id"],
-            "catalog-2026-06-09",
+            call["vectors"][0]["attributes"]["image_url"],
+            "https://example.test/a.jpg",
         )
-        self.assertEqual(call["vectors"][0]["attributes"]["image_url"], "https://example.test/a.jpg")
+        self.assertRegex(
+            call["vectors"][0]["attributes"]["image_blob"],
+            r"^blob://amazon-products/[0-9a-f]{64}$",
+        )
         self.assertEqual(layer.complete_calls, [])
         self.assertEqual(layer.release_calls, [])
 
@@ -175,6 +183,29 @@ class EmbedProductsPipelineTests(unittest.IsolatedAsyncioTestCase):
         embedder = FakeClipImageEmbedder()
         embedder.raise_on_call = True
         self.ctx = make_ctx(layer=layer, embedder=embedder)
+
+        result = await _run_embed_products_once(self.ctx)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(layer.release_calls[0]["doc_ids"], ["A1"])
+        self.assertEqual(layer.pipeline_vector_calls, [])
+
+    async def test_blob_write_failure_releases_document(self) -> None:
+        layer = FakeLayerClient()
+        layer.next_claim = ["A1"]
+        layer.raise_on_put_blob = True
+        layer.chunks_by_doc_id = {
+            "A1": [
+                {
+                    "id": "A1",
+                    "metadata": {
+                        "asin": "A1",
+                        "image_url": "https://example.test/a.jpg",
+                    },
+                }
+            ],
+        }
+        self.ctx = make_ctx(layer=layer, embedder=FakeClipImageEmbedder())
 
         result = await _run_embed_products_once(self.ctx)
 

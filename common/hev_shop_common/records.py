@@ -31,6 +31,7 @@ class ProductRecord:
     asin: str
     category: str
     image_url: str
+    image_blob: str | None = None
     title: str | None = None
     description: str | None = None
     price: float | None = None
@@ -47,6 +48,8 @@ class ProductRecord:
             "category": self.category,
             "image_url": self.image_url,
         }
+        if self.image_blob:
+            attrs["image_blob"] = self.image_blob
         if self.title:
             attrs["title"] = self.title
         if self.description:
@@ -67,7 +70,7 @@ def product_vector_attributes(metadata: dict[str, Any], doc_id: str) -> dict[str
     previously indexed rows that used string columns.
     """
     attrs: dict[str, Any] = {"asin": str(metadata.get("asin") or doc_id)}
-    for key in ("title", "category", "description", "image_url", "catalog_run_id"):
+    for key in ("title", "category", "description", "image_url", "image_blob"):
         value = metadata.get(key)
         if value is not None:
             attrs[key] = str(value)
