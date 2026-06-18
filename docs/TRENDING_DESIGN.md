@@ -55,21 +55,20 @@ only I/O.
   `RecordSearch.tsx`; `SearchBar` reads them. The old server-backed personal
   recent-search mock is retired.
 - **Phase 1 — frequency trending.** `W = 0`. The reduce reads `search-history`
-  only, no click attribution. Needs the layer `trigger: schedule` shape (below).
+  only, no click attribution. Runs as a Layer Function with
+  `triggers: [schedule]`.
   Files: `indexer/trending.py`, `udfs/trending.yaml`, the `/search/trending`
   read, `trending.ts` + `Trending.tsx`, the `trending` explainer entry.
 - **Phase 2 — NDCG trending.** `W > 0`. Adds the `clickstream` read + click
   attribution: thread the search `traceparent` from result link → product page →
   `/product/{asin}` fetch. The gateway side is already done (RFC 0040 §4, gap 3).
 
-## Layer dependency (the one blocker)
+## Layer dependency
 
-Phase 1+ needs **`trigger: schedule`** on the `Function` CRD/operator: a reduce
-is invoked once per tick, but `UdfTrigger` today is `discovery|write` only. This
-is the single additive operator change we flagged for the layer production cut.
-The worker logic does **not** depend on it — `run_trending_once` is a pure tick,
-and `amain` offers a dev interval loop + `TRENDING_RUN_ONCE=1` so the reduce runs
-today. Only the *scheduled invocation* waits on layer.
+Phase 1+ uses **`triggers: [schedule]`** on the `Function` CRD/operator: a
+reduce is invoked once per tick with no row-level input. The worker logic does
+not depend on the scheduler — `run_trending_once` is a pure tick, and `amain`
+offers a dev interval loop + `TRENDING_RUN_ONCE=1` for manual runs.
 
 The reads/writes do **not** need a layer change: `list_search_history` /
 `list_clickstream` already exist on `AsyncHevlayer`, and the worker upserts the
@@ -84,7 +83,7 @@ Pure core + worker (Python):
 - `common/tests/test_trending.py` — scoring unit tests
 - `indexer/trending.py` — reduce worker (reads history, upserts `<ns>-trending`)
 - `indexer/tests/test_trending.py` — worker I/O tests
-- `indexer/udfs/trending.yaml` — `Function` resource (`trigger: schedule`)
+- `indexer/udfs/trending.yaml` — `Function` resource (`triggers: [schedule]`)
 - `common/hev_shop_common/config.py` — `trending_*` settings
 - `indexer/Dockerfile` — `trending` target (CMD `python trending.py`)
 

@@ -10,11 +10,10 @@ reads in one cheap, freshness-stamped query.
 Declared as the `hev-shop-trending` `Function` in `udfs/trending.yaml`. Two
 notes on how it differs from the map workers:
 
-- **Triggering.** The operator is meant to invoke this on a schedule
-  (`trigger: schedule`, RFC 0040 §2). That trigger is NOT YET in the Function
-  CRD / operator (see `docs/TRENDING_DESIGN.md` → "Layer dependency"). The
-  worker logic does not depend on it: `run_trending_once` is a pure tick, and
-  `amain` also offers a dev interval loop so it runs today without the trigger.
+- **Triggering.** The operator can invoke this on a schedule
+  (`triggers: [schedule]`, RFC 0040 §2). The worker logic does not depend on
+  the scheduler: `run_trending_once` is a pure tick, and `amain` also offers a
+  dev interval loop for local/manual runs.
 - **Reads/writes live here, not in the CRD.** Per the CLAUDE.md authoring split
   (operator owns worker shape + triggering; the document lifecycle stays in SDK
   calls), this worker reads `search-history`/`clickstream` and upserts the
@@ -71,8 +70,7 @@ async def run_trending(ctx: TrendingContext, stop: asyncio.Event) -> None:
     """Dev fallback loop: recompute on an interval until stopped.
 
     In production the operator invokes `run_trending_once` per scheduled tick
-    (no loop). This loop exists so the reduce is runnable before the
-    `trigger: schedule` CRD shape lands — and for local iteration.
+    (no loop). This loop keeps the reduce runnable for local iteration.
     """
     while not stop.is_set():
         with suppress(Exception):
@@ -261,8 +259,8 @@ async def amain() -> None:
     stop = asyncio.Event()
     _install_signals(stop)
     try:
-        # Once-per-tick when invoked by the scheduler; the loop is the dev
-        # fallback until `trigger: schedule` lands (see module docstring).
+        # Once-per-tick when invoked by the scheduler; the loop is the local
+        # fallback for manual iteration.
         if os.environ.get("TRENDING_RUN_ONCE"):
             await run_trending_once(ctx)
         else:

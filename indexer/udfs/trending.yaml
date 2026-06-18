@@ -9,11 +9,9 @@
 # authoring split (the operator owns worker shape + triggering; the document
 # lifecycle stays in SDK calls next to the code that uses it).
 #
-# BLOCKED on layer: `trigger: schedule` is not yet in the Function CRD /
-# operator (UdfTrigger is discovery|write only — RFC 0040 §2). The `schedule`
-# field shape below is provisional and will track whatever the operator lands.
-# Until then, run the worker directly (TRENDING_RUN_ONCE=1) or on its dev
-# interval loop. See docs/TRENDING_DESIGN.md → "Layer dependency".
+# Layer supports `triggers: [schedule]` on Functions. Apply this resource
+# when the trending worker image is deployed; for local/manual runs, use
+# TRENDING_RUN_ONCE=1.
 #
 apiVersion: hevlayer.com/v1alpha1
 kind: Function
@@ -22,9 +20,9 @@ metadata:
   namespace: hev-shop
 spec:
   # A reduce has no per-row discovery, so no targetNamespaces / filter.
-  triggers: [schedule]            # PENDING layer support (RFC 0040 §2)
+  triggers: [schedule]
   schedule:
-    cron: "0 * * * *"             # hourly; field name provisional (see header)
+    cron: "0 * * * *"             # hourly
   worker:
     image: 186219257916.dkr.ecr.us-east-1.amazonaws.com/hev-shop-indexer:latest-trending
   scaling:

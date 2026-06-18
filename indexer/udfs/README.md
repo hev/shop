@@ -3,7 +3,7 @@
 Home for app-owned Layer `Function` resources, the sibling of the `Pipeline`
 resources in `../pipelines/`. The first is `trending.yaml` (RFC 0040; see
 `../../docs/TRENDING_DESIGN.md`) — a scheduled *reduce* over search-history,
-currently blocked on the `trigger: schedule` CRD shape landing in layer.
+backed by the Layer Function `schedule` trigger.
 
 A `Function` (UDF) is the declarative surface for derived/enrichment work that
 runs *over indexed namespaces* rather than a staged ingest queue: it's
@@ -34,7 +34,7 @@ metadata:
   namespace: hev-shop
 spec:
   targetNamespaces: [amazon-products]
-  triggers: [discovery]          # discovery | write
+  triggers: [discovery]          # discovery | write | schedule
   worker:
     image: 186219257916.dkr.ecr.us-east-1.amazonaws.com/hev-shop-indexer:latest-<name>
   scaling:
