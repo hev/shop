@@ -1,0 +1,10 @@
+apiVersion: hevlayer.com/v1alpha1
+kind: Warehouse
+metadata:
+  name: huggingface-hub
+  namespace: hev-shop
+spec:
+  kind: huggingface
+  huggingface:
+    endpoint: https://huggingface.co
+  verifyInterval: 1h

@@ -16,7 +16,13 @@ spec:
     namespace: amazon-products
   sourceRef:
     kind: huggingface
-    dataset: McAuley-Lab/Amazon-Reviews-2023
+    warehouseRef: huggingface-hub
+    repo: McAuley-Lab/Amazon-Reviews-2023
+    config: raw_meta_Electronics
+    split: train
+    revision: main
+    cursor:
+      field: parent_asin
   worker:
     # The cpu-large pool (layer chart) carries the worker-cpu selector and
     # toleration, so no podSpec placement override is needed.
