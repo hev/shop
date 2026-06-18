@@ -58,6 +58,16 @@ class Settings(BaseSettings):
     )
     extraction_job_size: int = Field(default=10_000, alias="EXTRACTION_JOB_SIZE")
     extraction_concurrency: int = Field(default=16, alias="EXTRACTION_CONCURRENCY")
+    scheduled_pipeline: bool = Field(default=False, alias="HEVLAYER_PIPELINE_SCHEDULE")
+    scheduled_refresh_count: int = Field(
+        default=10_000, alias="SCHEDULED_REFRESH_COUNT"
+    )
+    scheduled_checkpoint_wait_seconds: float = Field(
+        default=3300.0, alias="SCHEDULED_CHECKPOINT_WAIT_SECONDS"
+    )
+    scheduled_checkpoint_poll_seconds: float = Field(
+        default=15.0, alias="SCHEDULED_CHECKPOINT_POLL_SECONDS"
+    )
     embedding_batch_size: int = Field(default=16, alias="EMBEDDING_BATCH_SIZE")
     embedding_claim_size: int = Field(default=2_000, alias="EMBEDDING_CLAIM_SIZE")
     worker_poll_seconds: float = Field(default=5.0, alias="WORKER_POLL_SECONDS")

@@ -77,7 +77,7 @@ Doc routes verified against `../layer/site/src/content/docs`.
 | `search` | `/search` results header | ✅ | vector ANN + stable read · `api/query` |
 | `trending` | Homepage Trending chips | ✅ | search-history + reduce UDF · `api/search-history`, `kubernetes/function-crd` |
 | `product-fetch` | `/product/[asin]` doc-fetch detail | ✅ | cached fetch · `api/query#fetch`, `api/warm-cache` |
-| `drops` | `/drops` page header | ✅ | catalog_run_id snapshot + freshness · `api/snapshots`, `api/pipelines` |
+| `drops` | `/drops` page header | ✅ | checkpoint label + freshness · `api/checkpoints`, `api/pipelines` |
 | `categories` | Homepage filter row | ✅ | snapshots + metadata · `api/snapshots` |
 
 All seven surfaces are now mounted. That's the intended shape of the rollout:

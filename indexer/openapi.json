@@ -1,6 +1,56 @@
 {
   "components": {
     "schemas": {
+      "CheckpointActivationRequest": {
+        "properties": {
+          "allow_failed": {
+            "default": false,
+            "description": "If false, any failed documents block checkpoint activation.",
+            "title": "Allow Failed",
+            "type": "boolean"
+          },
+          "catalog_run_id": {
+            "description": "Catalog checkpoint label. Defaults to catalog-YYYY-MM-DD in UTC.",
+            "nullable": true,
+            "title": "Catalog Run Id",
+            "type": "string"
+          }
+        },
+        "title": "CheckpointActivationRequest",
+        "type": "object"
+      },
+      "CheckpointActivationResponse": {
+        "properties": {
+          "catalog_run_id": {
+            "title": "Catalog Run Id",
+            "type": "string"
+          },
+          "checkpoint": {
+            "additionalProperties": true,
+            "title": "Checkpoint",
+            "type": "object"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "pipelines": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PipelineStability"
+            },
+            "title": "Pipelines",
+            "type": "object"
+          }
+        },
+        "required": [
+          "namespace",
+          "catalog_run_id",
+          "checkpoint",
+          "pipelines"
+        ],
+        "title": "CheckpointActivationResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -40,7 +90,7 @@
       "IndexRequest": {
         "properties": {
           "catalog_run_id": {
-            "description": "Catalog drop/run identifier stamped onto every staged product vector. Defaults to catalog-YYYY-MM-DD in UTC.",
+            "description": "Catalog checkpoint label. Defaults to catalog-YYYY-MM-DD in UTC; activate it with POST /index/checkpoint after ingest stabilizes.",
             "nullable": true,
             "title": "Catalog Run Id",
             "type": "string"
@@ -117,6 +167,32 @@
           "jobs_created"
         ],
         "title": "IndexResponse",
+        "type": "object"
+      },
+      "PipelineStability": {
+        "properties": {
+          "failed_count": {
+            "default": 0,
+            "title": "Failed Count",
+            "type": "integer"
+          },
+          "pending_count": {
+            "default": 0,
+            "title": "Pending Count",
+            "type": "integer"
+          },
+          "processing_count": {
+            "default": 0,
+            "title": "Processing Count",
+            "type": "integer"
+          },
+          "stable": {
+            "default": false,
+            "title": "Stable",
+            "type": "boolean"
+          }
+        },
+        "title": "PipelineStability",
         "type": "object"
       },
       "StatusResponse": {
@@ -257,6 +333,44 @@
           }
         },
         "summary": "Index Products"
+      }
+    },
+    "/index/checkpoint": {
+      "post": {
+        "operationId": "activate_catalog_checkpoint_index_checkpoint_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckpointActivationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckpointActivationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Activate Catalog Checkpoint"
       }
     },
     "/status": {

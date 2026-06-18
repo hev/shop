@@ -47,8 +47,8 @@ heading):
 ```
 DROPS
 Nightly catalog refreshes
-Every night a CronJob re-embeds the launch corpus. Each drop below is one
-catalog_run_id — click through to browse only those vectors.   [/drops perf badge]
+Every night the Layer Pipeline schedule wakes the refresh. Each drop below is
+one checkpoint label — click through to browse that temporal window.   [/drops perf badge]
 
 ┌────────────────────────────────────────────────────────────────┐
 │ catalog-2026-06-07          1,204 products      stable 06-07 09:14 UTC │  → /search?drop=catalog-2026-06-07
@@ -61,8 +61,8 @@ catalog_run_id — click through to browse only those vectors.   [/drops perf ba
   (`rounded-2xl bg-white ring-1 ring-ink-200`), run ID in `font-mono`.
 - The newest row gets the accent kicker `LATEST`.
 - Empty state (endpoint up, no runs yet): reuse the dashed-border empty
-  card from search — "No drops yet. The CronJob runs nightly; check back
-  after the next refresh."
+  card from search — "No drops yet. The pipeline schedule runs nightly; check
+  back after the next refresh."
 
 ### Search integration
 
@@ -74,7 +74,8 @@ catalog_run_id — click through to browse only those vectors.   [/drops perf ba
   composes with `q` through the same URLSearchParams plumbing used by search
   pagination.
 - An empty `q` with a `drop` param is valid: `/search` uses a filtered
-  namespace query for drop-only browsing, and vector search when `q` is present.
+  Layer checkpoint window for drop-only browsing, and vector search when `q` is
+  present.
 
 ### Response contract consumed by the frontend
 

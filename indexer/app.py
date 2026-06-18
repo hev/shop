@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request
@@ -30,8 +29,10 @@ from hevlayer import (
 )
 from pydantic import BaseModel, Field
 
+from hev_shop_common.catalog import default_catalog_run_id
 from hev_shop_common.config import get_settings
 from hev_shop_common.records import dedupe_categories
+from hev_shop_common.schema import amazon_products_namespace_schema
 
 from extract_chunk import (
     EXTRACTION_JOB_CHUNK_ID,
@@ -59,8 +60,8 @@ class IndexRequest(BaseModel):
     catalog_run_id: str | None = Field(
         default=None,
         description=(
-            "Catalog drop/run identifier stamped onto every staged product "
-            "vector. Defaults to catalog-YYYY-MM-DD in UTC."
+            "Catalog checkpoint label. Defaults to catalog-YYYY-MM-DD in UTC; "
+            "activate it with POST /index/checkpoint after ingest stabilizes."
         ),
     )
 
@@ -74,11 +75,6 @@ class IndexRequest(BaseModel):
     def resolved_catalog_run_id(self) -> str:
         value = (self.catalog_run_id or "").strip()
         return value or default_catalog_run_id()
-
-
-def default_catalog_run_id(now: datetime | None = None) -> str:
-    at = now or datetime.now(timezone.utc)
-    return f"catalog-{at.date().isoformat()}"
 
 
 class IndexCategoryResponse(BaseModel):
@@ -95,6 +91,35 @@ class IndexResponse(BaseModel):
     count: int
     jobs_created: int
     categories: list[IndexCategoryResponse] = Field(default_factory=list)
+
+
+class CheckpointActivationRequest(BaseModel):
+    catalog_run_id: str | None = Field(
+        default=None,
+        description="Catalog checkpoint label. Defaults to catalog-YYYY-MM-DD in UTC.",
+    )
+    allow_failed: bool = Field(
+        default=False,
+        description="If false, any failed documents block checkpoint activation.",
+    )
+
+    def resolved_catalog_run_id(self) -> str:
+        value = (self.catalog_run_id or "").strip()
+        return value or default_catalog_run_id()
+
+
+class PipelineStability(BaseModel):
+    pending_count: int = 0
+    processing_count: int = 0
+    failed_count: int = 0
+    stable: bool = False
+
+
+class CheckpointActivationResponse(BaseModel):
+    namespace: str
+    catalog_run_id: str
+    checkpoint: dict[str, Any]
+    pipelines: dict[str, PipelineStability]
 
 
 class StatusResponse(BaseModel):
@@ -155,6 +180,10 @@ async def index_products(request: Request, body: IndexRequest) -> IndexResponse:
             distance_metric=settings.distance_metric,
         )
     )
+    await layer.update_turbopuffer_namespace_schema(
+        namespace,
+        amazon_products_namespace_schema(),
+    )
     await layer.ensure_pipeline(
         CreatePipelineRequest(
             id=settings.extraction_pipeline_id,
@@ -170,7 +199,6 @@ async def index_products(request: Request, body: IndexRequest) -> IndexResponse:
             category=category,
             count=body.count,
             job_size=job_size,
-            catalog_run_id=catalog_run_id,
         )
         for job in jobs:
             await layer.put_pipeline_document_chunks(
@@ -202,6 +230,57 @@ async def index_products(request: Request, body: IndexRequest) -> IndexResponse:
         count=body.count,
         jobs_created=sum(result.jobs_created for result in category_results),
         categories=category_results,
+    )
+
+
+@app.post("/index/checkpoint", response_model=CheckpointActivationResponse)
+async def activate_catalog_checkpoint(
+    request: Request, body: CheckpointActivationRequest
+) -> CheckpointActivationResponse:
+    settings = request.app.state.settings
+    layer: AsyncHevlayer = request.app.state.layer
+    namespace = settings.namespace
+    catalog_run_id = body.resolved_catalog_run_id()
+    pipeline_ids = [settings.extraction_pipeline_id, settings.default_pipeline_id]
+
+    stability: dict[str, PipelineStability] = {}
+    for pipeline_id in pipeline_ids:
+        status = await pipeline_status_or_conflict(layer, pipeline_id)
+        stability[pipeline_id] = pipeline_stability(
+            status, allow_failed=body.allow_failed
+        )
+
+    blockers = {
+        pipeline_id: state
+        for pipeline_id, state in stability.items()
+        if not state.stable
+    }
+    if blockers:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "cannot create catalog checkpoint until ingest pipelines are stable",
+                "pipelines": {
+                    pipeline_id: state.model_dump()
+                    for pipeline_id, state in blockers.items()
+                },
+            },
+        )
+
+    try:
+        checkpoint = await layer.create_checkpoint(namespace, {"label": catalog_run_id})
+    except HevlayerError as exc:
+        status_code = exc.status_code if exc.status_code >= 400 else 502
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+    checkpoint_body = (
+        checkpoint.model_dump() if hasattr(checkpoint, "model_dump") else dict(checkpoint)
+    )
+    return CheckpointActivationResponse(
+        namespace=namespace,
+        catalog_run_id=catalog_run_id,
+        checkpoint=checkpoint_body,
+        pipelines=stability,
     )
 
 
@@ -246,6 +325,21 @@ async def pipeline_status_or_empty(
         }
 
 
+async def pipeline_status_or_conflict(
+    layer: AsyncHevlayer, pipeline_id: str
+) -> dict[str, Any]:
+    try:
+        status = await layer.get_pipeline_status(pipeline_id)
+    except HevlayerError as exc:
+        if exc.status_code == 404:
+            raise HTTPException(
+                status_code=409,
+                detail=f"pipeline {pipeline_id!r} does not exist",
+            ) from exc
+        raise
+    return status.model_dump() if hasattr(status, "model_dump") else dict(status)
+
+
 def stage_counts_from_status(status: dict[str, Any]) -> dict[str, int]:
     for key in ("stages", "stage_counts", "counts"):
         value = status.get(key)
@@ -262,3 +356,34 @@ def stage_counts_from_status(status: dict[str, Any]) -> dict[str, int]:
                     out[str(stage)] = count
             return out
     return {str(k): int(v) for k, v in status.items() if isinstance(v, int)}
+
+
+def pipeline_stability(
+    status: dict[str, Any], *, allow_failed: bool = False
+) -> PipelineStability:
+    counts = stage_counts_from_status(status)
+    pending_count = _status_count(status, "pending_count", counts.get("pending", 0))
+    processing_count = _status_count(
+        status,
+        "processing_count",
+        sum(
+            count
+            for stage, count in counts.items()
+            if stage not in {"pending", "indexed", "completed", "complete", "failed"}
+        ),
+    )
+    failed_count = _status_count(status, "failed_count", counts.get("failed", 0))
+    stable = pending_count == 0 and processing_count == 0 and (
+        allow_failed or failed_count == 0
+    )
+    return PipelineStability(
+        pending_count=pending_count,
+        processing_count=processing_count,
+        failed_count=failed_count,
+        stable=stable,
+    )
+
+
+def _status_count(status: dict[str, Any], key: str, fallback: int) -> int:
+    value = status.get(key)
+    return int(value) if isinstance(value, int) else fallback

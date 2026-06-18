@@ -14,9 +14,12 @@ from types import SimpleNamespace
 from typing import Any
 
 from hevlayer import (
+    Checkpoint,
+    CheckpointList,
     CreateScanRequest,
     CreateSnapshotRequest,
     Document,
+    FetchDocumentsResponse,
     LayerPerf,
     LayerResponse,
     QueryRequest,
@@ -26,6 +29,8 @@ from hevlayer import (
     SnapshotJob,
     SnapshotValueCount,
     ScanCountResponse,
+    ScanIdsResponse,
+    ScanJob,
 )
 
 
@@ -41,6 +46,7 @@ class FakeLayerClient:
     def __init__(self) -> None:
         self.query_calls: list[dict[str, Any]] = []
         self.fetch_document_calls: list[dict[str, Any]] = []
+        self.fetch_documents_calls: list[dict[str, Any]] = []
         self.snapshot_calls: list[dict[str, Any]] = []
         self.namespace_metadata_calls: list[str] = []
 
@@ -48,9 +54,15 @@ class FakeLayerClient:
         self.documents_by_namespace: dict[tuple[str, str], dict[str, Any]] = {}
         self.snapshot_values_by_namespace: dict[str, dict[str, list[dict[str, Any]]]] = {}
         self.snapshot_watermarks_by_namespace: dict[str, int] = {}
+        self.checkpoints_by_namespace: dict[str, list[dict[str, Any]]] = {}
+        self.checkpoint_calls: list[dict[str, Any]] = []
         self.namespace_metadata_data: Any = None
         self.scan_calls: list[dict[str, Any]] = []
-        self.next_scan_response: ScanCountResponse | None = None
+        self.scan_result_calls: list[dict[str, Any]] = []
+        self.scan_ids_by_namespace: dict[str, list[str]] = {}
+        self.scan_jobs_by_id: dict[str, ScanJob] = {}
+        self.next_scan_response: Any = None
+        self.next_scan_results_response: ScanIdsResponse | None = None
         self.scan_raises: bool = False
         self.turbopuffer_query_calls: list[dict[str, Any]] = []
         self.next_turbopuffer_query_response: Any = None
@@ -75,6 +87,7 @@ class FakeLayerClient:
                 "nearest_to_id": body.nearest_to_id,
                 "top_k": body.top_k,
                 "filters": body.filters,
+                "between": body.between,
                 "include_attributes": body.include_attributes,
                 "cursor": cursor,
                 "raw_query": raw_query,
@@ -88,6 +101,7 @@ class FakeLayerClient:
                 "nearest_to_id": body.get("nearest_to_id"),
                 "top_k": body.get("top_k"),
                 "filters": body.get("filters"),
+                "between": body.get("between"),
                 "include_attributes": body.get("include_attributes"),
                 "cursor": body.get("cursor"),
                 "raw_query": raw_query,
@@ -123,22 +137,107 @@ class FakeLayerClient:
             {
                 "namespace": namespace,
                 "mode": get("mode"),
+                "source": get("source"),
                 "radius": radius,
                 "vector": list(vector) if vector is not None else None,
                 "filters": get("filters"),
+                "between": get("between"),
             }
         )
-        response = self.next_scan_response or ScanCountResponse(
-            count=0,
-            bounded=False,
-            timed_out=False,
-            shards_saturated=0,
-            shards_total=1,
-            approximate=True,
-            served_by="origin",
-            elapsed_ms=0,
-        )
+        if self.next_scan_response is not None:
+            response = self.next_scan_response
+        elif get("mode") == "ids":
+            scan_id = f"scan-{len(self.scan_calls)}"
+            response = ScanJob(
+                id=scan_id,
+                namespace=namespace,
+                mode="ids",
+                source="auto",
+                effective_source="origin",
+                status="completed",
+                progress=1.0,
+                documents_scanned=len(self.scan_ids_by_namespace.get(namespace, [])),
+                stable_as_of=2000,
+                created_at="2026-05-20T00:00:00Z",
+                completed_at="2026-05-20T00:00:00Z",
+                error=None,
+            )
+            self.scan_jobs_by_id[scan_id] = response
+        else:
+            response = ScanCountResponse(
+                count=0,
+                bounded=False,
+                timed_out=False,
+                shards_saturated=0,
+                shards_total=1,
+                approximate=True,
+                served_by="origin",
+                elapsed_ms=0,
+            )
         return _attach_perf(response, with_perf)
+
+    async def get_scan(
+        self,
+        namespace: str,
+        scan_id: str,
+        *,
+        with_perf: bool = False,
+    ) -> ScanJob | LayerResponse[ScanJob]:
+        job = self.scan_jobs_by_id.get(scan_id)
+        if job is None:
+            job = ScanJob(
+                id=scan_id,
+                namespace=namespace,
+                mode="ids",
+                source="auto",
+                effective_source="origin",
+                status="completed",
+                progress=1.0,
+                documents_scanned=0,
+                stable_as_of=2000,
+                created_at="2026-05-20T00:00:00Z",
+                completed_at="2026-05-20T00:00:00Z",
+                error=None,
+            )
+        return _attach_perf(job, with_perf)
+
+    async def wait_for_scan(
+        self,
+        namespace: str,
+        scan_id: str,
+        *,
+        initial_delay: float = 0.05,
+        max_delay: float = 2.0,
+        timeout: float | None = None,
+    ) -> ScanJob:
+        return self.scan_jobs_by_id[scan_id]
+
+    async def get_scan_results(
+        self,
+        namespace: str,
+        scan_id: str,
+        *,
+        limit: int | None = None,
+        offset: int | None = None,
+        with_perf: bool = False,
+    ) -> ScanIdsResponse | LayerResponse[ScanIdsResponse]:
+        self.scan_result_calls.append(
+            {
+                "namespace": namespace,
+                "scan_id": scan_id,
+                "limit": limit,
+                "offset": offset,
+            }
+        )
+        if self.next_scan_results_response is not None:
+            return _attach_perf(self.next_scan_results_response, with_perf)
+        ids = self.scan_ids_by_namespace.get(namespace, [])
+        start = offset or 0
+        end = start + limit if limit is not None else None
+        return _attach_perf(
+            ScanIdsResponse(ids=ids[start:end], total=len(ids)),
+            with_perf,
+        )
 
     async def query_turbopuffer_namespace(
         self,
@@ -176,6 +275,38 @@ class FakeLayerClient:
         document = Document(id=doc_id, attributes=record.get("attributes") or {})
         return _attach_perf(document, with_perf)
 
+    async def fetch_documents(
+        self,
+        namespace: str,
+        body: Any,
+        *,
+        with_perf: bool = False,
+    ) -> FetchDocumentsResponse | LayerResponse[FetchDocumentsResponse]:
+        ids = list(body.get("ids", []))
+        include_attributes = body.get("include_attributes")
+        self.fetch_documents_calls.append(
+            {
+                "namespace": namespace,
+                "ids": ids,
+                "include_attributes": include_attributes,
+            }
+        )
+        documents: list[Document] = []
+        missing: list[str] = []
+        for doc_id in ids:
+            key = (namespace, doc_id)
+            if key not in self.documents_by_namespace:
+                missing.append(doc_id)
+                continue
+            record = self.documents_by_namespace[key]
+            documents.append(
+                Document(id=doc_id, attributes=record.get("attributes") or {})
+            )
+        return _attach_perf(
+            FetchDocumentsResponse(documents=documents, missing=missing),
+            with_perf,
+        )
+
     async def get_namespace_metadata(
         self,
         namespace: str,
@@ -186,6 +317,40 @@ class FakeLayerClient:
         data = self.namespace_metadata_data
         if data is None:
             raise RuntimeError("no metadata scripted")
+        return _attach_perf(data, with_perf)
+
+    async def list_checkpoints(
+        self,
+        namespace: str,
+        *,
+        limit: int | None = None,
+        before: str | None = None,
+        with_perf: bool = False,
+    ) -> CheckpointList | LayerResponse[CheckpointList]:
+        self.checkpoint_calls.append(
+            {"namespace": namespace, "limit": limit, "before": before}
+        )
+        raw = list(self.checkpoints_by_namespace.get(namespace, []))
+        if before:
+            for index, checkpoint in enumerate(raw):
+                if checkpoint.get("label") == before:
+                    raw = raw[index + 1 :]
+                    break
+        if limit is not None:
+            raw = raw[:limit]
+        data = CheckpointList(
+            checkpoints=[
+                Checkpoint(
+                    namespace=namespace,
+                    label=str(row["label"]),
+                    watermark_ms=int(row["watermark_ms"]),
+                    sha=str(row.get("sha") or "sha"),
+                    row_count=int(row.get("row_count") or 0),
+                )
+                for row in raw
+            ],
+            next_cursor=None,
+        )
         return _attach_perf(data, with_perf)
 
     async def create_snapshot(

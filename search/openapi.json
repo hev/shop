@@ -327,7 +327,7 @@
       "SearchRequest": {
         "properties": {
           "catalog_run_id": {
-            "description": "Filter results to a specific catalog drop/run id.",
+            "description": "Checkpoint label for a catalog drop. The field name is retained for client compatibility; the search service resolves it through Layer checkpoints and applies a temporal window.",
             "nullable": true,
             "title": "Catalog Run Id",
             "type": "string"
@@ -338,7 +338,7 @@
             "type": "string"
           },
           "cursor": {
-            "description": "Opaque pagination cursor from a prior /search response's next_cursor. Re-send the same query/filters/top_k to keep paging consistent; the gateway re-applies the consistency watermark.",
+            "description": "Opaque pagination cursor from a prior /search response's next_cursor. Re-send the same query/filters/top_k to keep paging consistent; catalog-drop browsing uses a scan-offset cursor.",
             "nullable": true,
             "title": "Cursor",
             "type": "string"
@@ -365,7 +365,7 @@
             "type": "string"
           },
           "query": {
-            "description": "Free-text search query. May be empty only when catalog_run_id is set, which browses that catalog drop without vector ranking.",
+            "description": "Free-text search query. May be empty only when catalog_run_id is set to a checkpoint label, which browses that catalog drop without vector ranking.",
             "minLength": 0,
             "title": "Query",
             "type": "string"
@@ -414,7 +414,7 @@
             "type": "string"
           },
           "next_cursor": {
-            "description": "Opaque cursor for the next page. Present iff the gateway returned a full top_k (i.e. there may be more results). Pass it back as `cursor` on the next /search call alongside the same filters.",
+            "description": "Opaque cursor for the next page. Present iff the gateway returned a full top_k (i.e. there may be more results). Pass it back as `cursor` on the next /search call alongside the same filters; catalog-drop browsing returns a scan-offset cursor.",
             "nullable": true,
             "title": "Next Cursor",
             "type": "string"
@@ -560,7 +560,7 @@
   "paths": {
     "/drops": {
       "get": {
-        "description": "Recent catalog runs discovered from the `catalog_run_id` vector field.",
+        "description": "Recent catalog runs discovered from Layer checkpoint labels.",
         "operationId": "drops_drops_get",
         "parameters": [
           {

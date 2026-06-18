@@ -51,6 +51,19 @@ logger = logging.getLogger("hev_shop.search")
 
 SEARCH_HISTORY_BASE_TAGS = ("app:hev-shop", "surface:storefront", "route:search")
 SEARCH_HISTORY_SURFACE_HEADER = "x-hev-shop-surface"
+CHECKPOINT_LOOKUP_LIMIT = 100
+PRODUCT_INCLUDE_ATTRIBUTES = [
+    "asin",
+    "title",
+    "description",
+    "category",
+    "image_url",
+    "image_blob",
+    "avg_rating_txt",
+    "rating_cnt_txt",
+]
+DROP_SCAN_CURSOR_PREFIX = "scan:"
+DROP_BROWSE_CURSOR_PREFIX = "id:"
 
 
 @asynccontextmanager
@@ -168,6 +181,14 @@ def combine_filters(filters: list[list[object]]) -> list[object] | None:
     return ["And", filters]
 
 
+def temporal_between_filters(window: tuple[int, int]) -> list[list[object]]:
+    lo, hi = window
+    return [
+        ["_hevlayer_upserted_at", "Gt", lo],
+        ["_hevlayer_upserted_at", "Lte", hi],
+    ]
+
+
 def decode_dict_attrs(attrs: dict[str, Any] | None) -> dict[str, Any]:
     return dict(attrs or {})
 
@@ -208,6 +229,14 @@ def row_to_hit(row: Any) -> SearchHit:
         id=doc_id,
         dist=dist if isinstance(dist, (int, float)) else None,
         attributes=decode_dict_attrs(attributes),
+    )
+
+
+def document_to_hit(document: Any) -> SearchHit:
+    doc_id = str(getattr(document, "id", ""))
+    return SearchHit(
+        id=doc_id,
+        attributes=decode_dict_attrs(getattr(document, "attributes", None)),
     )
 
 
@@ -259,6 +288,19 @@ def _stable_as_of(payload: Any) -> int | None:
     return value if isinstance(value, int) else None
 
 
+def _layer_block(payload: Any) -> dict[str, Any]:
+    value = getattr(payload, "layer", None)
+    if isinstance(value, dict):
+        return value
+    if hasattr(value, "model_dump"):
+        dumped = value.model_dump(exclude_none=True)
+        if isinstance(dumped, dict):
+            return dumped
+    extra = getattr(payload, "model_extra", None) or {}
+    value = extra.get("layer")
+    return value if isinstance(value, dict) else {}
+
+
 def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -271,6 +313,7 @@ async def _vector_count(
     vector: list[float],
     max_distance: float,
     filters: list[object] | None,
+    window: tuple[int, int] | None = None,
     *,
     label: str,
 ) -> CountInfo | None:
@@ -284,6 +327,7 @@ async def _vector_count(
                 mode="count",
                 ann=AnnScan(vector=vector, radius=max_distance),
                 filters=filters,
+                between=list(window) if window else None,
             ),
             with_perf=True,
         )
@@ -330,6 +374,86 @@ def _search_history_kwargs(
     }
 
 
+def _drop_scan_cursor(cursor: str | None) -> tuple[str | None, int]:
+    if not cursor:
+        return (None, 0)
+    if cursor.startswith(DROP_SCAN_CURSOR_PREFIX):
+        parts = cursor.split(":", 2)
+        if len(parts) != 3 or not parts[1] or not parts[2]:
+            raise HTTPException(
+                status_code=422,
+                detail="catalog browse cursor must be a scan cursor",
+            )
+        _, scan_id, offset = parts
+        return (scan_id, _positive_offset(offset))
+    return (None, _positive_offset(cursor))
+
+
+def _positive_offset(value: str) -> int:
+    try:
+        offset = int(value)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="catalog browse cursor must be a non-negative offset cursor",
+        ) from exc
+    if offset < 0:
+        raise HTTPException(
+            status_code=422,
+            detail="catalog browse cursor must be a non-negative offset cursor",
+        )
+    return offset
+
+
+def _scan_next_cursor(scan_id: str, offset: int, returned: int, total: int) -> str | None:
+    next_offset = offset + returned
+    if returned <= 0 or next_offset >= total:
+        return None
+    return f"{DROP_SCAN_CURSOR_PREFIX}{scan_id}:{next_offset}"
+
+
+def _drop_browse_cursor_id(cursor: str | None) -> str | None:
+    if not cursor:
+        return None
+    if cursor.startswith(DROP_BROWSE_CURSOR_PREFIX):
+        cursor = cursor[len(DROP_BROWSE_CURSOR_PREFIX) :]
+    if not cursor:
+        raise HTTPException(status_code=422, detail="catalog browse cursor is empty")
+    return cursor
+
+
+def _drop_browse_next_cursor(rows: list[dict[str, Any]], limit: int) -> str | None:
+    if len(rows) <= limit:
+        return None
+    doc_id = str(rows[limit - 1].get("id") or "")
+    if not doc_id:
+        return None
+    return f"{DROP_BROWSE_CURSOR_PREFIX}{doc_id}"
+
+
+async def checkpoint_window(
+    layer: AsyncHevlayer,
+    namespace: str,
+    label: str,
+) -> tuple[int, int]:
+    page = await layer.list_checkpoints(namespace, limit=CHECKPOINT_LOOKUP_LIMIT)
+    checkpoints = list(getattr(page, "checkpoints", []) or [])
+    for index, checkpoint in enumerate(checkpoints):
+        if getattr(checkpoint, "label", None) != label:
+            continue
+        hi = int(getattr(checkpoint, "watermark_ms"))
+        lo = (
+            int(getattr(checkpoints[index + 1], "watermark_ms"))
+            if index + 1 < len(checkpoints)
+            else 0
+        )
+        return (lo, hi)
+    raise HTTPException(
+        status_code=422,
+        detail=f"unknown catalog checkpoint: {label}",
+    )
+
+
 app = FastAPI(title="hev-shop search", lifespan=lifespan)
 
 
@@ -348,8 +472,11 @@ async def search(request: Request, body: SearchRequest) -> SearchResponse:
     filters: list[list[object]] = []
     if body.category:
         filters.append(["category", "Eq", body.category])
-    if body.catalog_run_id:
-        filters.append(["catalog_run_id", "Eq", body.catalog_run_id])
+    drop_window = (
+        await checkpoint_window(layer, namespace, body.catalog_run_id)
+        if body.catalog_run_id
+        else None
+    )
     combined_filters = combine_filters(filters)
     if not query_text and not body.catalog_run_id:
         raise HTTPException(
@@ -359,18 +486,24 @@ async def search(request: Request, body: SearchRequest) -> SearchResponse:
 
     if not query_text:
         try:
-            raw_query: dict[str, Any] = {
-                "top_k": body.top_k,
-                "include_attributes": include_attributes,
-                "filters": combined_filters,
-            }
-            if body.cursor:
-                raw_query["cursor"] = body.cursor
+            browse_filters = [*filters, *temporal_between_filters(drop_window)]
+            cursor_id = _drop_browse_cursor_id(body.cursor)
+            if cursor_id:
+                browse_filters.append(["id", "Gt", cursor_id])
             response = await layer.query_turbopuffer_namespace(
                 namespace,
-                raw_query,
+                {
+                    "rank_by": ["id", "asc"],
+                    "top_k": body.top_k + 1,
+                    "include_attributes": body.include_attributes
+                    or PRODUCT_INCLUDE_ATTRIBUTES,
+                    "filters": combine_filters(browse_filters),
+                    "consistency": {"level": "eventual"},
+                },
                 with_perf=True,
             )
+            rows = _query_rows(response.data)
+            page_rows = rows[: body.top_k]
         except Exception as exc:
             logger.exception("drop browse failed: namespace=%s", namespace)
             raise HTTPException(
@@ -380,13 +513,13 @@ async def search(request: Request, body: SearchRequest) -> SearchResponse:
         return SearchResponse(
             query=body.query,
             namespace=namespace,
-            hits=query_hits(response.data),
-            stable_as_of=_stable_as_of(response.data),
+            hits=[row_to_hit(row) for row in page_rows],
+            stable_as_of=drop_window[1],
             layer_perf=LayerPerf(
                 latency_ms=int(response.perf.latency_ms),
                 cache_status=response.perf.cache_status,
             ),
-            next_cursor=_extract_next_cursor(response.data),
+            next_cursor=_drop_browse_next_cursor(rows, body.top_k),
             count=None,
         )
 
@@ -398,6 +531,8 @@ async def search(request: Request, body: SearchRequest) -> SearchResponse:
         "include_attributes": include_attributes,
         "filters": combined_filters,
     }
+    if drop_window:
+        query_kwargs["between"] = list(drop_window)
     if body.cursor:
         query_kwargs["cursor"] = body.cursor
     try:
@@ -420,6 +555,7 @@ async def search(request: Request, body: SearchRequest) -> SearchResponse:
                     vector,
                     body.max_distance,
                     combined_filters,
+                    drop_window,
                     label="search",
                 ),
             )
@@ -437,7 +573,7 @@ async def search(request: Request, body: SearchRequest) -> SearchResponse:
         query=body.query,
         namespace=namespace,
         hits=hits,
-        stable_as_of=response.data.stable_as_of,
+        stable_as_of=drop_window[1] if drop_window else response.data.stable_as_of,
         layer_perf=LayerPerf(
             latency_ms=int(response.perf.latency_ms),
             cache_status=response.perf.cache_status,
@@ -508,16 +644,7 @@ async def product(request: Request, asin: str) -> ProductResponse:
         response = await layer.fetch_document(
             settings.namespace,
             asin,
-            include_attributes=[
-            "asin",
-            "title",
-            "description",
-            "category",
-            "catalog_run_id",
-            "image_url",
-            "avg_rating_txt",
-            "rating_cnt_txt",
-            ],
+            include_attributes=PRODUCT_INCLUDE_ATTRIBUTES,
             with_perf=True,
         )
     except Exception as exc:
@@ -579,7 +706,7 @@ async def meta(request: Request, namespace: str | None = None) -> MetaResponse:
         ]
 
         metadata = metadata_response.data
-        layer_block = (metadata.model_extra or {}).get("layer") or {}
+        layer_block = _layer_block(metadata)
         response = MetaResponse(
             namespace=resolved_namespace,
             vectors=int(metadata.approx_row_count or 0),
@@ -602,50 +729,36 @@ async def drops(
     namespace: str | None = None,
     limit: int = FastAPIQuery(default=7, ge=1, le=100),
 ) -> DropsResponse:
-    """Recent catalog runs discovered from the `catalog_run_id` vector field."""
+    """Recent catalog runs discovered from Layer checkpoint labels."""
     settings = request.app.state.settings
     layer: AsyncHevlayer = request.app.state.layer
     resolved_namespace = namespace or settings.namespace
     try:
-        metadata_response, run_snapshot = await asyncio.gather(
-            layer.get_namespace_metadata(resolved_namespace, with_perf=True),
-            get_field_snapshot(
-                layer,
-                resolved_namespace,
-                "catalog_run_id",
-                timeout=settings.http_timeout_seconds,
-            ),
+        checkpoint_response = await layer.list_checkpoints(
+            resolved_namespace,
+            limit=limit,
+            with_perf=True,
         )
     except Exception as exc:
         logger.exception("drops read failed: namespace=%s", resolved_namespace)
         raise HTTPException(status_code=502, detail="drops upstream failed") from exc
 
-    metadata = metadata_response.data
-    layer_block = (metadata.model_extra or {}).get("layer") or {}
-    stable_as_of = _int_value(layer_block.get("stable_as_of"), default=0) or None
-    snapshot_watermark = int(run_snapshot.watermark_ms or 0) or stable_as_of
-    run_values = [
-        value
-        for field in run_snapshot.fields
-        if field.name == "catalog_run_id"
-        for value in field.values
-        if value.v
-    ]
+    checkpoints = list(getattr(checkpoint_response.data, "checkpoints", []) or [])
     entries = [
         DropInfo(
-            run_id=value.v,
-            product_count=int(value.n),
-            stable_as_of=snapshot_watermark,
+            run_id=str(checkpoint.label),
+            product_count=int(checkpoint.row_count),
+            stable_as_of=int(checkpoint.watermark_ms),
         )
-        for value in sorted(run_values, key=lambda item: item.v, reverse=True)
+        for checkpoint in checkpoints
     ][:limit]
     return DropsResponse(
         namespace=resolved_namespace,
         drops=entries,
-        stable_as_of=snapshot_watermark,
+        stable_as_of=entries[0].stable_as_of if entries else None,
         layer_perf=LayerPerf(
-            latency_ms=int(metadata_response.perf.latency_ms),
-            cache_status=metadata_response.perf.cache_status,
+            latency_ms=int(checkpoint_response.perf.latency_ms),
+            cache_status=checkpoint_response.perf.cache_status,
         ),
     )
 

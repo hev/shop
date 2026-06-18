@@ -64,6 +64,6 @@ func init() {
 		"Amazon Reviews 2023 metadata categories (comma-separated or repeatable)",
 	)
 	indexCmd.Flags().IntVar(&indexJobSize, "job-size", 10000, "products per extraction job")
-	indexCmd.Flags().StringVar(&indexCatalogRun, "catalog-run-id", "", "override the catalog_run_id stamped onto queued products")
+	indexCmd.Flags().StringVar(&indexCatalogRun, "catalog-run-id", "", "override the checkpoint/drop label returned by /index")
 	rootCmd.AddCommand(indexCmd)
 }

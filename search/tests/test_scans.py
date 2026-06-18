@@ -61,9 +61,11 @@ class TestScansMigration:
             {
                 "namespace": "amazon-products",
                 "mode": "count",
+                "source": None,
                 "radius": 0.33,
                 "vector": [0.1, 0.2, 0.3],
                 "filters": ["category", "Eq", "Audio"],
+                "between": None,
             }
         ]
 

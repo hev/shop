@@ -65,6 +65,38 @@ func TestStatusCmdSendsRequest(t *testing.T) {
 	}
 }
 
+func TestCheckpointCmdSendsRequest(t *testing.T) {
+	resetCLIState()
+	srv, recorded := recordingServer(t, 200, map[string]any{
+		"namespace":      "amazon-products",
+		"catalog_run_id": "catalog-2026-06-09",
+		"checkpoint": map[string]any{
+			"label":        "catalog-2026-06-09",
+			"watermark_ms": 12345,
+			"sha":          "abc123",
+			"row_count":    42,
+		},
+		"pipelines": map[string]any{},
+	})
+	if err := runArgs(t,
+		"checkpoint",
+		"--indexer-url", srv.URL,
+		"--catalog-run-id", "catalog-2026-06-09",
+		"--allow-failed",
+	); err != nil {
+		t.Fatalf("checkpoint cmd failed: %v", err)
+	}
+	if recorded.Method != "POST" || recorded.Path != "/index/checkpoint" {
+		t.Fatalf("unexpected request: %s %s", recorded.Method, recorded.Path)
+	}
+	if recorded.Body["catalog_run_id"] != "catalog-2026-06-09" {
+		t.Errorf("expected catalog_run_id, got %v", recorded.Body["catalog_run_id"])
+	}
+	if recorded.Body["allow_failed"] != true {
+		t.Errorf("expected allow_failed=true, got %v", recorded.Body["allow_failed"])
+	}
+}
+
 // healthCmd hits two services, so use distinct servers and assert both
 // were called.
 func TestHealthCmdHitsBothServices(t *testing.T) {

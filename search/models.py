@@ -30,8 +30,9 @@ class SearchRequest(BaseModel):
         ...,
         min_length=0,
         description=(
-            "Free-text search query. May be empty only when catalog_run_id is "
-            "set, which browses that catalog drop without vector ranking."
+            "Free-text search query. May be empty only when catalog_run_id "
+            "is set to a checkpoint label, which browses that catalog drop "
+            "without vector ranking."
         ),
     )
     top_k: int = Field(default=10, ge=1, le=200)
@@ -40,14 +41,18 @@ class SearchRequest(BaseModel):
     category: str | None = None
     catalog_run_id: str | None = Field(
         default=None,
-        description="Filter results to a specific catalog drop/run id.",
+        description=(
+            "Checkpoint label for a catalog drop. The field name is retained "
+            "for client compatibility; the search service resolves it through "
+            "Layer checkpoints and applies a temporal window."
+        ),
     )
     cursor: str | None = Field(
         default=None,
         description=(
             "Opaque pagination cursor from a prior /search response's "
             "next_cursor. Re-send the same query/filters/top_k to keep paging "
-            "consistent; the gateway re-applies the consistency watermark."
+            "consistent; catalog-drop browsing uses a scan-offset cursor."
         ),
     )
     with_count: bool = Field(
@@ -113,7 +118,8 @@ class SearchResponse(BaseModel):
         description=(
             "Opaque cursor for the next page. Present iff the gateway returned "
             "a full top_k (i.e. there may be more results). Pass it back as "
-            "`cursor` on the next /search call alongside the same filters."
+            "`cursor` on the next /search call alongside the same filters; "
+            "catalog-drop browsing returns a scan-offset cursor."
         ),
     )
     count: CountInfo | None = Field(

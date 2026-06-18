@@ -58,8 +58,8 @@ export default async function SearchPage({
     approx: approxParam,
     drop,
   } = await searchParams;
-  // Active drop filter (a catalog_run_id from /drops). In backend mode this is
-  // sent to /search; demo mode uses the local mock drop slice below.
+  // Active drop filter (a checkpoint label from /drops). In backend mode this
+  // is sent to /search; demo mode uses the local mock drop slice below.
   const selectedDrop =
     drop && /^catalog-\d{4}-\d{2}-\d{2}$/.test(drop) ? drop : null;
   // Cursor pages carry the page-1 count forward in the URL so we don't re-run

@@ -16,6 +16,23 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// CheckpointActivationRequest defines model for CheckpointActivationRequest.
+type CheckpointActivationRequest struct {
+	// AllowFailed If false, any failed documents block checkpoint activation.
+	AllowFailed *bool `json:"allow_failed,omitempty"`
+
+	// CatalogRunId Catalog checkpoint label. Defaults to catalog-YYYY-MM-DD in UTC.
+	CatalogRunId *string `json:"catalog_run_id,omitempty"`
+}
+
+// CheckpointActivationResponse defines model for CheckpointActivationResponse.
+type CheckpointActivationResponse struct {
+	CatalogRunId string                       `json:"catalog_run_id"`
+	Checkpoint   map[string]interface{}       `json:"checkpoint"`
+	Namespace    string                       `json:"namespace"`
+	Pipelines    map[string]PipelineStability `json:"pipelines"`
+}
+
 // HTTPValidationError defines model for HTTPValidationError.
 type HTTPValidationError struct {
 	Detail *[]ValidationError `json:"detail,omitempty"`
@@ -30,7 +47,7 @@ type IndexCategoryResponse struct {
 
 // IndexRequest defines model for IndexRequest.
 type IndexRequest struct {
-	// CatalogRunId Catalog drop/run identifier stamped onto every staged product vector. Defaults to catalog-YYYY-MM-DD in UTC.
+	// CatalogRunId Catalog checkpoint label. Defaults to catalog-YYYY-MM-DD in UTC; activate it with POST /index/checkpoint after ingest stabilizes.
 	CatalogRunId *string `json:"catalog_run_id,omitempty"`
 
 	// Categories Optional multi-category fan-out. Overrides category unless category is explicitly merged by the caller.
@@ -51,6 +68,14 @@ type IndexResponse struct {
 	JobsCreated  int                      `json:"jobs_created"`
 	Namespace    string                   `json:"namespace"`
 	PipelineId   string                   `json:"pipeline_id"`
+}
+
+// PipelineStability defines model for PipelineStability.
+type PipelineStability struct {
+	FailedCount     *int  `json:"failed_count,omitempty"`
+	PendingCount    *int  `json:"pending_count,omitempty"`
+	ProcessingCount *int  `json:"processing_count,omitempty"`
+	Stable          *bool `json:"stable,omitempty"`
 }
 
 // StatusResponse defines model for StatusResponse.
@@ -88,6 +113,9 @@ type StatusStatusGetParams struct {
 
 // IndexProductsIndexPostJSONRequestBody defines body for IndexProductsIndexPost for application/json ContentType.
 type IndexProductsIndexPostJSONRequestBody = IndexRequest
+
+// ActivateCatalogCheckpointIndexCheckpointPostJSONRequestBody defines body for ActivateCatalogCheckpointIndexCheckpointPost for application/json ContentType.
+type ActivateCatalogCheckpointIndexCheckpointPostJSONRequestBody = CheckpointActivationRequest
 
 // AsValidationErrorLoc0 returns the union data inside the ValidationError_Loc_Item as a ValidationErrorLoc0
 func (t ValidationError_Loc_Item) AsValidationErrorLoc0() (ValidationErrorLoc0, error) {
@@ -232,6 +260,11 @@ type ClientInterface interface {
 
 	IndexProductsIndexPost(ctx context.Context, body IndexProductsIndexPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ActivateCatalogCheckpointIndexCheckpointPostWithBody request with any body
+	ActivateCatalogCheckpointIndexCheckpointPostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	ActivateCatalogCheckpointIndexCheckpointPost(ctx context.Context, body ActivateCatalogCheckpointIndexCheckpointPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// StatusStatusGet request
 	StatusStatusGet(ctx context.Context, params *StatusStatusGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
@@ -262,6 +295,30 @@ func (c *Client) IndexProductsIndexPostWithBody(ctx context.Context, contentType
 
 func (c *Client) IndexProductsIndexPost(ctx context.Context, body IndexProductsIndexPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewIndexProductsIndexPostRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ActivateCatalogCheckpointIndexCheckpointPostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewActivateCatalogCheckpointIndexCheckpointPostRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ActivateCatalogCheckpointIndexCheckpointPost(ctx context.Context, body ActivateCatalogCheckpointIndexCheckpointPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewActivateCatalogCheckpointIndexCheckpointPostRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -332,6 +389,46 @@ func NewIndexProductsIndexPostRequestWithBody(server string, contentType string,
 	}
 
 	operationPath := fmt.Sprintf("/index")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewActivateCatalogCheckpointIndexCheckpointPostRequest calls the generic ActivateCatalogCheckpointIndexCheckpointPost builder with application/json body
+func NewActivateCatalogCheckpointIndexCheckpointPostRequest(server string, body ActivateCatalogCheckpointIndexCheckpointPostJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewActivateCatalogCheckpointIndexCheckpointPostRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewActivateCatalogCheckpointIndexCheckpointPostRequestWithBody generates requests for ActivateCatalogCheckpointIndexCheckpointPost with any type of body
+func NewActivateCatalogCheckpointIndexCheckpointPostRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/index/checkpoint")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -456,6 +553,11 @@ type ClientWithResponsesInterface interface {
 
 	IndexProductsIndexPostWithResponse(ctx context.Context, body IndexProductsIndexPostJSONRequestBody, reqEditors ...RequestEditorFn) (*IndexProductsIndexPostResponse, error)
 
+	// ActivateCatalogCheckpointIndexCheckpointPostWithBodyWithResponse request with any body
+	ActivateCatalogCheckpointIndexCheckpointPostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ActivateCatalogCheckpointIndexCheckpointPostResponse, error)
+
+	ActivateCatalogCheckpointIndexCheckpointPostWithResponse(ctx context.Context, body ActivateCatalogCheckpointIndexCheckpointPostJSONRequestBody, reqEditors ...RequestEditorFn) (*ActivateCatalogCheckpointIndexCheckpointPostResponse, error)
+
 	// StatusStatusGetWithResponse request
 	StatusStatusGetWithResponse(ctx context.Context, params *StatusStatusGetParams, reqEditors ...RequestEditorFn) (*StatusStatusGetResponse, error)
 }
@@ -521,6 +623,37 @@ func (r IndexProductsIndexPostResponse) ContentType() string {
 	return ""
 }
 
+type ActivateCatalogCheckpointIndexCheckpointPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *CheckpointActivationResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r ActivateCatalogCheckpointIndexCheckpointPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ActivateCatalogCheckpointIndexCheckpointPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ActivateCatalogCheckpointIndexCheckpointPostResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type StatusStatusGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -578,6 +711,23 @@ func (c *ClientWithResponses) IndexProductsIndexPostWithResponse(ctx context.Con
 	return ParseIndexProductsIndexPostResponse(rsp)
 }
 
+// ActivateCatalogCheckpointIndexCheckpointPostWithBodyWithResponse request with arbitrary body returning *ActivateCatalogCheckpointIndexCheckpointPostResponse
+func (c *ClientWithResponses) ActivateCatalogCheckpointIndexCheckpointPostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ActivateCatalogCheckpointIndexCheckpointPostResponse, error) {
+	rsp, err := c.ActivateCatalogCheckpointIndexCheckpointPostWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseActivateCatalogCheckpointIndexCheckpointPostResponse(rsp)
+}
+
+func (c *ClientWithResponses) ActivateCatalogCheckpointIndexCheckpointPostWithResponse(ctx context.Context, body ActivateCatalogCheckpointIndexCheckpointPostJSONRequestBody, reqEditors ...RequestEditorFn) (*ActivateCatalogCheckpointIndexCheckpointPostResponse, error) {
+	rsp, err := c.ActivateCatalogCheckpointIndexCheckpointPost(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseActivateCatalogCheckpointIndexCheckpointPostResponse(rsp)
+}
+
 // StatusStatusGetWithResponse request returning *StatusStatusGetResponse
 func (c *ClientWithResponses) StatusStatusGetWithResponse(ctx context.Context, params *StatusStatusGetParams, reqEditors ...RequestEditorFn) (*StatusStatusGetResponse, error) {
 	rsp, err := c.StatusStatusGet(ctx, params, reqEditors...)
@@ -629,6 +779,39 @@ func ParseIndexProductsIndexPostResponse(rsp *http.Response) (*IndexProductsInde
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest IndexResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseActivateCatalogCheckpointIndexCheckpointPostResponse parses an HTTP response from a ActivateCatalogCheckpointIndexCheckpointPostWithResponse call
+func ParseActivateCatalogCheckpointIndexCheckpointPostResponse(rsp *http.Response) (*ActivateCatalogCheckpointIndexCheckpointPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ActivateCatalogCheckpointIndexCheckpointPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest CheckpointActivationResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

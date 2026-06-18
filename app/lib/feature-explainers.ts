@@ -104,13 +104,13 @@ const EXPLAINERS: Record<string, FeatureExplainer> = {
       "Each drop is one nightly catalog run re-embedded end to end. The freshness watermark tells you which consistent snapshot a drop's vectors belong to.",
     mechanism: [
       { label: "Pipeline", detail: "extract-chunk → embed → indexed" },
-      { label: "Snapshot", detail: "field: catalog_run_id" },
+      { label: "Checkpoint", detail: "label → watermark window" },
       { label: "Freshness", detail: "stable_as_of · is_stable" },
     ],
     docs: [
+      { label: "Checkpoints", href: `${DOCS}/api/checkpoints` },
       { label: "Snapshots", href: `${DOCS}/api/snapshots` },
       { label: "Pipelines", href: `${DOCS}/api/pipelines` },
-      { label: "Guarantees", href: `${DOCS}/guarantees` },
     ],
   },
   categories: {

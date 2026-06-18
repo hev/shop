@@ -23,6 +23,9 @@ spec:
     revision: main
     cursor:
       field: parent_asin
+  schedule:
+    cron: "0 2 * * *"
+    leaseSeconds: 3300
   worker:
     # The cpu-large pool (layer chart) carries the worker-cpu selector and
     # toleration, so no podSpec placement override is needed.

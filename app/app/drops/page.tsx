@@ -124,10 +124,10 @@ export default async function DropsPage() {
             <span className="font-mono text-sm">
               {DROP_SIZE.toLocaleString()}
             </span>{" "}
-            products from the Amazon dataset, embeds them, and stamps each one
-            with a <span className="font-mono text-sm">catalog_run_id</span>.
-            Each drop below is one run — the products that joined the index
-            that night. The shelves don't restock; they grow.
+            products from the Amazon dataset, embeds them, and labels the
+            resulting Layer checkpoint. Each drop below is one run — the
+            products that joined the index that night. The shelves don't
+            restock; they grow.
           </p>
         </div>
 
@@ -169,14 +169,14 @@ export default async function DropsPage() {
       )}
 
       <p className="mt-10 text-xs text-ink-500">
-        Run markers are app-owned attributes stamped on each product vector
-        during the nightly ingest; completed runs are read back through Layer
-        namespace snapshots. See{" "}
+        Drop markers are Layer checkpoint labels over namespace snapshot
+        watermarks; completed runs are read back through Layer checkpoint
+        history. See{" "}
         <a
-          href="https://hevlayer.com/docs/api/snapshots"
+          href="https://hevlayer.com/docs/api/checkpoints"
           className="font-medium text-ink-700 underline-offset-2 hover:underline"
         >
-          snapshot history
+          checkpoints
         </a>{" "}
         in the hev layer docs.
       </p>

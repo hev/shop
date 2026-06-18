@@ -42,6 +42,9 @@ func resetCLIState() {
 	indexJobSize = 10000
 	indexCatalogRun = ""
 
+	checkpointCatalogRun = ""
+	checkpointAllowFailed = false
+
 	statusPipelineID = ""
 }
 

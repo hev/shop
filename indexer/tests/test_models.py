@@ -47,24 +47,24 @@ class ModelTests(unittest.TestCase):
 
         self.assertEqual(request.resolved_catalog_run_id(), "catalog-2026-06-09")
 
-    def test_extraction_jobs_round_trip_catalog_run_metadata(self):
+    def test_extraction_jobs_do_not_stamp_catalog_run_metadata(self):
         jobs = build_index_jobs(
             pipeline_id="hev-shop-product-images",
             namespace="amazon-products",
             category="Electronics",
             count=3,
             job_size=2,
-            catalog_run_id="catalog-2026-06-09",
         )
 
         self.assertEqual(len(jobs), 2)
         metadata = extraction_job_metadata(jobs[0])
-        self.assertEqual(metadata["catalog_run_id"], "catalog-2026-06-09")
+        self.assertNotIn("catalog_run_id", metadata)
         decoded = extraction_job_from_chunks(
             jobs[0].id,
             [{"id": "extraction-job", "metadata": metadata}],
         )
-        self.assertEqual(decoded.catalog_run_id, "catalog-2026-06-09")
+        self.assertEqual(decoded.pipeline_id, "hev-shop-product-images")
+        self.assertEqual(decoded.namespace, "amazon-products")
 
 
 if __name__ == "__main__":

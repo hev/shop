@@ -150,11 +150,11 @@ type SearchHit struct {
 
 // SearchRequest defines model for SearchRequest.
 type SearchRequest struct {
-	// CatalogRunId Filter results to a specific catalog drop/run id.
+	// CatalogRunId Checkpoint label for a catalog drop. The field name is retained for client compatibility; the search service resolves it through Layer checkpoints and applies a temporal window.
 	CatalogRunId *string `json:"catalog_run_id,omitempty"`
 	Category     *string `json:"category,omitempty"`
 
-	// Cursor Opaque pagination cursor from a prior /search response's next_cursor. Re-send the same query/filters/top_k to keep paging consistent; the gateway re-applies the consistency watermark.
+	// Cursor Opaque pagination cursor from a prior /search response's next_cursor. Re-send the same query/filters/top_k to keep paging consistent; catalog-drop browsing uses a scan-offset cursor.
 	Cursor            *string   `json:"cursor,omitempty"`
 	IncludeAttributes *[]string `json:"include_attributes,omitempty"`
 
@@ -162,7 +162,7 @@ type SearchRequest struct {
 	MaxDistance *float32 `json:"max_distance,omitempty"`
 	Namespace   *string  `json:"namespace,omitempty"`
 
-	// Query Free-text search query. May be empty only when catalog_run_id is set, which browses that catalog drop without vector ranking.
+	// Query Free-text search query. May be empty only when catalog_run_id is set to a checkpoint label, which browses that catalog drop without vector ranking.
 	Query string `json:"query"`
 	TopK  *int   `json:"top_k,omitempty"`
 
@@ -188,7 +188,7 @@ type SearchResponse struct {
 	LayerPerf *LayerPerf `json:"layer_perf,omitempty"`
 	Namespace string     `json:"namespace"`
 
-	// NextCursor Opaque cursor for the next page. Present iff the gateway returned a full top_k (i.e. there may be more results). Pass it back as `cursor` on the next /search call alongside the same filters.
+	// NextCursor Opaque cursor for the next page. Present iff the gateway returned a full top_k (i.e. there may be more results). Pass it back as `cursor` on the next /search call alongside the same filters; catalog-drop browsing returns a scan-offset cursor.
 	NextCursor *string `json:"next_cursor,omitempty"`
 	Query      string  `json:"query"`
 

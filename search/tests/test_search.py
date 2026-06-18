@@ -64,6 +64,23 @@ def _query_response(ids: list[str], *, next_cursor: str | None = None) -> QueryR
     return QueryResponse(**payload)
 
 
+def _seed_checkpoints(layer: FakeLayerClient) -> None:
+    layer.checkpoints_by_namespace["amazon-products"] = [
+        {
+            "label": "catalog-2026-06-09",
+            "watermark_ms": 2000,
+            "sha": "new",
+            "row_count": 5,
+        },
+        {
+            "label": "catalog-2026-06-08",
+            "watermark_ms": 1000,
+            "sha": "old",
+            "row_count": 7,
+        },
+    ]
+
+
 class TestSearchCursor:
     def test_first_page_records_search_history_metadata(self, client_with_fakes):
         client, layer, _ = client_with_fakes
@@ -116,8 +133,11 @@ class TestSearchCursor:
         assert layer.query_calls[-1]["raw_query"] is None
         assert layer.query_calls[-1]["history_tags"] is None
 
-    def test_catalog_run_filter_is_sent_to_vector_query(self, client_with_fakes):
+    def test_catalog_run_checkpoint_window_is_sent_to_vector_query(
+        self, client_with_fakes
+    ):
         client, layer, _ = client_with_fakes
+        _seed_checkpoints(layer)
         layer.next_query_response = _query_response(["B0001"])
 
         resp = client.post(
@@ -128,12 +148,15 @@ class TestSearchCursor:
             },
         )
         assert resp.status_code == 200
+        assert resp.json()["stable_as_of"] == 2000
 
-        assert layer.query_calls[-1]["filters"] == [
-            "catalog_run_id",
-            "Eq",
-            "catalog-2026-06-09",
-        ]
+        assert layer.query_calls[-1]["filters"] is None
+        assert layer.query_calls[-1]["between"] == [1000, 2000]
+        assert layer.checkpoint_calls[-1] == {
+            "namespace": "amazon-products",
+            "limit": 100,
+            "before": None,
+        }
 
     def test_omits_next_cursor_when_gateway_returns_short_page(
         self, client_with_fakes
@@ -157,25 +180,19 @@ class TestSearchCursor:
         self, client_with_fakes
     ):
         client, layer, clip = client_with_fakes
+        _seed_checkpoints(layer)
         layer.next_turbopuffer_query_response = SimpleNamespace(
             rows=[
-                {
-                    "id": "B0001",
-                    "asin": "B0001",
-                    "title": "Fresh Camera",
-                    "catalog_run_id": "catalog-2026-06-09",
-                }
-            ],
-            stable_as_of=67890,
-            next_cursor="drop-page-2",
+                {"id": "B0001", "asin": "B0001", "title": "Fresh Camera"},
+                {"id": "B0002", "asin": "B0002", "title": "Fresh Lens"},
+            ]
         )
 
         resp = client.post(
             "/search",
             json={
                 "query": "",
-                "top_k": 4,
-                "cursor": "drop-page-1",
+                "top_k": 1,
                 "catalog_run_id": "catalog-2026-06-09",
             },
         )
@@ -183,20 +200,53 @@ class TestSearchCursor:
         assert resp.status_code == 200
         body = resp.json()
         assert body["hits"][0]["id"] == "B0001"
-        assert body["stable_as_of"] == 67890
-        assert body["next_cursor"] == "drop-page-2"
+        assert body["stable_as_of"] == 2000
+        assert body["next_cursor"] == "id:B0001"
         assert body["count"] is None
         assert clip.calls == []
         assert layer.query_calls == []
+        assert layer.scan_calls == []
+        assert layer.fetch_documents_calls == []
         assert layer.turbopuffer_query_calls[-1] == {
             "namespace": "amazon-products",
             "body": {
-                "top_k": 4,
-                "include_attributes": True,
-                "filters": ["catalog_run_id", "Eq", "catalog-2026-06-09"],
-                "cursor": "drop-page-1",
+                "rank_by": ["id", "asc"],
+                "top_k": 2,
+                "include_attributes": [
+                    "asin",
+                    "title",
+                    "description",
+                    "category",
+                    "image_url",
+                    "image_blob",
+                    "avg_rating_txt",
+                    "rating_cnt_txt",
+                ],
+                "filters": [
+                    "And",
+                    [
+                        ["_hevlayer_upserted_at", "Gt", 1000],
+                        ["_hevlayer_upserted_at", "Lte", 2000],
+                    ],
+                ],
+                "consistency": {"level": "eventual"},
             },
         }
+
+    def test_unknown_catalog_checkpoint_is_validation_error(self, client_with_fakes):
+        client, layer, _ = client_with_fakes
+        _seed_checkpoints(layer)
+
+        resp = client.post(
+            "/search",
+            json={
+                "query": "wireless headphones",
+                "catalog_run_id": "missing",
+            },
+        )
+
+        assert resp.status_code == 422
+        assert layer.query_calls == []
 
 
 class TestSearchCount:
@@ -238,6 +288,35 @@ class TestSearchCount:
         assert scan_call["radius"] == 0.35
         assert scan_call["vector"] == [0.1, 0.2, 0.3]
         assert scan_call["filters"] == ["category", "Eq", "Electronics"]
+        assert scan_call["between"] is None
+
+    def test_with_count_uses_checkpoint_window(self, client_with_fakes):
+        client, layer, _ = client_with_fakes
+        _seed_checkpoints(layer)
+        layer.next_query_response = _query_response(["B0001", "B0002"])
+        layer.next_scan_response = ScanCountResponse(
+            count=5,
+            served_by="origin",
+            bounded=False,
+            timed_out=False,
+            shards_saturated=0,
+            shards_total=4,
+            approximate=True,
+            elapsed_ms=12,
+        )
+
+        resp = client.post(
+            "/search",
+            json={
+                "query": "headphones",
+                "with_count": True,
+                "catalog_run_id": "catalog-2026-06-09",
+            },
+        )
+        assert resp.status_code == 200
+
+        assert layer.query_calls[-1]["between"] == [1000, 2000]
+        assert layer.scan_calls[-1]["between"] == [1000, 2000]
 
     def test_without_with_count_skips_count_fanout(self, client_with_fakes):
         client, layer, _ = client_with_fakes
@@ -299,45 +378,31 @@ class TestMeta:
 
 
 class TestDrops:
-    def test_catalog_run_buckets_come_from_snapshot(self, client_with_fakes):
+    def test_catalog_runs_come_from_checkpoints(self, client_with_fakes):
         client, layer, _ = client_with_fakes
-        layer.namespace_metadata_data = NamespaceMetadata(
-            id="amazon-products",
-            schema={},
-            approx_logical_bytes=0,
-            approx_row_count=12,
-            created_at="2026-05-20T00:00:00Z",
-            updated_at="2026-05-20T00:00:00Z",
-            layer={"stable_as_of": 12345, "is_stable": True},
-        )
-        layer.snapshot_watermarks_by_namespace["amazon-products"] = 1780000000000
-        layer.snapshot_values_by_namespace["amazon-products"] = {
-            "catalog_run_id": [
-                {"value": "catalog-2026-06-08", "doc_count": 7},
-                {"value": "catalog-2026-06-09", "doc_count": 5},
-                {"value": "catalog-2026-06-07", "doc_count": 3},
-            ]
-        }
+        _seed_checkpoints(layer)
 
         resp = client.get("/drops?limit=2")
 
         assert resp.status_code == 200
         body = resp.json()
         assert body["namespace"] == "amazon-products"
-        assert body["stable_as_of"] == 1780000000000
+        assert body["stable_as_of"] == 2000
         assert body["drops"] == [
             {
                 "run_id": "catalog-2026-06-09",
                 "product_count": 5,
-                "stable_as_of": 1780000000000,
+                "stable_as_of": 2000,
             },
             {
                 "run_id": "catalog-2026-06-08",
                 "product_count": 7,
-                "stable_as_of": 1780000000000,
+                "stable_as_of": 1000,
             },
         ]
-        assert layer.snapshot_calls[-1] == {
+        assert layer.checkpoint_calls[-1] == {
             "namespace": "amazon-products",
-            "field": "catalog_run_id",
+            "limit": 2,
+            "before": None,
         }
+        assert layer.snapshot_calls == []

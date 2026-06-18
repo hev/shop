@@ -284,8 +284,8 @@ export type DropsResult = {
   layer_perf: LayerPerf | null;
 };
 
-// GET /drops — recent nightly catalog runs materialized from catalog_run_id
-// vector attributes (see docs/FRONTEND_0.1_DESIGN.md).
+// GET /drops — recent nightly catalog runs materialized from Layer checkpoint
+// labels (see docs/FRONTEND_0.1_DESIGN.md).
 export async function backendDrops(): Promise<DropsResult> {
   if (!API_BASE) throw new Error("HEV_SHOP_API_BASE not set");
   const res = await fetchWithTimeout(

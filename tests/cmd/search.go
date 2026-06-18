@@ -28,8 +28,8 @@ var searchCmd = &cobra.Command{
 		if len(args) > 0 && args[0] != "" {
 			query = args[0]
 		}
-		if query == "" {
-			return fmt.Errorf("a query is required (positional arg or --query)")
+		if query == "" && searchCatalogRun == "" {
+			return fmt.Errorf("a query is required unless --catalog-run-id is set")
 		}
 		body := searchapi.SearchRequest{
 			Query:       query,
@@ -73,6 +73,6 @@ func init() {
 	searchCmd.Flags().BoolVar(&searchWithCount, "with-count", false, "fan out an extra /scans radius count to estimate matches within --max-distance")
 	searchCmd.Flags().Float32Var(&searchMaxDistance, "max-distance", 0.4, "cosine-distance ceiling for --with-count")
 	searchCmd.Flags().StringVar(&searchNamespace, "namespace", "", "override the target namespace")
-	searchCmd.Flags().StringVar(&searchCatalogRun, "catalog-run-id", "", "filter by catalog_run_id")
+	searchCmd.Flags().StringVar(&searchCatalogRun, "catalog-run-id", "", "filter by checkpoint/drop label")
 	rootCmd.AddCommand(searchCmd)
 }
