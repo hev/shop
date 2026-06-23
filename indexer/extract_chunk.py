@@ -449,7 +449,7 @@ class ExtractionWorker:
             "seeded scheduled refresh control document",
             extra={
                 "catalog_run_id": catalog_run_id,
-                "created": response.updated,
+                "created_count": response.updated,
             },
         )
 
