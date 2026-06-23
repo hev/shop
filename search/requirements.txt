@@ -9,7 +9,10 @@ fastapi>=0.115
 -e ../common
 httpx>=0.27
 pydantic-settings>=2.6
-# torch + transformers cover CLIP-text query embedding.
-torch>=2.5
+# transformers covers CLIP-text query embedding. torch is installed CPU-only in
+# the Dockerfile (search embeds queries on the CPU system node, never a GPU), so
+# it is kept out of this file: the default CUDA wheel drags in ~5GB of unused
+# nvidia libraries, and listing it here would let the editable installs above
+# pull the CUDA build back in.
 transformers>=4.46
 uvicorn[standard]>=0.32
