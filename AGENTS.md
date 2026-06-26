@@ -39,6 +39,11 @@ meant to manage.
 The deliverable of any friction is always a **paper trail in `hev/layer`** (issue
 or RFC) so the design-preview signal reaches the Layer team.
 
+**File findings on GitHub, never Linear.** The Linear MCP is often connected, but
+it is **not** the demo→Layer channel: tickets logged there miss the `hev/layer`
+paper trail and have had to be re-filed as GitHub issues (and deleted from
+Linear). Open it at `github.com/hev/layer/issues` instead.
+
 ## Repo Layout
 
 Two Python services + shared Python library + one Next.js app + a Go
@@ -260,6 +265,24 @@ deploys the always-on API/web pods; it carries no worker or pipeline shape.
 The `cpu-large` and `gpu` compute pools referenced by `scaling.pool` are
 defined in the Layer chart's `InfraRules/default`
 (`../layer/infra/helm/layer/values.yaml`).
+
+## Container images
+
+Deployed images (search, indexer, web, and the pipeline/UDF workers) are **built
+with `depot` and pushed to ECR — not ghcr.io**:
+`186219257916.dkr.ecr.us-east-1.amazonaws.com/hev-shop-{search,indexer,web}`
+(the `--set *Image.repository=` values in `README.md`). Log in first:
+
+```sh
+aws ecr get-login-password --region us-east-1 \
+  | docker login --username AWS --password-stdin \
+    186219257916.dkr.ecr.us-east-1.amazonaws.com
+```
+
+`ghcr.io` is only for public base images (`ghcr.io/astral-sh/uv` in a Dockerfile
+is correct). **Never point a `Pipeline`/`Function` `image:` at a `ghcr.io/hev/*`
+RFC placeholder** — those name a stock-image registry that hasn't shipped; build
+the real image and push it to ECR.
 
 ## Tests
 
