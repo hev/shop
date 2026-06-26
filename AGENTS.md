@@ -3,6 +3,42 @@
 This file is for engineering and operations work in `hev-shop`. For product,
 design, and strategic context, read `CLAUDE.md`.
 
+## ⚠️ IMPORTANT — this repo is a Layer design-preview customer
+
+This repo is a **design-preview customer of hev layer**, not part of the Layer
+product. Its job is to *use* Layer the way a real customer would and **report
+back** to the Layer team. That feedback loop is a primary responsibility of this
+repo, not a side task — the demo working is table stakes; the signal we send the
+Layer team is the deliverable.
+
+**When you hit friction, do not fix Layer from here — report it:**
+
+- **A bug, or docs that are wrong / unclear / missing** → file a **GitHub issue**
+  on the Layer repo (`hev/layer`) with a minimal repro and the exact page or
+  behavior at fault.
+- **A missing feature or capability gap** → open an **RFC** in the Layer repo
+  (`../layer/docs/rfcs/`), in the existing RFC shape, with this workload as the
+  motivating / acceptance case.
+
+**Operations are Layer's job.** This repo has operational access to the shared
+Layer cluster, but the goal is that Layer operates *itself* — autoscaling,
+scale-to-zero, scheduling, binpacking. Let it. Do **not** hand-tune what Layer is
+meant to manage.
+
+- When Layer falls short — autoscaling lags, a pipeline stalls, scale-to-zero
+  misbehaves — it is OK to **intervene** to keep the demo healthy. But every
+  intervention **must** produce a GitHub issue (bug) or an RFC (missing
+  capability). An undocumented manual fix is a process failure: the intervention
+  is the symptom, the report is the deliverable.
+- **Shared namespace / binpacking.** This repo deploys to a namespace in the
+  shared demo cluster alongside the other demos (shelf, shop, chart,
+  hybrid-text-fusion-demo, label). Scheduling / binpacking contention may bite.
+  Same rule: intervene to stay healthy if you must, but the result is a GH issue
+  or an RFC documenting the shortfall — never a silent workaround.
+
+The deliverable of any friction is always a **paper trail in `hev/layer`** (issue
+or RFC) so the design-preview signal reaches the Layer team.
+
 ## Repo Layout
 
 Two Python services + shared Python library + one Next.js app + a Go
@@ -18,7 +54,7 @@ hev-shop/
     Dockerfile, requirements.txt, openapi.json
   indexer/                # control plane + pipeline worker scripts
     pipelines/            # Layer Pipeline resources (extract-chunk, embed)
-    udfs/                 # Layer Function/UDF resources (trending reduce + README)
+    udfs/                 # Layer Function/UDF resources (trending + warm-blobs reduces + README)
     app.py                # /index, /status; creates the Layer queues
     extract_chunk.py      # CPU stage: claim job, read source, stage chunks
     embed.py              # GPU stage: claim pending docs, write CLIP vectors
@@ -181,7 +217,7 @@ The search pod loads `CLIPTextEmbedder` to embed query strings.
 | `embed.py` | GPU stage script: claims pending product docs, writes vectors with `put_pipeline_document_vectors` |
 | `dataset.py` | HuggingFace `McAuley-Lab/Amazon-Reviews-2023` product metadata reader |
 | `pipelines/` | Layer `Pipeline` resources declaring the two worker stages (image, pool, scaling). `kubectl apply -f indexer/pipelines/` |
-| `udfs/` | Layer `Function`/UDF resources for derived/enrichment work over indexed namespaces. Holds `trending.yaml` (the RFC 0040 trending reduce, blocked on `trigger: schedule`) + a `README.md` sketch; sibling of `pipelines/`. `kubectl apply -f indexer/udfs/` |
+| `udfs/` | Layer `Function`/UDF resources for derived/enrichment work over indexed namespaces. Holds `trending.yaml` (RFC 0040 trending reduce) and `warm-blobs.yaml` (RFC 0055 blob cache-warm; re-warms image blobs onto the gateway NVMe cache on a schedule) — both `triggers: [schedule]` Functions — plus a `README.md` sketch; sibling of `pipelines/`. `kubectl apply -f indexer/udfs/` |
 
 Worker pods are owned by the Layer operator, which injects
 `HEVLAYER_PIPELINE_ID`, `HEVLAYER_BASE_URL`, and `LAYER_GATEWAY_API_KEY`;
