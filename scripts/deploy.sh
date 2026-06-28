@@ -118,8 +118,9 @@ build_image() {
 
 if [[ "$BUILD_INDEXER" == "1" ]]; then
   docker_login "$INDEXER_IMAGE_REPOSITORY"
-  # One Dockerfile, three targets: the control plane plus the two worker
-  # images referenced by the Pipeline resources in indexer/pipelines/.
+  # One Dockerfile, five targets: the control plane plus the worker images
+  # referenced by the Pipeline resources in indexer/pipelines/ (extract, embed)
+  # and the scheduled Function workers in indexer/udfs/ (trending, warm-blobs).
   build_image indexer/Dockerfile . "${INDEXER_IMAGE_REPOSITORY}:${IMAGE_TAG}" \
     --target api \
     --build-context "layer_client=${LAYER_CLIENT_CONTEXT}"
@@ -128,6 +129,14 @@ if [[ "$BUILD_INDEXER" == "1" ]]; then
     --build-context "layer_client=${LAYER_CLIENT_CONTEXT}"
   build_image indexer/Dockerfile . "${INDEXER_IMAGE_REPOSITORY}:${IMAGE_TAG}-embed" \
     --target embed \
+    --build-context "layer_client=${LAYER_CLIENT_CONTEXT}"
+  # Scheduled Function workers (indexer/udfs/). deploy.sh applies pipelines/ but
+  # not udfs/, so after deploy apply them manually: kubectl apply -f indexer/udfs/
+  build_image indexer/Dockerfile . "${INDEXER_IMAGE_REPOSITORY}:${IMAGE_TAG}-trending" \
+    --target trending \
+    --build-context "layer_client=${LAYER_CLIENT_CONTEXT}"
+  build_image indexer/Dockerfile . "${INDEXER_IMAGE_REPOSITORY}:${IMAGE_TAG}-warm-blobs" \
+    --target warm-blobs \
     --build-context "layer_client=${LAYER_CLIENT_CONTEXT}"
 fi
 
@@ -212,6 +221,18 @@ log "Waiting for core rollout..."
 kubectl rollout status deployment/"${RELEASE}-indexer-api" -n "$NAMESPACE" --timeout=180s
 kubectl rollout status deployment/"${RELEASE}-search" -n "$NAMESPACE" --timeout=180s
 kubectl rollout status deployment/"${RELEASE}-web" -n "$NAMESPACE" --timeout=180s
+
+# Fail the deploy if the read API can't authenticate to the Layer gateway. This
+# catches an empty/invalid LAYER_GATEWAY_API_KEY at deploy time instead of via a
+# user-facing 502 (the 2026-06-24 outage: a deploy blanked the key and every
+# /search returned "search upstream 502"). A bad key makes /search return 502.
+log "Verifying read API <-> Layer gateway auth..."
+if kubectl exec -n "$NAMESPACE" "deploy/${RELEASE}-search" -- \
+    python -c "import httpx,sys; r=httpx.post('http://localhost:8080/search', json={'query':'deploy auth check','top_k':1}, timeout=30); sys.exit(0 if r.status_code == 200 else 1)" >/dev/null 2>&1; then
+  log "Read API <-> gateway auth OK."
+else
+  err "Read API got a non-200 from the Layer gateway (commonly an empty LAYER_GATEWAY_API_KEY). Check secrets.gatewayKeySecret / the '${NAMESPACE}/layer' secret before serving traffic."
+fi
 
 log "hev-shop deployed with Helm. Useful checks:"
 log "  kubectl get pods -n ${NAMESPACE}"

@@ -374,7 +374,35 @@ class TestMeta:
         assert layer.snapshot_calls[-1] == {
             "namespace": "amazon-products",
             "field": "category",
+            "source": "stored",
         }
+
+    def test_meta_degrades_to_count_only_when_snapshot_has_no_watermark(
+        self, client_with_fakes
+    ):
+        # hev/layer#97: when the gateway has no stable watermark the category
+        # snapshot fails. /meta must still serve count + freshness (HTTP 200,
+        # empty facets) instead of 500ing, so the storefront home doesn't stall
+        # on it and the result count isn't ~0.
+        client, layer, _ = client_with_fakes
+        layer.namespace_metadata_data = NamespaceMetadata(
+            id="amazon-products",
+            schema={},
+            approx_logical_bytes=0,
+            approx_row_count=282953,
+            created_at="2026-05-20T00:00:00Z",
+            updated_at="2026-05-20T00:00:00Z",
+            layer={"stable_as_of": None, "is_stable": False},
+        )
+        layer.snapshot_should_fail = True
+
+        resp = client.get("/meta")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["vectors"] == 282953
+        assert body["categories"] == []
+        assert body["is_stable"] is False
 
 
 class TestDrops:

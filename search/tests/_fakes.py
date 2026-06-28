@@ -54,6 +54,13 @@ class FakeLayerClient:
         self.documents_by_namespace: dict[tuple[str, str], dict[str, Any]] = {}
         self.snapshot_values_by_namespace: dict[str, dict[str, list[dict[str, Any]]]] = {}
         self.snapshot_watermarks_by_namespace: dict[str, int] = {}
+        # When True, snapshot jobs report "failed" (mirrors the gateway's
+        # "no stable watermark" error) so /meta's facet path degrades. hev/layer#97.
+        self.snapshot_should_fail = False
+        self.snapshot_failure_error = (
+            "no stable watermark observed for namespace; "
+            "retry after the consistency watcher polls it"
+        )
         self.checkpoints_by_namespace: dict[str, list[dict[str, Any]]] = {}
         self.checkpoint_calls: list[dict[str, Any]] = []
         self.namespace_metadata_data: Any = None
@@ -362,12 +369,15 @@ class FakeLayerClient:
     ) -> SnapshotJob | LayerResponse[SnapshotJob]:
         if isinstance(body, CreateSnapshotRequest):
             field = body.field
+            source = body.source
         else:
             field = body.get("field")
+            source = body.get("source")
         self.snapshot_calls.append(
             {
                 "namespace": namespace,
                 "field": field,
+                "source": source,
             }
         )
         job = SnapshotJob(
@@ -376,14 +386,14 @@ class FakeLayerClient:
             field=field or "",
             source="auto",
             effective_source="cache",
-            status="completed",
-            progress=1.0,
+            status="running" if self.snapshot_should_fail else "completed",
+            progress=0.0 if self.snapshot_should_fail else 1.0,
             documents_scanned=0,
             stable_as_of=None,
             created_at="2026-05-20T00:00:00Z",
-            completed_at="2026-05-20T00:00:00Z",
+            completed_at=None if self.snapshot_should_fail else "2026-05-20T00:00:00Z",
             error=None,
-            sha=f"sha-{len(self.snapshot_calls)}",
+            sha=None if self.snapshot_should_fail else f"sha-{len(self.snapshot_calls)}",
         )
         return _attach_perf(job, with_perf)
 
@@ -396,20 +406,21 @@ class FakeLayerClient:
     ) -> SnapshotJob | LayerResponse[SnapshotJob]:
         index = int(job_id.rsplit("-", 1)[-1])
         call = self.snapshot_calls[index - 1]
+        failing = self.snapshot_should_fail
         job = SnapshotJob(
             id=job_id,
             namespace=namespace,
             field=call.get("field") or "",
             source="auto",
             effective_source="cache",
-            status="completed",
-            progress=1.0,
+            status="failed" if failing else "completed",
+            progress=0.0 if failing else 1.0,
             documents_scanned=0,
             stable_as_of=None,
             created_at="2026-05-20T00:00:00Z",
-            completed_at="2026-05-20T00:00:00Z",
-            error=None,
-            sha=f"sha-{index}",
+            completed_at=None if failing else "2026-05-20T00:00:00Z",
+            error=self.snapshot_failure_error if failing else None,
+            sha=None if failing else f"sha-{index}",
         )
         return _attach_perf(job, with_perf)
 

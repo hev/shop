@@ -46,6 +46,13 @@ class Settings(BaseSettings):
         default=True, alias="PREWARM_TEXT_EMBEDDER"
     )
     meta_cache_ttl_seconds: float = Field(default=30.0, alias="META_CACHE_TTL_SECONDS")
+    # Safety bound on the /meta facet-snapshot read. /meta reads the precomputed
+    # ("stored") category facet snapshot, which is normally sub-ms; this caps the
+    # wait if that read is slow or has to fall through, so /meta (count +
+    # freshness) never stalls a caller. See search get_field_snapshot / hev/layer#97.
+    meta_snapshot_timeout_seconds: float = Field(
+        default=2.0, alias="META_SNAPSHOT_TIMEOUT_SECONDS"
+    )
 
     clip_model_name: str = Field(
         default="openai/clip-vit-large-patch14", alias="CLIP_MODEL_NAME"
@@ -87,6 +94,20 @@ class Settings(BaseSettings):
     trending_history_tag: str = Field(default="page:first", alias="TRENDING_HISTORY_TAG")
     trending_interval_seconds: float = Field(
         default=3600.0, alias="TRENDING_INTERVAL_SECONDS"
+    )
+
+    # Blob cache-warm (RFC 0055 / indexer/warm_blobs.py). Hydrates image blobs
+    # onto the gateway NVMe document cache via hint_cache_warm?blobs=true. That
+    # cache is shared with the document/vector cache and is resetOnStart, so the
+    # budget stays conservative (~22 GiB) to avoid evicting documents (which keep
+    # search fast), and a scheduled Function re-warms after gateway restarts. The
+    # long tail warms reactively on read.
+    blob_warm_budget_bytes: int = Field(
+        default=22_000_000_000, alias="BLOB_WARM_BUDGET_BYTES"
+    )
+    blob_warm_page_size: int = Field(default=1000, alias="BLOB_WARM_PAGE_SIZE")
+    blob_warm_interval_seconds: float = Field(
+        default=21600.0, alias="BLOB_WARM_INTERVAL_SECONDS"
     )
 
     @field_validator("layer_gateway_url")

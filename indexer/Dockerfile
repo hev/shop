@@ -34,6 +34,10 @@ CMD ["python", "extract_chunk.py"]
 FROM base AS trending
 CMD ["python", "trending.py"]
 
+# Scheduled blob cache-warm — udfs/warm-blobs.yaml. CPU-only, no CLIP needed.
+FROM base AS warm-blobs
+CMD ["python", "warm_blobs.py"]
+
 # GPU embedding worker — pipelines/embed.yaml. Bake CLIP weights into the
 # image so cold starts on autoscaled pods don't pay the HF round-trip.
 FROM base AS embed

@@ -18,6 +18,7 @@ from hevlayer import (
     DocumentsStageResponse,
     HeartbeatDocumentsRequest,
     HevlayerError,
+    HintCacheWarmResponse,
     LayerPerf,
     LayerResponse,
     Pipeline,
@@ -27,6 +28,7 @@ from hevlayer import (
     SetDocumentsStageRequest,
     StageDocumentResponse,
     StatusResponse,
+    WarmBlobsResponse,
 )
 
 
@@ -66,6 +68,10 @@ class FakeLayerClient:
         self.list_search_history_calls: list[dict[str, Any]] = []
         self.list_clickstream_calls: list[dict[str, Any]] = []
         self.upsert_calls: list[dict[str, Any]] = []
+
+        # RFC 0055 blob cache-warm test doubles (indexer/tests/test_warm_blobs.py).
+        self.hint_cache_warm_calls: list[dict[str, Any]] = []
+        self.warm_blobs_result: WarmBlobsResponse | None = None
 
     async def ensure_pipeline(self, body: CreatePipelineRequest | dict[str, Any]) -> Pipeline:
         if isinstance(body, CreatePipelineRequest):
@@ -471,6 +477,47 @@ class FakeLayerClient:
         self.upsert_calls.append({"namespace": namespace, "body": body})
         return _attach_perf(SimpleNamespace(status="ok"), with_perf)
 
+    async def hint_cache_warm(
+        self,
+        namespace: str,
+        *,
+        turbopuffer: bool | None = None,
+        documents: bool | None = None,
+        snapshots: bool | None = None,
+        blobs: bool | None = None,
+        blob_budget_bytes: int | None = None,
+        page_size: int | None = None,
+        with_perf: bool = False,
+    ) -> HintCacheWarmResponse | LayerResponse[HintCacheWarmResponse]:
+        """RFC 0055 blob cache-warm test double (indexer/warm_blobs.py)."""
+        self.hint_cache_warm_calls.append(
+            {
+                "namespace": namespace,
+                "turbopuffer": turbopuffer,
+                "documents": documents,
+                "snapshots": snapshots,
+                "blobs": blobs,
+                "blob_budget_bytes": blob_budget_bytes,
+                "page_size": page_size,
+            }
+        )
+        blobs_section = self.warm_blobs_result or WarmBlobsResponse(
+            enabled=bool(blobs),
+            status="completed",
+            attributes=["image_blob"],
+            budget_bytes=blob_budget_bytes,
+            documents_scanned=0,
+            refs_seen=0,
+            objects=0,
+            bytes=0,
+            missing=0,
+            invalid_refs=0,
+            budget_exhausted=False,
+        )
+        return _attach_perf(
+            HintCacheWarmResponse(namespace=namespace, blobs=blobs_section), with_perf
+        )
+
 
 class FakeClipImageEmbedder:
     def __init__(self) -> None:
@@ -516,6 +563,10 @@ def make_settings(**overrides) -> SimpleNamespace:
         trending_interval_seconds=0.01,
         trending_namespace="amazon-products-trending",
         resolved_trending_namespace="amazon-products-trending",
+        # RFC 0055 blob cache-warm knobs (indexer/warm_blobs.py).
+        blob_warm_budget_bytes=22_000_000_000,
+        blob_warm_page_size=1000,
+        blob_warm_interval_seconds=0.01,
     )
     for key, value in overrides.items():
         setattr(settings, key, value)

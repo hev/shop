@@ -62,3 +62,31 @@ app.kubernetes.io/name: {{ include "hev-shop.name" . }}
 {{- define "hev-shop.webImage" -}}
 {{- printf "%s:%s" .Values.webImage.repository (.Values.webImage.tag | default .Chart.AppVersion) -}}
 {{- end -}}
+
+{{- /*
+  LAYER_GATEWAY_API_KEY env entry, shared by search / indexer-api / web.
+
+  By default it is sourced from the Layer-managed gateway secret
+  (secrets.gatewayKeySecret / gatewayKeySecretKey) via secretKeyRef, so a
+  hev-shop `helm upgrade` can never blank it: the live secret is the single
+  source of truth — the same one the gateway and the operator-generated
+  warm-blobs worker use. (The 2026-06-24 outage was a deploy that rendered the
+  key from the empty `layerApiKey` default and 401'd every read.)
+
+  optional:true preserves the local-dev "no key -> gateway middleware no-op"
+  case. Set gatewayKeySecret: "" to fall back to the chart's own secret carrying
+  secrets.layerApiKey (offline / self-contained installs).
+*/ -}}
+{{- define "hev-shop.gatewayApiKeyEnv" -}}
+- name: LAYER_GATEWAY_API_KEY
+  valueFrom:
+    secretKeyRef:
+{{- if .Values.secrets.gatewayKeySecret }}
+      name: {{ .Values.secrets.gatewayKeySecret | quote }}
+      key: {{ .Values.secrets.gatewayKeySecretKey | quote }}
+      optional: true
+{{- else }}
+      name: {{ include "hev-shop.secretName" . }}
+      key: LAYER_GATEWAY_API_KEY
+{{- end }}
+{{- end -}}

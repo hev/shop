@@ -5,7 +5,6 @@ class FetchTransportError {
     }
 }
 const DEFAULT_BASE_URL = "https://aws-us-east-1.hevlayer.com";
-const DEFAULT_TURBOPUFFER_BASE_URL = "https://aws-us-east-1.turbopuffer.com";
 const SEARCH_HISTORY_MAX_TAGS = 32;
 const SEARCH_HISTORY_MAX_TAG_LENGTH = 128;
 const SEARCH_HISTORY_TAG_RE = /^[A-Za-z0-9:_\-.=/+]+$/;
@@ -26,17 +25,11 @@ export class HevlayerError extends Error {
 export class Hevlayer {
     baseUrl;
     apiKey;
-    turbopufferApiKey;
-    turbopufferBaseUrl;
-    fallbackToTurbopuffer;
     timeout;
     fetchImpl;
     constructor(options = {}) {
         this.baseUrl = cleanBaseUrl(options.baseUrl ?? DEFAULT_BASE_URL, DEFAULT_BASE_URL);
         this.apiKey = cleanToken(options.apiKey);
-        this.turbopufferApiKey = cleanToken(options.turbopufferApiKey ?? env("TURBOPUFFER_API_KEY"));
-        this.turbopufferBaseUrl = cleanBaseUrl(options.turbopufferBaseUrl ?? env("TURBOPUFFER_API_URL") ?? DEFAULT_TURBOPUFFER_BASE_URL, DEFAULT_TURBOPUFFER_BASE_URL);
-        this.fallbackToTurbopuffer = options.fallbackToTurbopuffer ?? true;
         this.timeout = options.timeout === undefined ? 30000 : options.timeout;
         this.fetchImpl = options.fetch ?? defaultFetch();
     }
@@ -50,15 +43,22 @@ export class Hevlayer {
             signal: opts.signal,
         });
     }
+    async batchQueryNamespace(namespace_, body, opts = {}) {
+        return this.requestJson({
+            method: "POST",
+            path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/query",
+            params: undefined,
+            body: body,
+            withPerf: opts.withPerf === true,
+            signal: opts.signal,
+        });
+    }
     async branchNamespace(namespace_, body, opts = {}) {
         return this.requestJson({
             method: "POST",
             path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)),
-            params: [
-                { key: "stainless_overload", value: "branchFrom" }
-            ],
+            params: undefined,
             body: body,
-            fallback: { method: "POST", path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) },
             withPerf: opts.withPerf === true,
             signal: opts.signal,
         });
@@ -97,11 +97,18 @@ export class Hevlayer {
         return this.requestJson({
             method: "POST",
             path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)),
-            params: [
-                { key: "stainless_overload", value: "copyFrom" }
-            ],
+            params: undefined,
             body: body,
-            fallback: { method: "POST", path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) },
+            withPerf: opts.withPerf === true,
+            signal: opts.signal,
+        });
+    }
+    async createCheckpoint(namespace_, body, opts = {}) {
+        return this.requestJson({
+            method: "POST",
+            path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/checkpoints",
+            params: undefined,
+            body: body,
             withPerf: opts.withPerf === true,
             signal: opts.signal,
         });
@@ -207,7 +214,6 @@ export class Hevlayer {
             path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/_debug/recall",
             params: undefined,
             body: body,
-            fallback: { method: "POST", path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/_debug/recall" },
             withPerf: opts.withPerf === true,
             signal: opts.signal,
         });
@@ -218,7 +224,6 @@ export class Hevlayer {
             path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/explain_query",
             params: undefined,
             body: body,
-            fallback: { method: "POST", path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/explain_query" },
             withPerf: opts.withPerf === true,
             signal: opts.signal,
         });
@@ -250,6 +255,56 @@ export class Hevlayer {
             path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/documents",
             params: undefined,
             body: body,
+            withPerf: opts.withPerf === true,
+            signal: opts.signal,
+        });
+    }
+    async getBlob(namespace_, sha256, opts = {}) {
+        return this.requestBytes({
+            method: "GET",
+            path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/blobs/" + encodeURIComponent(String(sha256)),
+            params: undefined,
+            withPerf: opts.withPerf === true,
+            signal: opts.signal,
+        });
+    }
+    async getCheckpoint(namespace_, label, opts = {}) {
+        return this.requestJson({
+            method: "GET",
+            path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/checkpoints/" + encodeURIComponent(String(label)),
+            params: undefined,
+            withPerf: opts.withPerf === true,
+            signal: opts.signal,
+        });
+    }
+    async getCostRateCard(opts = {}) {
+        return this.requestJson({
+            method: "GET",
+            path: "/v2/cost/rate-card",
+            params: undefined,
+            withPerf: opts.withPerf === true,
+            signal: opts.signal,
+        });
+    }
+    async getCostSnapshot(opts = {}) {
+        return this.requestJson({
+            method: "GET",
+            path: "/v2/cost",
+            params: [
+                { key: "window", value: opts.window }
+            ],
+            withPerf: opts.withPerf === true,
+            signal: opts.signal,
+        });
+    }
+    async getCostTimeseries(opts = {}) {
+        return this.requestJson({
+            method: "GET",
+            path: "/v2/cost/timeseries",
+            params: [
+                { key: "window", value: opts.window },
+                { key: "step", value: opts.step }
+            ],
             withPerf: opts.withPerf === true,
             signal: opts.signal,
         });
@@ -343,7 +398,6 @@ export class Hevlayer {
             method: "GET",
             path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/schema",
             params: undefined,
-            fallback: { method: "GET", path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/schema" },
             withPerf: opts.withPerf === true,
             signal: opts.signal,
         });
@@ -353,7 +407,6 @@ export class Hevlayer {
             method: "GET",
             path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/metadata",
             params: undefined,
-            fallback: { method: "GET", path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/metadata" },
             withPerf: opts.withPerf === true,
             signal: opts.signal,
         });
@@ -371,6 +424,24 @@ export class Hevlayer {
         return this.requestJson({
             method: "GET",
             path: "/v2/udfs/" + encodeURIComponent(String(udfId)) + "/status",
+            params: undefined,
+            withPerf: opts.withPerf === true,
+            signal: opts.signal,
+        });
+    }
+    async getVectorstore(name, opts = {}) {
+        return this.requestJson({
+            method: "GET",
+            path: "/v2/vectorstores/" + encodeURIComponent(String(name)),
+            params: undefined,
+            withPerf: opts.withPerf === true,
+            signal: opts.signal,
+        });
+    }
+    async getWarehouse(name, opts = {}) {
+        return this.requestJson({
+            method: "GET",
+            path: "/v2/warehouses/" + encodeURIComponent(String(name)),
             params: undefined,
             withPerf: opts.withPerf === true,
             signal: opts.signal,
@@ -413,7 +484,32 @@ export class Hevlayer {
                 { key: "turbopuffer", value: opts.turbopuffer },
                 { key: "documents", value: opts.documents },
                 { key: "snapshots", value: opts.snapshots },
+                { key: "blobs", value: opts.blobs },
+                { key: "blob_budget_bytes", value: opts.blobBudgetBytes },
                 { key: "page_size", value: opts.pageSize }
+            ],
+            withPerf: opts.withPerf === true,
+            signal: opts.signal,
+        });
+    }
+    async importNamespace(namespace_, body, opts = {}) {
+        return this.requestJson({
+            method: "POST",
+            path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/import",
+            params: undefined,
+            body: body,
+            bodyContentType: "application/vnd.apache.arrow.stream",
+            withPerf: opts.withPerf === true,
+            signal: opts.signal,
+        });
+    }
+    async listCheckpoints(namespace_, opts = {}) {
+        return this.requestJson({
+            method: "GET",
+            path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/checkpoints",
+            params: [
+                { key: "limit", value: opts.limit },
+                { key: "before", value: opts.before }
             ],
             withPerf: opts.withPerf === true,
             signal: opts.signal,
@@ -547,7 +643,6 @@ export class Hevlayer {
                 { key: "prefix", value: opts.prefix },
                 { key: "page_size", value: opts.pageSize }
             ],
-            fallback: { method: "GET", path: "/v1/namespaces" },
             withPerf: opts.withPerf === true,
             signal: opts.signal,
         });
@@ -556,6 +651,24 @@ export class Hevlayer {
         return this.requestJson({
             method: "GET",
             path: "/v2/udfs",
+            params: undefined,
+            withPerf: opts.withPerf === true,
+            signal: opts.signal,
+        });
+    }
+    async listVectorstores(opts = {}) {
+        return this.requestJson({
+            method: "GET",
+            path: "/v2/vectorstores",
+            params: undefined,
+            withPerf: opts.withPerf === true,
+            signal: opts.signal,
+        });
+    }
+    async listWarehouses(opts = {}) {
+        return this.requestJson({
+            method: "GET",
+            path: "/v2/warehouses",
             params: undefined,
             withPerf: opts.withPerf === true,
             signal: opts.signal,
@@ -580,24 +693,24 @@ export class Hevlayer {
             signal: opts.signal,
         });
     }
-    async multiQueryTurbopufferNamespace(namespace_, body, opts = {}) {
-        return this.requestJson({
-            method: "POST",
-            path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/query",
-            params: [
-                { key: "stainless_overload", value: "multiQuery" }
-            ],
-            body: body,
-            fallback: { method: "POST", path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/query" },
-            withPerf: opts.withPerf === true,
-            signal: opts.signal,
-        });
-    }
     async pauseUdf(udfId, opts = {}) {
         return this.requestJson({
             method: "POST",
             path: "/v2/udfs/" + encodeURIComponent(String(udfId)) + "/pause",
             params: undefined,
+            withPerf: opts.withPerf === true,
+            signal: opts.signal,
+        });
+    }
+    async putBlob(namespace_, body, opts = {}) {
+        return this.requestJson({
+            method: "PUT",
+            path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/blobs",
+            params: [
+                { key: "warm", value: opts.warm }
+            ],
+            body: body,
+            bodyContentType: "application/octet-stream",
             withPerf: opts.withPerf === true,
             signal: opts.signal,
         });
@@ -616,6 +729,26 @@ export class Hevlayer {
         return this.requestJson({
             method: "PUT",
             path: "/v2/pipelines/" + encodeURIComponent(String(pipelineId)) + "/documents/" + encodeURIComponent(String(docId)) + "/vectors",
+            params: undefined,
+            body: body,
+            withPerf: opts.withPerf === true,
+            signal: opts.signal,
+        });
+    }
+    async query(body, opts = {}) {
+        return this.requestJson({
+            method: "POST",
+            path: "/v2/query",
+            params: undefined,
+            body: body,
+            withPerf: opts.withPerf === true,
+            signal: opts.signal,
+        });
+    }
+    async queryAgent(name, body, opts = {}) {
+        return this.requestJson({
+            method: "POST",
+            path: "/v2/agents/" + encodeURIComponent(String(name)) + "/query",
             params: undefined,
             body: body,
             withPerf: opts.withPerf === true,
@@ -685,7 +818,6 @@ export class Hevlayer {
             params: undefined,
             body: body,
             headers: this.searchHistoryHeaders(opts.searchQuery, opts.tags),
-            fallback: { method: "POST", path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/query", transform: "query_namespace" },
             withPerf: opts.withPerf === true,
             signal: opts.signal,
         });
@@ -693,10 +825,9 @@ export class Hevlayer {
     async queryTurbopufferNamespace(namespace_, body, opts = {}) {
         return this.requestJson({
             method: "POST",
-            path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/query",
+            path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/query",
             params: undefined,
             body: body,
-            fallback: { method: "POST", path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/query" },
             withPerf: opts.withPerf === true,
             signal: opts.signal,
         });
@@ -744,7 +875,6 @@ export class Hevlayer {
             path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/metadata",
             params: undefined,
             body: body,
-            fallback: { method: "PATCH", path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/metadata" },
             withPerf: opts.withPerf === true,
             signal: opts.signal,
         });
@@ -755,7 +885,6 @@ export class Hevlayer {
             path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/schema",
             params: undefined,
             body: body,
-            fallback: { method: "POST", path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/schema" },
             withPerf: opts.withPerf === true,
             signal: opts.signal,
         });
@@ -777,7 +906,6 @@ export class Hevlayer {
             path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)),
             params: undefined,
             body: body,
-            fallback: { method: "POST", path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) },
             withPerf: opts.withPerf === true,
             signal: opts.signal,
         });
@@ -874,11 +1002,7 @@ export class Hevlayer {
             response = await this.fetchJson(this.baseUrl, this.apiKey, request);
         }
         catch (error) {
-            const originalError = unwrapTransportError(error);
-            if (!request.fallback || !isTransportFallbackError(error)) {
-                throw originalError;
-            }
-            return this.requestTurbopufferJson(originalError, started, request);
+            throw unwrapTransportError(error);
         }
         const latencyMs = nowMs() - started;
         const cacheStatus = response.headers.get("x-layer-cache");
@@ -889,7 +1013,7 @@ export class Hevlayer {
         const data = raw;
         this.applyLayerHeaders(data, response.headers);
         if (request.withPerf) {
-            return { data, perf: { latencyMs, cacheStatus, fallback: null } };
+            return { data, perf: { latencyMs, cacheStatus } };
         }
         return data;
     }
@@ -925,47 +1049,7 @@ export class Hevlayer {
         }
         const data = new Uint8Array(await response.arrayBuffer());
         if (request.withPerf) {
-            return { data, perf: { latencyMs, cacheStatus, fallback: null } };
-        }
-        return data;
-    }
-    async requestTurbopufferJson(originalError, started, request) {
-        if (!this.canFallbackToTurbopuffer() || !request.fallback) {
-            throw originalError;
-        }
-        let body;
-        try {
-            body = this.fallbackBody(request.fallback, request.body);
-        }
-        catch {
-            throw originalError;
-        }
-        console.warn("hevlayer gateway unreachable; falling through to Turbopuffer direct for " +
-            request.fallback.method +
-            " " +
-            request.fallback.path);
-        let response;
-        try {
-            response = await this.fetchJson(this.turbopufferBaseUrl, this.turbopufferApiKey, {
-                method: request.fallback.method,
-                path: request.fallback.path,
-                params: request.params,
-                body,
-                signal: request.signal,
-            });
-        }
-        catch (error) {
-            throw unwrapTransportError(error);
-        }
-        const latencyMs = nowMs() - started;
-        let raw = await this.decodeJsonResponse(response);
-        if (!response.ok) {
-            throw this.errorFromResponse(response, raw);
-        }
-        raw = this.fallbackResponse(request.fallback, raw);
-        const data = raw;
-        if (request.withPerf) {
-            return { data, perf: { latencyMs, cacheStatus: null, fallback: "turbopuffer_direct" } };
+            return { data, perf: { latencyMs, cacheStatus } };
         }
         return data;
     }
@@ -978,7 +1062,11 @@ export class Hevlayer {
         if (apiKey) {
             headers.set("Authorization", "Bearer " + apiKey);
         }
-        if (request.body !== undefined && request.body !== null) {
+        if (request.bodyContentType) {
+            headers.set("Content-Type", request.bodyContentType);
+            init.body = request.body;
+        }
+        else if (request.body !== undefined && request.body !== null) {
             headers.set("Content-Type", "application/json");
             init.body = JSON.stringify(request.body);
         }
@@ -1056,21 +1144,6 @@ export class Hevlayer {
         }
         return Object.keys(headers).length ? headers : undefined;
     }
-    canFallbackToTurbopuffer() {
-        return this.fallbackToTurbopuffer && this.turbopufferApiKey !== null;
-    }
-    fallbackBody(fallback, value) {
-        if (fallback.transform === "query_namespace") {
-            return turbopufferQueryBody(value);
-        }
-        return value;
-    }
-    fallbackResponse(fallback, value) {
-        if (fallback.transform === "query_namespace") {
-            return queryResponseFromTurbopuffer(value);
-        }
-        return value;
-    }
     async decodeJsonResponse(response) {
         if (response.status === 204) {
             return undefined;
@@ -1102,14 +1175,6 @@ function defaultFetch() {
     }
     return globalThis.fetch.bind(globalThis);
 }
-function env(name) {
-    try {
-        return typeof process !== "undefined" ? process.env?.[name] : undefined;
-    }
-    catch {
-        return undefined;
-    }
-}
 function cleanBaseUrl(value, fallback) {
     const cleaned = String(value ?? "").trim();
     return (cleaned || fallback).replace(/\/+$/, "");
@@ -1139,50 +1204,8 @@ function cleanHistoryTags(tags) {
     }
     return unique;
 }
-function turbopufferQueryBody(value) {
-    if (!isRecord(value)) {
-        throw new Error("query fallback requires an object body");
-    }
-    if (value.nearest_to_id !== undefined && value.nearest_to_id !== null) {
-        throw new Error("query fallback cannot resolve layer-only fields");
-    }
-    if (value.nearestToId !== undefined && value.nearestToId !== null) {
-        throw new Error("query fallback cannot resolve layer-only fields");
-    }
-    if (value.cursor !== undefined && value.cursor !== null) {
-        throw new Error("query fallback cannot resolve layer-only fields");
-    }
-    const vector = value.vector;
-    if (!Array.isArray(vector) || vector.length === 0) {
-        throw new Error("query fallback requires vector");
-    }
-    const body = {
-        rank_by: ["vector", "ANN", vector],
-        top_k: value.top_k ?? 10,
-        consistency: { level: "eventual" },
-    };
-    if (value.filters !== undefined && value.filters !== null) {
-        body.filters = value.filters;
-    }
-    if (value.include_attributes !== undefined && value.include_attributes !== null) {
-        body.include_attributes = value.include_attributes;
-    }
-    return body;
-}
-function queryResponseFromTurbopuffer(value) {
-    return isRecord(value) ? value : {};
-}
 function isRecord(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function isTransportFallbackError(error) {
-    if (!(error instanceof FetchTransportError)) {
-        return false;
-    }
-    if (error.cause instanceof DOMException && error.cause.name === "AbortError") {
-        return false;
-    }
-    return true;
 }
 function unwrapTransportError(error) {
     return error instanceof FetchTransportError ? error.cause : error;

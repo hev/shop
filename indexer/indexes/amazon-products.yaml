@@ -1,0 +1,54 @@
+# Index snapshot policy for the amazon-products namespace.
+#
+# Why this exists: the Layer operator auto-discovered this index (its live spec
+# carries metadata.annotations hevlayer.com/discovered=true) with NO snapshot
+# policy. Without a policy the gateway never precomputes/persists facet
+# snapshots, so the read API's /meta has to create on-demand snapshots that fan
+# out a full scan and depend on a live stable consistency watermark — seconds of
+# latency, and broken outright when the watermark is behind (hev/layer#97).
+#
+# Declaring spec.snapshot.facetFields makes the gateway materialize the category
+# facet histogram on `interval` and durably store it (`retention`). The read API
+# then fetches it via source="stored": a sub-ms, watermark-decoupled read of the
+# S3 body (Aerospike-cached) that carries its own watermark_ms. This mirrors the
+# moment-segments index, whose declared snapshot policy is why its facets work.
+#
+# facetFields caps distinct values at 10,000/field (gateway lists anything over
+# the cap in fields_skipped rather than partial data). `category` is low
+# cardinality, so it materializes fully; revisit if higher-cardinality facets
+# are added.
+#
+# Ownership / apply: Index CRs are reconciled by the Layer operator in the
+# `layer` namespace (not hev-shop, where the shop's Pipeline/Function CRs live),
+# so this manifest pins metadata.namespace: layer. deploy.sh does not apply it;
+# apply manually after deploy:
+#
+#   kubectl apply -f indexer/indexes/amazon-products.yaml
+#
+# The backend / blobs / consistency fields replicate the discovered spec so a
+# declarative apply does not drop them. blobs.referenceAttributes is load-bearing
+# for product-image blob serving (RFC 0055) — do not remove it.
+#
+# NOTE: producing a fresh snapshot still requires a stable consistency watermark,
+# so while hev/layer#97 keeps amazon-products' watermark stuck no body will be
+# materialized yet; until then source="stored" reads fail fast and /meta serves
+# count + freshness with no facets. Once the watermark recovers, this policy
+# keeps a durable, fast facet snapshot.
+apiVersion: hevlayer.com/v1
+kind: Index
+metadata:
+  name: amazon-products
+  namespace: layer
+spec:
+  backend:
+    distanceMetric: cosine_distance
+    namespace: amazon-products
+  blobs:
+    referenceAttributes:
+      - image_blob
+  consistency: eventual
+  snapshot:
+    facetFields:
+      - category
+    interval: 5m
+    retention: never

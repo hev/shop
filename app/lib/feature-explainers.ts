@@ -43,7 +43,7 @@ const EXPLAINERS: Record<string, FeatureExplainer> = {
       { label: "Fusion", detail: "reciprocal rank fusion (RRF)" },
     ],
     call:
-      'POST /v2/namespaces/amazon-products/query?stainless_overload=multiQuery\n{ "queries": [ { "nearest_to_id": ["<asin>"] }, … ] }',
+      'POST /v2/namespaces/amazon-products/query\n{ "queries": [ { "nearest_to_id": ["<asin>"] }, … ] }',
     docs: [
       { label: "Multi-query", href: `${DOCS}/api/query#multi-query` },
       { label: "Query by id", href: `${DOCS}/api/query#query-by-id` },

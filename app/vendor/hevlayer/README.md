@@ -14,7 +14,6 @@ import { Hevlayer } from "hevlayer";
 const client = new Hevlayer({
   baseUrl: process.env.LAYER_GATEWAY_URL,
   apiKey: process.env.LAYER_GATEWAY_API_KEY,
-  turbopufferApiKey: process.env.TURBOPUFFER_API_KEY,
 });
 
 const response = await client.queryNamespace(
@@ -31,24 +30,16 @@ console.log(response.perf.latencyMs, response.perf.cacheStatus);
 console.log(response.data.rows);
 ```
 
-## Direct Turbopuffer Fallback
-
-When configured with `turbopufferApiKey` or `TURBOPUFFER_API_KEY`,
-`Hevlayer` falls through to Turbopuffer direct if the gateway is unreachable
-for simple vector queries and raw Turbopuffer-compatible methods such as
-`writeNamespace`, `queryTurbopufferNamespace`, and
-`listTurbopufferNamespaces`. Layer-only methods such as fetch, warm jobs,
-pipelines, UDFs, and `nearest_to_id` queries still fail fast because they
-depend on gateway state. Disable this with `fallbackToTurbopuffer: false`.
-
 ## Generated Operations
 
 - `authenticateKey`
+- `batchQueryNamespace`
 - `branchNamespace`
 - `claimDocuments`
 - `claimUdfItems`
 - `completeUdfItems`
 - `copyNamespace`
+- `createCheckpoint`
 - `createPipeline`
 - `createScan`
 - `createSnapshot`
@@ -64,6 +55,11 @@ depend on gateway state. Disable this with `fallbackToTurbopuffer: false`.
 - `failUdfItems`
 - `fetchDocument`
 - `fetchDocuments`
+- `getBlob`
+- `getCheckpoint`
+- `getCostRateCard`
+- `getCostSnapshot`
+- `getCostTimeseries`
 - `getKey`
 - `getMetricCatalogEntry`
 - `getNamespaceMetadata`
@@ -77,10 +73,14 @@ depend on gateway state. Disable this with `fallbackToTurbopuffer: false`.
 - `getTurbopufferV1NamespaceMetadata`
 - `getUdf`
 - `getUdfStatus`
+- `getVectorstore`
+- `getWarehouse`
 - `getWarmJob`
 - `heartbeatDocuments`
 - `heartbeatUdfItems`
 - `hintCacheWarm`
+- `importNamespace`
+- `listCheckpoints`
 - `listClickstream`
 - `listKeys`
 - `listMetricsCatalog`
@@ -93,12 +93,16 @@ depend on gateway state. Disable this with `fallbackToTurbopuffer: false`.
 - `listSnapshotJobs`
 - `listTurbopufferNamespaces`
 - `listUdfs`
+- `listVectorstores`
+- `listWarehouses`
 - `listWarmJobs`
 - `mintKey`
-- `multiQueryTurbopufferNamespace`
 - `pauseUdf`
+- `putBlob`
 - `putPipelineDocumentChunks`
 - `putPipelineDocumentVectors`
+- `query`
+- `queryAgent`
 - `queryMetrics`
 - `queryMetricsApiV1`
 - `queryMetricsRange`

@@ -29,10 +29,20 @@ secrets:
   create: true
   existingSecret: ""
   hfToken: ""
-  # Required since layer#10 — bearer token the gateway accepts on /v1 + /v2.
-  # In our deploys this is the same value as the gateway's TURBOPUFFER_API_KEY
-  # (see layer's scripts/deploy-layer.sh). Leave blank for local dev against a
-  # gateway started without LAYER_GATEWAY_API_KEY (middleware is a no-op then).
+  # LAYER_GATEWAY_API_KEY (bearer the gateway accepts on /v1 + /v2, required
+  # since layer#10) is sourced from this existing, Layer-managed secret via
+  # secretKeyRef so a hev-shop `helm upgrade` cannot blank it. This is the same
+  # secret/key the gateway and the operator-generated warm-blobs worker use.
+  # The 2026-06-24 outage was a deploy that rendered the key from the empty
+  # layerApiKey default below and 401'd every read; sourcing it here removes the
+  # easy-to-forget deploy-time value. Set gatewayKeySecret: "" to fall back to
+  # layerApiKey (offline / self-contained installs).
+  gatewayKeySecret: layer
+  gatewayKeySecretKey: turbopuffer-api-key
+  # Fallback bearer token, used only when gatewayKeySecret is "". In our deploys
+  # this equals the gateway's TURBOPUFFER_API_KEY (see layer's
+  # scripts/deploy-layer.sh). Leave blank for local dev against a gateway started
+  # without LAYER_GATEWAY_API_KEY (middleware is a no-op then).
   layerApiKey: ""
 
 persistence:

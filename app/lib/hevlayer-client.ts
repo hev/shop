@@ -25,8 +25,8 @@ import type { Product } from "./types";
 // Strategic constraint ([[project-strategic-goals]]): the storefront talks to
 // Layer only, never a direct turbopuffer client — the gateway adds the doc
 // cache and the `_upserted_at` freshness watermark this app depends on. So the
-// client is built with `fallbackToTurbopuffer: false`: a gateway outage fails
-// the rail (which degrades to invisible) rather than silently bypassing Layer.
+// the rail depends on the gateway path: a gateway outage fails the rail (which
+// degrades to invisible) rather than silently bypassing Layer.
 
 const GATEWAY_URL = process.env.LAYER_GATEWAY_URL ?? "";
 const GATEWAY_API_KEY = (process.env.LAYER_GATEWAY_API_KEY ?? "").trim();
@@ -103,8 +103,6 @@ function gateway(): Hevlayer {
     singleton = new Hevlayer({
       baseUrl: GATEWAY_URL,
       apiKey: GATEWAY_API_KEY,
-      // Layer-only: never fall through to a direct turbopuffer client.
-      fallbackToTurbopuffer: false,
     });
   }
   return singleton;
@@ -128,7 +126,7 @@ export class HevlayerClient {
     }
 
     // One leg per seed, batched into a single multi-query round trip:
-    //   POST /v2/namespaces/{ns}/query?stainless_overload=multiQuery
+    //   POST /v2/namespaces/{ns}/query
     //   { "queries": [ { "nearest_to_id": ["<seed>"], "top_k": … }, … ] }
     // The gateway resolves each seed's stored vector per leg and returns a
     // parallel `results` array (one ranking per leg) that we fuse below. Each
@@ -142,7 +140,7 @@ export class HevlayerClient {
       })),
     };
 
-    const batch = await gateway().multiQueryTurbopufferNamespace(
+    const batch = await gateway().batchQueryNamespace(
       namespace,
       body,
       { withPerf: true },

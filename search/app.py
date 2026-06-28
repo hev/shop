@@ -156,10 +156,20 @@ async def get_field_snapshot(
     field: str,
     *,
     timeout: float | None,
+    source: str = "stored",
 ):
+    # Read the precomputed ("stored") facet snapshot the index snapshot policy
+    # materializes on a schedule: a durable S3 body (Aerospike-cached) that
+    # carries its own watermark_ms, so the read is sub-ms and decoupled from the
+    # live consistency watermark. source="auto" instead fans out an on-demand
+    # scan that needs a live stable watermark — seconds of latency, and broken
+    # when the watermark is behind (hev/layer#97). The stored body requires
+    # spec.snapshot.facetFields on the index CR (indexer/indexes/
+    # amazon-products.yaml); without it the read fails fast with "no snapshot
+    # available" and the caller degrades to no facets.
     job = await layer.create_snapshot(
         namespace,
-        CreateSnapshotRequest(field=field),
+        CreateSnapshotRequest(field=field, source=source),
     )
     if job.status != "completed":
         job = await wait_for_snapshot_job(
@@ -688,22 +698,39 @@ async def meta(request: Request, namespace: str | None = None) -> MetaResponse:
                 if time.monotonic() - cached_at < cache_ttl:
                     return cached_response
 
-        metadata_response, category_snapshot = await asyncio.gather(
-            layer.get_namespace_metadata(resolved_namespace, with_perf=True),
-            get_field_snapshot(
+        # Namespace metadata (row count + freshness) is a fast gateway read and
+        # the load-bearing part of /meta. Category facets are read from the
+        # precomputed ("stored") snapshot the index snapshot policy materializes
+        # (get_field_snapshot, source="stored") — sub-ms and watermark-decoupled.
+        # When that policy isn't configured yet, or no body exists, the read
+        # fails fast and we degrade to no facets rather than 500ing the whole
+        # endpoint, so the storefront home never stalls on /meta. See hev/layer#97
+        # and indexer/indexes/amazon-products.yaml.
+        metadata_response = await layer.get_namespace_metadata(
+            resolved_namespace, with_perf=True
+        )
+
+        categories: list[CategoryBucket] = []
+        try:
+            category_snapshot = await get_field_snapshot(
                 layer,
                 resolved_namespace,
                 "category",
-                timeout=settings.http_timeout_seconds,
-            ),
-        )
-
-        categories = [
-            CategoryBucket(value=value.v, doc_count=value.n)
-            for field in category_snapshot.fields
-            if field.name == "category"
-            for value in field.values
-        ]
+                timeout=settings.meta_snapshot_timeout_seconds,
+            )
+            categories = [
+                CategoryBucket(value=value.v, doc_count=value.n)
+                for field in category_snapshot.fields
+                if field.name == "category"
+                for value in field.values
+            ]
+        except Exception:
+            logger.warning(
+                "meta: category facets unavailable for %s; serving count + "
+                "freshness only (see hev/layer#97)",
+                resolved_namespace,
+                exc_info=True,
+            )
 
         metadata = metadata_response.data
         layer_block = _layer_block(metadata)

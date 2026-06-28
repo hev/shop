@@ -32,3 +32,6 @@ build/
 # global dist/ ignore above. Refresh with scripts/sync-ts-client.sh.
 !app/vendor/hevlayer/dist/
 !app/vendor/hevlayer/dist/**
+
+# agent-local trace data — never committed
+.claude/traces/

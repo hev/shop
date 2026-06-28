@@ -1,0 +1,40 @@
+# Blob cache-warm (RFC 0055) — the reduce sibling of trending.yaml.
+#
+# Invoked on a schedule, the worker (indexer/warm_blobs.py) makes one
+# `hint_cache_warm?blobs=true` call that hydrates `image_blob`-referenced product
+# images onto the gateway's NVMe document cache up to BLOB_WARM_BUDGET_BYTES. Like
+# trending, the gateway owns the scan + writes, so there is deliberately NO
+# `spec.sources` / `spec.output` here (the CLAUDE.md authoring split: the operator
+# owns worker shape + triggering; the read/warm call stays in SDK code).
+#
+# Why scheduled, not one-shot: the document cache is `resetOnStart: true`, wiped on
+# every gateway restart, so the warm must recur to stay effective. The 6h cadence
+# re-warms the hot set after restarts; the long tail warms reactively on read.
+#
+# Apply with `kubectl apply -f indexer/udfs/` once the warm-blobs worker image is
+# deployed (deploy.sh applies pipelines/, not udfs/). For local runs use
+# WARM_RUN_ONCE=1.
+#
+apiVersion: hevlayer.com/v1alpha1
+kind: Function
+metadata:
+  name: hev-shop-warm-blobs
+  namespace: hev-shop
+spec:
+  # A reduce has no per-row discovery, so no targetNamespaces / filter.
+  triggers: [schedule]
+  schedule:
+    cron: "0 */6 * * *"          # every 6h (minute field is a single integer, RFC 0040 §2)
+    # A full 22 GiB blob warm is one long synchronous hint_cache_warm request
+    # (pages S3 -> Aerospike); it runs well past the default 5-min KEDA window.
+    # leaseSeconds widens the window so the worker isn't scaled down mid-warm:
+    # window = clamp(leaseSeconds/60 + 1, 5, 55) min. 1800 -> ~31 min.
+    leaseSeconds: 1800
+  worker:
+    image: 186219257916.dkr.ecr.us-east-1.amazonaws.com/hev-shop-indexer:latest-warm-blobs
+  scaling:
+    pool: cpu-large              # warm is a gateway call; CPU-only, no CLIP
+    mode: autoscale
+    replicas:
+      min: 0
+      max: 1

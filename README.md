@@ -208,6 +208,21 @@ PYTHONPATH=common:../layer/clients/python/src \
   python indexer/blob_backfill.py --id B0BN13GCLC --apply
 ```
 
+Backfill writes blobs durably to S3 and references them on rows; it does not put
+them on NVMe. The gateway's document cache warms reactively (first read pulls
+S3 -> NVMe), and the `hev-shop-warm-blobs` `Function` (`indexer/udfs/warm-blobs.yaml`)
+proactively re-warms the hot set on a schedule via `hint_cache_warm?blobs=true`.
+The cache is 64 GiB shared with documents and `resetOnStart: true` (wiped on every
+gateway restart), so the warm is bounded by `BLOB_WARM_BUDGET_BYTES` (default
+~22 GiB) and recurs rather than running once. Warm once locally with:
+
+```sh
+PYTHONPATH=common:../layer/clients/python/src \
+  LAYER_GATEWAY_URL=http://127.0.0.1:8080 \
+  LAYER_GATEWAY_API_KEY=... \
+  WARM_RUN_ONCE=1 python indexer/warm_blobs.py
+```
+
 Enable app-owned Karpenter NodePools:
 
 ```sh

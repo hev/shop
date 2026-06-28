@@ -43,11 +43,9 @@ spec:
               value: {{ default (printf "http://%s-search.%s.svc.cluster.local:8080" (include "hev-shop.fullname" .) .Release.Namespace) .Values.web.apiBaseUrl | quote }}
             - name: LAYER_GATEWAY_URL
               value: {{ .Values.layer.gatewayUrl | quote }}
-            - name: LAYER_GATEWAY_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "hev-shop.secretName" . }}
-                  key: LAYER_GATEWAY_API_KEY
+            # Sourced from the Layer-managed secret so a deploy can't blank it
+            # (the web pod's /api/blobs image proxy bearer-auths to the gateway).
+            {{- include "hev-shop.gatewayApiKeyEnv" . | nindent 12 }}
             - name: LAYER_PRODUCT_NAMESPACE
               value: {{ .Values.pipeline.product.namespace | quote }}
             - name: NODE_ENV

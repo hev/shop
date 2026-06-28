@@ -1,9 +1,14 @@
 # Layer UDFs (Functions)
 
 Home for app-owned Layer `Function` resources, the sibling of the `Pipeline`
-resources in `../pipelines/`. The first is `trending.yaml` (RFC 0040; see
-`../../docs/TRENDING_DESIGN.md`) — a scheduled *reduce* over search-history,
-backed by the Layer Function `schedule` trigger.
+resources in `../pipelines/`. Two scheduled *reduces* live here, both backed by
+the Layer Function `schedule` trigger:
+
+- `trending.yaml` (RFC 0040; see `../../docs/TRENDING_DESIGN.md`) — a reduce over
+  search-history that materializes the trending-queries namespace.
+- `warm-blobs.yaml` (RFC 0055) — re-warms product-image blobs onto the gateway
+  NVMe document cache via `hint_cache_warm?blobs=true`, bounded by
+  `BLOB_WARM_BUDGET_BYTES`. Recurs because that cache is `resetOnStart: true`.
 
 A `Function` (UDF) is the declarative surface for derived/enrichment work that
 runs *over indexed namespaces* rather than a staged ingest queue: it's

@@ -1,15 +1,10 @@
 import type * as Models from "./models.js";
 
-declare const process: { env?: Record<string, string | undefined> } | undefined;
-
 export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 export interface HevlayerOptions {
   baseUrl?: string | null;
   apiKey?: string | null;
-  turbopufferApiKey?: string | null;
-  turbopufferBaseUrl?: string | null;
-  fallbackToTurbopuffer?: boolean;
   timeout?: number | null;
   fetch?: FetchLike;
 }
@@ -23,6 +18,15 @@ export interface FetchDocumentOptions extends RequestOptions {
   includeAttributes?: string[];
 }
 
+export interface GetCostSnapshotOptions extends RequestOptions {
+  window?: Models.CostWindow;
+}
+
+export interface GetCostTimeseriesOptions extends RequestOptions {
+  window?: Models.CostWindow;
+  step?: Models.CostStep;
+}
+
 export interface GetScanResultsOptions extends RequestOptions {
   limit?: number;
   offset?: number;
@@ -32,7 +36,14 @@ export interface HintCacheWarmOptions extends RequestOptions {
   turbopuffer?: boolean;
   documents?: boolean;
   snapshots?: boolean;
+  blobs?: boolean;
+  blobBudgetBytes?: number;
   pageSize?: number;
+}
+
+export interface ListCheckpointsOptions extends RequestOptions {
+  limit?: number;
+  before?: string;
 }
 
 export interface ListClickstreamOptions extends RequestOptions {
@@ -84,6 +95,10 @@ export interface ListTurbopufferNamespacesOptions extends RequestOptions {
   pageSize?: number;
 }
 
+export interface PutBlobOptions extends RequestOptions {
+  warm?: boolean;
+}
+
 export interface QueryMetricsOptions extends RequestOptions {
   query?: string;
   time?: string;
@@ -124,7 +139,6 @@ export interface WarmCacheOptions extends RequestOptions {
 export interface LayerPerf {
   latencyMs: number;
   cacheStatus: string | null;
-  fallback: string | null;
 }
 
 export interface LayerResponse<T> {
@@ -142,16 +156,10 @@ interface JsonRequest {
   path: string;
   params?: QueryParam[];
   body?: unknown;
+  bodyContentType?: string;
   headers?: Record<string, string>;
-  fallback?: TurbopufferFallback;
   withPerf?: boolean;
   signal?: AbortSignal;
-}
-
-interface TurbopufferFallback {
-  method: string;
-  path: string;
-  transform?: "query_namespace";
 }
 
 class FetchTransportError {
@@ -163,7 +171,6 @@ class FetchTransportError {
 }
 
 const DEFAULT_BASE_URL = "https://aws-us-east-1.hevlayer.com";
-const DEFAULT_TURBOPUFFER_BASE_URL = "https://aws-us-east-1.turbopuffer.com";
 const SEARCH_HISTORY_MAX_TAGS = 32;
 const SEARCH_HISTORY_MAX_TAG_LENGTH = 128;
 const SEARCH_HISTORY_TAG_RE = /^[A-Za-z0-9:_\-.=/+]+$/;
@@ -187,21 +194,12 @@ export class HevlayerError extends Error {
 export class Hevlayer {
   private readonly baseUrl: string;
   private readonly apiKey: string | null;
-  private readonly turbopufferApiKey: string | null;
-  private readonly turbopufferBaseUrl: string;
-  private readonly fallbackToTurbopuffer: boolean;
   private readonly timeout: number | null;
   private readonly fetchImpl: FetchLike;
 
   constructor(options: HevlayerOptions = {}) {
     this.baseUrl = cleanBaseUrl(options.baseUrl ?? DEFAULT_BASE_URL, DEFAULT_BASE_URL);
     this.apiKey = cleanToken(options.apiKey);
-    this.turbopufferApiKey = cleanToken(options.turbopufferApiKey ?? env("TURBOPUFFER_API_KEY"));
-    this.turbopufferBaseUrl = cleanBaseUrl(
-      options.turbopufferBaseUrl ?? env("TURBOPUFFER_API_URL") ?? DEFAULT_TURBOPUFFER_BASE_URL,
-      DEFAULT_TURBOPUFFER_BASE_URL,
-    );
-    this.fallbackToTurbopuffer = options.fallbackToTurbopuffer ?? true;
     this.timeout = options.timeout === undefined ? 30000 : options.timeout;
     this.fetchImpl = options.fetch ?? defaultFetch();
   }
@@ -220,17 +218,28 @@ export class Hevlayer {
   }
 
 
+  async batchQueryNamespace(namespace_: string, body: Models.BatchQueryRequest | Record<string, unknown>, opts?: RequestOptions & { withPerf?: false }): Promise<Models.BatchQueryResponse>;
+  async batchQueryNamespace(namespace_: string, body: Models.BatchQueryRequest | Record<string, unknown>, opts: RequestOptions & { withPerf: true }): Promise<LayerResponse<Models.BatchQueryResponse>>;
+  async batchQueryNamespace(namespace_: string, body: Models.BatchQueryRequest | Record<string, unknown>, opts: RequestOptions = {}): Promise<Models.BatchQueryResponse | LayerResponse<Models.BatchQueryResponse>> {
+    return this.requestJson<Models.BatchQueryResponse>({
+      method: "POST",
+      path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/query",
+      params: undefined,
+        body: body,
+      withPerf: opts.withPerf === true,
+      signal: opts.signal,
+    }) as Promise<Models.BatchQueryResponse | LayerResponse<Models.BatchQueryResponse>>;
+  }
+
+
   async branchNamespace(namespace_: string, body: Models.TurbopufferBranchFromRequest | Record<string, unknown>, opts?: RequestOptions & { withPerf?: false }): Promise<Models.TurbopufferWriteResponse>;
   async branchNamespace(namespace_: string, body: Models.TurbopufferBranchFromRequest | Record<string, unknown>, opts: RequestOptions & { withPerf: true }): Promise<LayerResponse<Models.TurbopufferWriteResponse>>;
   async branchNamespace(namespace_: string, body: Models.TurbopufferBranchFromRequest | Record<string, unknown>, opts: RequestOptions = {}): Promise<Models.TurbopufferWriteResponse | LayerResponse<Models.TurbopufferWriteResponse>> {
     return this.requestJson<Models.TurbopufferWriteResponse>({
       method: "POST",
       path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)),
-      params: [
-        { key: "stainless_overload", value: "branchFrom" }
-      ],
+      params: undefined,
         body: body,
-        fallback: { method: "POST", path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) },
       withPerf: opts.withPerf === true,
       signal: opts.signal,
     }) as Promise<Models.TurbopufferWriteResponse | LayerResponse<Models.TurbopufferWriteResponse>>;
@@ -285,14 +294,25 @@ export class Hevlayer {
     return this.requestJson<Models.TurbopufferWriteResponse>({
       method: "POST",
       path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)),
-      params: [
-        { key: "stainless_overload", value: "copyFrom" }
-      ],
+      params: undefined,
         body: body,
-        fallback: { method: "POST", path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) },
       withPerf: opts.withPerf === true,
       signal: opts.signal,
     }) as Promise<Models.TurbopufferWriteResponse | LayerResponse<Models.TurbopufferWriteResponse>>;
+  }
+
+
+  async createCheckpoint(namespace_: string, body: Models.CreateCheckpointRequest | Record<string, unknown>, opts?: RequestOptions & { withPerf?: false }): Promise<Models.Checkpoint>;
+  async createCheckpoint(namespace_: string, body: Models.CreateCheckpointRequest | Record<string, unknown>, opts: RequestOptions & { withPerf: true }): Promise<LayerResponse<Models.Checkpoint>>;
+  async createCheckpoint(namespace_: string, body: Models.CreateCheckpointRequest | Record<string, unknown>, opts: RequestOptions = {}): Promise<Models.Checkpoint | LayerResponse<Models.Checkpoint>> {
+    return this.requestJson<Models.Checkpoint>({
+      method: "POST",
+      path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/checkpoints",
+      params: undefined,
+        body: body,
+      withPerf: opts.withPerf === true,
+      signal: opts.signal,
+    }) as Promise<Models.Checkpoint | LayerResponse<Models.Checkpoint>>;
   }
 
 
@@ -439,7 +459,6 @@ export class Hevlayer {
       path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/_debug/recall",
       params: undefined,
         body: body,
-        fallback: { method: "POST", path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/_debug/recall" },
       withPerf: opts.withPerf === true,
       signal: opts.signal,
     }) as Promise<Models.TurbopufferRecallResponse | LayerResponse<Models.TurbopufferRecallResponse>>;
@@ -454,7 +473,6 @@ export class Hevlayer {
       path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/explain_query",
       params: undefined,
         body: body,
-        fallback: { method: "POST", path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/explain_query" },
       withPerf: opts.withPerf === true,
       signal: opts.signal,
     }) as Promise<Models.TurbopufferExplainQueryResponse | LayerResponse<Models.TurbopufferExplainQueryResponse>>;
@@ -501,6 +519,76 @@ export class Hevlayer {
       withPerf: opts.withPerf === true,
       signal: opts.signal,
     }) as Promise<Models.FetchDocumentsResponse | LayerResponse<Models.FetchDocumentsResponse>>;
+  }
+
+
+  async getBlob(namespace_: string, sha256: string, opts?: RequestOptions & { withPerf?: false }): Promise<Uint8Array>;
+  async getBlob(namespace_: string, sha256: string, opts: RequestOptions & { withPerf: true }): Promise<LayerResponse<Uint8Array>>;
+  async getBlob(namespace_: string, sha256: string, opts: RequestOptions = {}): Promise<Uint8Array | LayerResponse<Uint8Array>> {
+    return this.requestBytes({
+      method: "GET",
+      path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/blobs/" + encodeURIComponent(String(sha256)),
+      params: undefined,
+      withPerf: opts.withPerf === true,
+      signal: opts.signal,
+    }) as Promise<Uint8Array | LayerResponse<Uint8Array>>;
+  }
+
+
+  async getCheckpoint(namespace_: string, label: string, opts?: RequestOptions & { withPerf?: false }): Promise<Models.Checkpoint>;
+  async getCheckpoint(namespace_: string, label: string, opts: RequestOptions & { withPerf: true }): Promise<LayerResponse<Models.Checkpoint>>;
+  async getCheckpoint(namespace_: string, label: string, opts: RequestOptions = {}): Promise<Models.Checkpoint | LayerResponse<Models.Checkpoint>> {
+    return this.requestJson<Models.Checkpoint>({
+      method: "GET",
+      path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/checkpoints/" + encodeURIComponent(String(label)),
+      params: undefined,
+      withPerf: opts.withPerf === true,
+      signal: opts.signal,
+    }) as Promise<Models.Checkpoint | LayerResponse<Models.Checkpoint>>;
+  }
+
+
+  async getCostRateCard(opts?: RequestOptions & { withPerf?: false }): Promise<Models.RateCard>;
+  async getCostRateCard(opts: RequestOptions & { withPerf: true }): Promise<LayerResponse<Models.RateCard>>;
+  async getCostRateCard(opts: RequestOptions = {}): Promise<Models.RateCard | LayerResponse<Models.RateCard>> {
+    return this.requestJson<Models.RateCard>({
+      method: "GET",
+      path: "/v2/cost/rate-card",
+      params: undefined,
+      withPerf: opts.withPerf === true,
+      signal: opts.signal,
+    }) as Promise<Models.RateCard | LayerResponse<Models.RateCard>>;
+  }
+
+
+  async getCostSnapshot(opts?: GetCostSnapshotOptions & { withPerf?: false }): Promise<Models.CostSnapshot>;
+  async getCostSnapshot(opts: GetCostSnapshotOptions & { withPerf: true }): Promise<LayerResponse<Models.CostSnapshot>>;
+  async getCostSnapshot(opts: GetCostSnapshotOptions = {}): Promise<Models.CostSnapshot | LayerResponse<Models.CostSnapshot>> {
+    return this.requestJson<Models.CostSnapshot>({
+      method: "GET",
+      path: "/v2/cost",
+      params: [
+        { key: "window", value: opts.window }
+      ],
+      withPerf: opts.withPerf === true,
+      signal: opts.signal,
+    }) as Promise<Models.CostSnapshot | LayerResponse<Models.CostSnapshot>>;
+  }
+
+
+  async getCostTimeseries(opts?: GetCostTimeseriesOptions & { withPerf?: false }): Promise<Models.CostTimeseries>;
+  async getCostTimeseries(opts: GetCostTimeseriesOptions & { withPerf: true }): Promise<LayerResponse<Models.CostTimeseries>>;
+  async getCostTimeseries(opts: GetCostTimeseriesOptions = {}): Promise<Models.CostTimeseries | LayerResponse<Models.CostTimeseries>> {
+    return this.requestJson<Models.CostTimeseries>({
+      method: "GET",
+      path: "/v2/cost/timeseries",
+      params: [
+        { key: "window", value: opts.window },
+        { key: "step", value: opts.step }
+      ],
+      withPerf: opts.withPerf === true,
+      signal: opts.signal,
+    }) as Promise<Models.CostTimeseries | LayerResponse<Models.CostTimeseries>>;
   }
 
 
@@ -631,7 +719,6 @@ export class Hevlayer {
       method: "GET",
       path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/schema",
       params: undefined,
-        fallback: { method: "GET", path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/schema" },
       withPerf: opts.withPerf === true,
       signal: opts.signal,
     }) as Promise<Models.TurbopufferSchema | LayerResponse<Models.TurbopufferSchema>>;
@@ -645,7 +732,6 @@ export class Hevlayer {
       method: "GET",
       path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/metadata",
       params: undefined,
-        fallback: { method: "GET", path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/metadata" },
       withPerf: opts.withPerf === true,
       signal: opts.signal,
     }) as Promise<Models.NamespaceMetadata | LayerResponse<Models.NamespaceMetadata>>;
@@ -675,6 +761,32 @@ export class Hevlayer {
       withPerf: opts.withPerf === true,
       signal: opts.signal,
     }) as Promise<Models.UdfStatus | LayerResponse<Models.UdfStatus>>;
+  }
+
+
+  async getVectorstore(name: string, opts?: RequestOptions & { withPerf?: false }): Promise<Models.VectorStore>;
+  async getVectorstore(name: string, opts: RequestOptions & { withPerf: true }): Promise<LayerResponse<Models.VectorStore>>;
+  async getVectorstore(name: string, opts: RequestOptions = {}): Promise<Models.VectorStore | LayerResponse<Models.VectorStore>> {
+    return this.requestJson<Models.VectorStore>({
+      method: "GET",
+      path: "/v2/vectorstores/" + encodeURIComponent(String(name)),
+      params: undefined,
+      withPerf: opts.withPerf === true,
+      signal: opts.signal,
+    }) as Promise<Models.VectorStore | LayerResponse<Models.VectorStore>>;
+  }
+
+
+  async getWarehouse(name: string, opts?: RequestOptions & { withPerf?: false }): Promise<Models.Warehouse>;
+  async getWarehouse(name: string, opts: RequestOptions & { withPerf: true }): Promise<LayerResponse<Models.Warehouse>>;
+  async getWarehouse(name: string, opts: RequestOptions = {}): Promise<Models.Warehouse | LayerResponse<Models.Warehouse>> {
+    return this.requestJson<Models.Warehouse>({
+      method: "GET",
+      path: "/v2/warehouses/" + encodeURIComponent(String(name)),
+      params: undefined,
+      withPerf: opts.withPerf === true,
+      signal: opts.signal,
+    }) as Promise<Models.Warehouse | LayerResponse<Models.Warehouse>>;
   }
 
 
@@ -729,11 +841,44 @@ export class Hevlayer {
         { key: "turbopuffer", value: opts.turbopuffer },
         { key: "documents", value: opts.documents },
         { key: "snapshots", value: opts.snapshots },
+        { key: "blobs", value: opts.blobs },
+        { key: "blob_budget_bytes", value: opts.blobBudgetBytes },
         { key: "page_size", value: opts.pageSize }
       ],
       withPerf: opts.withPerf === true,
       signal: opts.signal,
     }) as Promise<Models.HintCacheWarmResponse | LayerResponse<Models.HintCacheWarmResponse>>;
+  }
+
+
+  async importNamespace(namespace_: string, body: Uint8Array | ArrayBuffer | Blob, opts?: RequestOptions & { withPerf?: false }): Promise<Record<string, unknown>>;
+  async importNamespace(namespace_: string, body: Uint8Array | ArrayBuffer | Blob, opts: RequestOptions & { withPerf: true }): Promise<LayerResponse<Record<string, unknown>>>;
+  async importNamespace(namespace_: string, body: Uint8Array | ArrayBuffer | Blob, opts: RequestOptions = {}): Promise<Record<string, unknown> | LayerResponse<Record<string, unknown>>> {
+    return this.requestJson<Record<string, unknown>>({
+      method: "POST",
+      path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/import",
+      params: undefined,
+        body: body,
+        bodyContentType: "application/vnd.apache.arrow.stream",
+      withPerf: opts.withPerf === true,
+      signal: opts.signal,
+    }) as Promise<Record<string, unknown> | LayerResponse<Record<string, unknown>>>;
+  }
+
+
+  async listCheckpoints(namespace_: string, opts?: ListCheckpointsOptions & { withPerf?: false }): Promise<Models.CheckpointList>;
+  async listCheckpoints(namespace_: string, opts: ListCheckpointsOptions & { withPerf: true }): Promise<LayerResponse<Models.CheckpointList>>;
+  async listCheckpoints(namespace_: string, opts: ListCheckpointsOptions = {}): Promise<Models.CheckpointList | LayerResponse<Models.CheckpointList>> {
+    return this.requestJson<Models.CheckpointList>({
+      method: "GET",
+      path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/checkpoints",
+      params: [
+        { key: "limit", value: opts.limit },
+        { key: "before", value: opts.before }
+      ],
+      withPerf: opts.withPerf === true,
+      signal: opts.signal,
+    }) as Promise<Models.CheckpointList | LayerResponse<Models.CheckpointList>>;
   }
 
 
@@ -907,7 +1052,6 @@ export class Hevlayer {
         { key: "prefix", value: opts.prefix },
         { key: "page_size", value: opts.pageSize }
       ],
-        fallback: { method: "GET", path: "/v1/namespaces" },
       withPerf: opts.withPerf === true,
       signal: opts.signal,
     }) as Promise<Models.TurbopufferNamespaceList | LayerResponse<Models.TurbopufferNamespaceList>>;
@@ -924,6 +1068,32 @@ export class Hevlayer {
       withPerf: opts.withPerf === true,
       signal: opts.signal,
     }) as Promise<Models.UdfList | LayerResponse<Models.UdfList>>;
+  }
+
+
+  async listVectorstores(opts?: RequestOptions & { withPerf?: false }): Promise<Models.VectorStoreList>;
+  async listVectorstores(opts: RequestOptions & { withPerf: true }): Promise<LayerResponse<Models.VectorStoreList>>;
+  async listVectorstores(opts: RequestOptions = {}): Promise<Models.VectorStoreList | LayerResponse<Models.VectorStoreList>> {
+    return this.requestJson<Models.VectorStoreList>({
+      method: "GET",
+      path: "/v2/vectorstores",
+      params: undefined,
+      withPerf: opts.withPerf === true,
+      signal: opts.signal,
+    }) as Promise<Models.VectorStoreList | LayerResponse<Models.VectorStoreList>>;
+  }
+
+
+  async listWarehouses(opts?: RequestOptions & { withPerf?: false }): Promise<Models.WarehouseList>;
+  async listWarehouses(opts: RequestOptions & { withPerf: true }): Promise<LayerResponse<Models.WarehouseList>>;
+  async listWarehouses(opts: RequestOptions = {}): Promise<Models.WarehouseList | LayerResponse<Models.WarehouseList>> {
+    return this.requestJson<Models.WarehouseList>({
+      method: "GET",
+      path: "/v2/warehouses",
+      params: undefined,
+      withPerf: opts.withPerf === true,
+      signal: opts.signal,
+    }) as Promise<Models.WarehouseList | LayerResponse<Models.WarehouseList>>;
   }
 
 
@@ -954,23 +1124,6 @@ export class Hevlayer {
   }
 
 
-  async multiQueryTurbopufferNamespace(namespace_: string, body: Models.TurbopufferMultiQueryRequest | Record<string, unknown>, opts?: RequestOptions & { withPerf?: false }): Promise<Models.TurbopufferMultiQueryResponse>;
-  async multiQueryTurbopufferNamespace(namespace_: string, body: Models.TurbopufferMultiQueryRequest | Record<string, unknown>, opts: RequestOptions & { withPerf: true }): Promise<LayerResponse<Models.TurbopufferMultiQueryResponse>>;
-  async multiQueryTurbopufferNamespace(namespace_: string, body: Models.TurbopufferMultiQueryRequest | Record<string, unknown>, opts: RequestOptions = {}): Promise<Models.TurbopufferMultiQueryResponse | LayerResponse<Models.TurbopufferMultiQueryResponse>> {
-    return this.requestJson<Models.TurbopufferMultiQueryResponse>({
-      method: "POST",
-      path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/query",
-      params: [
-        { key: "stainless_overload", value: "multiQuery" }
-      ],
-        body: body,
-        fallback: { method: "POST", path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/query" },
-      withPerf: opts.withPerf === true,
-      signal: opts.signal,
-    }) as Promise<Models.TurbopufferMultiQueryResponse | LayerResponse<Models.TurbopufferMultiQueryResponse>>;
-  }
-
-
   async pauseUdf(udfId: string, opts?: RequestOptions & { withPerf?: false }): Promise<Models.Udf>;
   async pauseUdf(udfId: string, opts: RequestOptions & { withPerf: true }): Promise<LayerResponse<Models.Udf>>;
   async pauseUdf(udfId: string, opts: RequestOptions = {}): Promise<Models.Udf | LayerResponse<Models.Udf>> {
@@ -981,6 +1134,23 @@ export class Hevlayer {
       withPerf: opts.withPerf === true,
       signal: opts.signal,
     }) as Promise<Models.Udf | LayerResponse<Models.Udf>>;
+  }
+
+
+  async putBlob(namespace_: string, body: Uint8Array | ArrayBuffer | Blob, opts?: PutBlobOptions & { withPerf?: false }): Promise<Models.BlobPutResponse>;
+  async putBlob(namespace_: string, body: Uint8Array | ArrayBuffer | Blob, opts: PutBlobOptions & { withPerf: true }): Promise<LayerResponse<Models.BlobPutResponse>>;
+  async putBlob(namespace_: string, body: Uint8Array | ArrayBuffer | Blob, opts: PutBlobOptions = {}): Promise<Models.BlobPutResponse | LayerResponse<Models.BlobPutResponse>> {
+    return this.requestJson<Models.BlobPutResponse>({
+      method: "PUT",
+      path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/blobs",
+      params: [
+        { key: "warm", value: opts.warm }
+      ],
+        body: body,
+        bodyContentType: "application/octet-stream",
+      withPerf: opts.withPerf === true,
+      signal: opts.signal,
+    }) as Promise<Models.BlobPutResponse | LayerResponse<Models.BlobPutResponse>>;
   }
 
 
@@ -1009,6 +1179,34 @@ export class Hevlayer {
       withPerf: opts.withPerf === true,
       signal: opts.signal,
     }) as Promise<Models.StatusResponse | LayerResponse<Models.StatusResponse>>;
+  }
+
+
+  async query(body: Models.FederatedQueryRequest | Record<string, unknown>, opts?: RequestOptions & { withPerf?: false }): Promise<Models.FederatedQueryResponse>;
+  async query(body: Models.FederatedQueryRequest | Record<string, unknown>, opts: RequestOptions & { withPerf: true }): Promise<LayerResponse<Models.FederatedQueryResponse>>;
+  async query(body: Models.FederatedQueryRequest | Record<string, unknown>, opts: RequestOptions = {}): Promise<Models.FederatedQueryResponse | LayerResponse<Models.FederatedQueryResponse>> {
+    return this.requestJson<Models.FederatedQueryResponse>({
+      method: "POST",
+      path: "/v2/query",
+      params: undefined,
+        body: body,
+      withPerf: opts.withPerf === true,
+      signal: opts.signal,
+    }) as Promise<Models.FederatedQueryResponse | LayerResponse<Models.FederatedQueryResponse>>;
+  }
+
+
+  async queryAgent(name: string, body: Models.AgentQueryRequest | Record<string, unknown>, opts?: RequestOptions & { withPerf?: false }): Promise<Models.AgentQueryResponse>;
+  async queryAgent(name: string, body: Models.AgentQueryRequest | Record<string, unknown>, opts: RequestOptions & { withPerf: true }): Promise<LayerResponse<Models.AgentQueryResponse>>;
+  async queryAgent(name: string, body: Models.AgentQueryRequest | Record<string, unknown>, opts: RequestOptions = {}): Promise<Models.AgentQueryResponse | LayerResponse<Models.AgentQueryResponse>> {
+    return this.requestJson<Models.AgentQueryResponse>({
+      method: "POST",
+      path: "/v2/agents/" + encodeURIComponent(String(name)) + "/query",
+      params: undefined,
+        body: body,
+      withPerf: opts.withPerf === true,
+      signal: opts.signal,
+    }) as Promise<Models.AgentQueryResponse | LayerResponse<Models.AgentQueryResponse>>;
   }
 
 
@@ -1093,7 +1291,6 @@ export class Hevlayer {
       params: undefined,
         body: body,
         headers: this.searchHistoryHeaders(opts.searchQuery, opts.tags),
-        fallback: { method: "POST", path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/query", transform: "query_namespace" },
       withPerf: opts.withPerf === true,
       signal: opts.signal,
     }) as Promise<Models.QueryResponse | LayerResponse<Models.QueryResponse>>;
@@ -1105,10 +1302,9 @@ export class Hevlayer {
   async queryTurbopufferNamespace(namespace_: string, body: Models.TurbopufferQueryRequest | Record<string, unknown>, opts: RequestOptions = {}): Promise<Models.TurbopufferQueryResponse | LayerResponse<Models.TurbopufferQueryResponse>> {
     return this.requestJson<Models.TurbopufferQueryResponse>({
       method: "POST",
-      path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/query",
+      path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/query",
       params: undefined,
         body: body,
-        fallback: { method: "POST", path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) + "/query" },
       withPerf: opts.withPerf === true,
       signal: opts.signal,
     }) as Promise<Models.TurbopufferQueryResponse | LayerResponse<Models.TurbopufferQueryResponse>>;
@@ -1176,7 +1372,6 @@ export class Hevlayer {
       path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/metadata",
       params: undefined,
         body: body,
-        fallback: { method: "PATCH", path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/metadata" },
       withPerf: opts.withPerf === true,
       signal: opts.signal,
     }) as Promise<Models.NamespaceMetadata | LayerResponse<Models.NamespaceMetadata>>;
@@ -1191,7 +1386,6 @@ export class Hevlayer {
       path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/schema",
       params: undefined,
         body: body,
-        fallback: { method: "POST", path: "/v1/namespaces/" + encodeURIComponent(String(namespace_)) + "/schema" },
       withPerf: opts.withPerf === true,
       signal: opts.signal,
     }) as Promise<Models.TurbopufferSchema | LayerResponse<Models.TurbopufferSchema>>;
@@ -1221,7 +1415,6 @@ export class Hevlayer {
       path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)),
       params: undefined,
         body: body,
-        fallback: { method: "POST", path: "/v2/namespaces/" + encodeURIComponent(String(namespace_)) },
       withPerf: opts.withPerf === true,
       signal: opts.signal,
     }) as Promise<Models.TurbopufferWriteResponse | LayerResponse<Models.TurbopufferWriteResponse>>;
@@ -1415,11 +1608,7 @@ export class Hevlayer {
     try {
       response = await this.fetchJson(this.baseUrl, this.apiKey, request);
     } catch (error) {
-      const originalError = unwrapTransportError(error);
-      if (!request.fallback || !isTransportFallbackError(error)) {
-        throw originalError;
-      }
-      return this.requestTurbopufferJson<T>(originalError, started, request);
+      throw unwrapTransportError(error);
     }
     const latencyMs = nowMs() - started;
     const cacheStatus = response.headers.get("x-layer-cache");
@@ -1430,7 +1619,7 @@ export class Hevlayer {
     const data = raw as T;
     this.applyLayerHeaders(data, response.headers);
     if (request.withPerf) {
-      return { data, perf: { latencyMs, cacheStatus, fallback: null } };
+      return { data, perf: { latencyMs, cacheStatus } };
     }
     return data;
   }
@@ -1467,52 +1656,7 @@ export class Hevlayer {
     }
     const data = new Uint8Array(await response.arrayBuffer());
     if (request.withPerf) {
-      return { data, perf: { latencyMs, cacheStatus, fallback: null } };
-    }
-    return data;
-  }
-
-  private async requestTurbopufferJson<T>(
-    originalError: unknown,
-    started: number,
-    request: JsonRequest,
-  ): Promise<T | LayerResponse<T>> {
-    if (!this.canFallbackToTurbopuffer() || !request.fallback) {
-      throw originalError;
-    }
-    let body: unknown;
-    try {
-      body = this.fallbackBody(request.fallback, request.body);
-    } catch {
-      throw originalError;
-    }
-    console.warn(
-      "hevlayer gateway unreachable; falling through to Turbopuffer direct for " +
-        request.fallback.method +
-        " " +
-        request.fallback.path,
-    );
-    let response: Response;
-    try {
-      response = await this.fetchJson(this.turbopufferBaseUrl, this.turbopufferApiKey, {
-        method: request.fallback.method,
-        path: request.fallback.path,
-        params: request.params,
-        body,
-        signal: request.signal,
-      });
-    } catch (error) {
-      throw unwrapTransportError(error);
-    }
-    const latencyMs = nowMs() - started;
-    let raw = await this.decodeJsonResponse(response);
-    if (!response.ok) {
-      throw this.errorFromResponse(response, raw);
-    }
-    raw = this.fallbackResponse(request.fallback, raw);
-    const data = raw as T;
-    if (request.withPerf) {
-      return { data, perf: { latencyMs, cacheStatus: null, fallback: "turbopuffer_direct" } };
+      return { data, perf: { latencyMs, cacheStatus } };
     }
     return data;
   }
@@ -1530,7 +1674,10 @@ export class Hevlayer {
     if (apiKey) {
       headers.set("Authorization", "Bearer " + apiKey);
     }
-    if (request.body !== undefined && request.body !== null) {
+    if (request.bodyContentType) {
+      headers.set("Content-Type", request.bodyContentType);
+      init.body = request.body as BodyInit;
+    } else if (request.body !== undefined && request.body !== null) {
       headers.set("Content-Type", "application/json");
       init.body = JSON.stringify(request.body);
     }
@@ -1611,24 +1758,6 @@ export class Hevlayer {
     return Object.keys(headers).length ? headers : undefined;
   }
 
-  private canFallbackToTurbopuffer(): boolean {
-    return this.fallbackToTurbopuffer && this.turbopufferApiKey !== null;
-  }
-
-  private fallbackBody(fallback: TurbopufferFallback, value: unknown): unknown {
-    if (fallback.transform === "query_namespace") {
-      return turbopufferQueryBody(value);
-    }
-    return value;
-  }
-
-  private fallbackResponse(fallback: TurbopufferFallback, value: unknown): unknown {
-    if (fallback.transform === "query_namespace") {
-      return queryResponseFromTurbopuffer(value);
-    }
-    return value;
-  }
-
   private async decodeJsonResponse(response: Response): Promise<unknown> {
     if (response.status === 204) {
       return undefined;
@@ -1676,14 +1805,6 @@ function defaultFetch(): FetchLike {
   return globalThis.fetch.bind(globalThis);
 }
 
-function env(name: string): string | undefined {
-  try {
-    return typeof process !== "undefined" ? process.env?.[name] : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 function cleanBaseUrl(value: string | null | undefined, fallback: string): string {
   const cleaned = String(value ?? "").trim();
   return (cleaned || fallback).replace(/\/+$/, "");
@@ -1716,53 +1837,8 @@ function cleanHistoryTags(tags: unknown[]): string[] {
   return unique;
 }
 
-function turbopufferQueryBody(value: unknown): Record<string, unknown> {
-  if (!isRecord(value)) {
-    throw new Error("query fallback requires an object body");
-  }
-  if (value.nearest_to_id !== undefined && value.nearest_to_id !== null) {
-    throw new Error("query fallback cannot resolve layer-only fields");
-  }
-  if (value.nearestToId !== undefined && value.nearestToId !== null) {
-    throw new Error("query fallback cannot resolve layer-only fields");
-  }
-  if (value.cursor !== undefined && value.cursor !== null) {
-    throw new Error("query fallback cannot resolve layer-only fields");
-  }
-  const vector = value.vector;
-  if (!Array.isArray(vector) || vector.length === 0) {
-    throw new Error("query fallback requires vector");
-  }
-  const body: Record<string, unknown> = {
-    rank_by: ["vector", "ANN", vector],
-    top_k: value.top_k ?? 10,
-    consistency: { level: "eventual" },
-  };
-  if (value.filters !== undefined && value.filters !== null) {
-    body.filters = value.filters;
-  }
-  if (value.include_attributes !== undefined && value.include_attributes !== null) {
-    body.include_attributes = value.include_attributes;
-  }
-  return body;
-}
-
-function queryResponseFromTurbopuffer(value: unknown): Record<string, unknown> {
-  return isRecord(value) ? value : {};
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isTransportFallbackError(error: unknown): error is FetchTransportError {
-  if (!(error instanceof FetchTransportError)) {
-    return false;
-  }
-  if (error.cause instanceof DOMException && error.cause.name === "AbortError") {
-    return false;
-  }
-  return true;
 }
 
 function unwrapTransportError(error: unknown): unknown {

@@ -3,9 +3,6 @@ export type FetchLike = (input: string | URL | Request, init?: RequestInit) => P
 export interface HevlayerOptions {
     baseUrl?: string | null;
     apiKey?: string | null;
-    turbopufferApiKey?: string | null;
-    turbopufferBaseUrl?: string | null;
-    fallbackToTurbopuffer?: boolean;
     timeout?: number | null;
     fetch?: FetchLike;
 }
@@ -16,6 +13,13 @@ export interface RequestOptions {
 export interface FetchDocumentOptions extends RequestOptions {
     includeAttributes?: string[];
 }
+export interface GetCostSnapshotOptions extends RequestOptions {
+    window?: Models.CostWindow;
+}
+export interface GetCostTimeseriesOptions extends RequestOptions {
+    window?: Models.CostWindow;
+    step?: Models.CostStep;
+}
 export interface GetScanResultsOptions extends RequestOptions {
     limit?: number;
     offset?: number;
@@ -24,7 +28,13 @@ export interface HintCacheWarmOptions extends RequestOptions {
     turbopuffer?: boolean;
     documents?: boolean;
     snapshots?: boolean;
+    blobs?: boolean;
+    blobBudgetBytes?: number;
     pageSize?: number;
+}
+export interface ListCheckpointsOptions extends RequestOptions {
+    limit?: number;
+    before?: string;
 }
 export interface ListClickstreamOptions extends RequestOptions {
     traceId?: string;
@@ -67,6 +77,9 @@ export interface ListTurbopufferNamespacesOptions extends RequestOptions {
     prefix?: string;
     pageSize?: number;
 }
+export interface PutBlobOptions extends RequestOptions {
+    warm?: boolean;
+}
 export interface QueryMetricsOptions extends RequestOptions {
     query?: string;
     time?: string;
@@ -101,7 +114,6 @@ export interface WarmCacheOptions extends RequestOptions {
 export interface LayerPerf {
     latencyMs: number;
     cacheStatus: string | null;
-    fallback: string | null;
 }
 export interface LayerResponse<T> {
     data: T;
@@ -121,9 +133,6 @@ export declare class HevlayerError extends Error {
 export declare class Hevlayer {
     private readonly baseUrl;
     private readonly apiKey;
-    private readonly turbopufferApiKey;
-    private readonly turbopufferBaseUrl;
-    private readonly fallbackToTurbopuffer;
     private readonly timeout;
     private readonly fetchImpl;
     constructor(options?: HevlayerOptions);
@@ -133,6 +142,12 @@ export declare class Hevlayer {
     authenticateKey(body: Models.AuthenticateKeyRequest | Record<string, unknown>, opts: RequestOptions & {
         withPerf: true;
     }): Promise<LayerResponse<Models.AuthenticateKeyResponse>>;
+    batchQueryNamespace(namespace_: string, body: Models.BatchQueryRequest | Record<string, unknown>, opts?: RequestOptions & {
+        withPerf?: false;
+    }): Promise<Models.BatchQueryResponse>;
+    batchQueryNamespace(namespace_: string, body: Models.BatchQueryRequest | Record<string, unknown>, opts: RequestOptions & {
+        withPerf: true;
+    }): Promise<LayerResponse<Models.BatchQueryResponse>>;
     branchNamespace(namespace_: string, body: Models.TurbopufferBranchFromRequest | Record<string, unknown>, opts?: RequestOptions & {
         withPerf?: false;
     }): Promise<Models.TurbopufferWriteResponse>;
@@ -163,6 +178,12 @@ export declare class Hevlayer {
     copyNamespace(namespace_: string, body: Models.TurbopufferCopyFromRequest | Record<string, unknown>, opts: RequestOptions & {
         withPerf: true;
     }): Promise<LayerResponse<Models.TurbopufferWriteResponse>>;
+    createCheckpoint(namespace_: string, body: Models.CreateCheckpointRequest | Record<string, unknown>, opts?: RequestOptions & {
+        withPerf?: false;
+    }): Promise<Models.Checkpoint>;
+    createCheckpoint(namespace_: string, body: Models.CreateCheckpointRequest | Record<string, unknown>, opts: RequestOptions & {
+        withPerf: true;
+    }): Promise<LayerResponse<Models.Checkpoint>>;
     createPipeline(body: Models.CreatePipelineRequest | Record<string, unknown>, opts?: RequestOptions & {
         withPerf?: false;
     }): Promise<Models.Pipeline>;
@@ -253,6 +274,36 @@ export declare class Hevlayer {
     fetchDocuments(namespace_: string, body: Models.FetchDocumentsRequest | Record<string, unknown>, opts: RequestOptions & {
         withPerf: true;
     }): Promise<LayerResponse<Models.FetchDocumentsResponse>>;
+    getBlob(namespace_: string, sha256: string, opts?: RequestOptions & {
+        withPerf?: false;
+    }): Promise<Uint8Array>;
+    getBlob(namespace_: string, sha256: string, opts: RequestOptions & {
+        withPerf: true;
+    }): Promise<LayerResponse<Uint8Array>>;
+    getCheckpoint(namespace_: string, label: string, opts?: RequestOptions & {
+        withPerf?: false;
+    }): Promise<Models.Checkpoint>;
+    getCheckpoint(namespace_: string, label: string, opts: RequestOptions & {
+        withPerf: true;
+    }): Promise<LayerResponse<Models.Checkpoint>>;
+    getCostRateCard(opts?: RequestOptions & {
+        withPerf?: false;
+    }): Promise<Models.RateCard>;
+    getCostRateCard(opts: RequestOptions & {
+        withPerf: true;
+    }): Promise<LayerResponse<Models.RateCard>>;
+    getCostSnapshot(opts?: GetCostSnapshotOptions & {
+        withPerf?: false;
+    }): Promise<Models.CostSnapshot>;
+    getCostSnapshot(opts: GetCostSnapshotOptions & {
+        withPerf: true;
+    }): Promise<LayerResponse<Models.CostSnapshot>>;
+    getCostTimeseries(opts?: GetCostTimeseriesOptions & {
+        withPerf?: false;
+    }): Promise<Models.CostTimeseries>;
+    getCostTimeseries(opts: GetCostTimeseriesOptions & {
+        withPerf: true;
+    }): Promise<LayerResponse<Models.CostTimeseries>>;
     getKey(keyId: string, opts?: RequestOptions & {
         withPerf?: false;
     }): Promise<Models.ApiKey>;
@@ -331,6 +382,18 @@ export declare class Hevlayer {
     getUdfStatus(udfId: string, opts: RequestOptions & {
         withPerf: true;
     }): Promise<LayerResponse<Models.UdfStatus>>;
+    getVectorstore(name: string, opts?: RequestOptions & {
+        withPerf?: false;
+    }): Promise<Models.VectorStore>;
+    getVectorstore(name: string, opts: RequestOptions & {
+        withPerf: true;
+    }): Promise<LayerResponse<Models.VectorStore>>;
+    getWarehouse(name: string, opts?: RequestOptions & {
+        withPerf?: false;
+    }): Promise<Models.Warehouse>;
+    getWarehouse(name: string, opts: RequestOptions & {
+        withPerf: true;
+    }): Promise<LayerResponse<Models.Warehouse>>;
     getWarmJob(namespace_: string, jobId: string, opts?: RequestOptions & {
         withPerf?: false;
     }): Promise<Models.WarmJob>;
@@ -355,6 +418,18 @@ export declare class Hevlayer {
     hintCacheWarm(namespace_: string, opts: HintCacheWarmOptions & {
         withPerf: true;
     }): Promise<LayerResponse<Models.HintCacheWarmResponse>>;
+    importNamespace(namespace_: string, body: Uint8Array | ArrayBuffer | Blob, opts?: RequestOptions & {
+        withPerf?: false;
+    }): Promise<Record<string, unknown>>;
+    importNamespace(namespace_: string, body: Uint8Array | ArrayBuffer | Blob, opts: RequestOptions & {
+        withPerf: true;
+    }): Promise<LayerResponse<Record<string, unknown>>>;
+    listCheckpoints(namespace_: string, opts?: ListCheckpointsOptions & {
+        withPerf?: false;
+    }): Promise<Models.CheckpointList>;
+    listCheckpoints(namespace_: string, opts: ListCheckpointsOptions & {
+        withPerf: true;
+    }): Promise<LayerResponse<Models.CheckpointList>>;
     listClickstream(namespace_: string, opts?: ListClickstreamOptions & {
         withPerf?: false;
     }): Promise<Models.ClickstreamListResponse>;
@@ -427,6 +502,18 @@ export declare class Hevlayer {
     listUdfs(opts: RequestOptions & {
         withPerf: true;
     }): Promise<LayerResponse<Models.UdfList>>;
+    listVectorstores(opts?: RequestOptions & {
+        withPerf?: false;
+    }): Promise<Models.VectorStoreList>;
+    listVectorstores(opts: RequestOptions & {
+        withPerf: true;
+    }): Promise<LayerResponse<Models.VectorStoreList>>;
+    listWarehouses(opts?: RequestOptions & {
+        withPerf?: false;
+    }): Promise<Models.WarehouseList>;
+    listWarehouses(opts: RequestOptions & {
+        withPerf: true;
+    }): Promise<LayerResponse<Models.WarehouseList>>;
     listWarmJobs(namespace_: string, opts?: RequestOptions & {
         withPerf?: false;
     }): Promise<Models.WarmJobList>;
@@ -439,18 +526,18 @@ export declare class Hevlayer {
     mintKey(body: Models.MintKeyRequest | Record<string, unknown>, opts: RequestOptions & {
         withPerf: true;
     }): Promise<LayerResponse<Models.MintKeyResponse>>;
-    multiQueryTurbopufferNamespace(namespace_: string, body: Models.TurbopufferMultiQueryRequest | Record<string, unknown>, opts?: RequestOptions & {
-        withPerf?: false;
-    }): Promise<Models.TurbopufferMultiQueryResponse>;
-    multiQueryTurbopufferNamespace(namespace_: string, body: Models.TurbopufferMultiQueryRequest | Record<string, unknown>, opts: RequestOptions & {
-        withPerf: true;
-    }): Promise<LayerResponse<Models.TurbopufferMultiQueryResponse>>;
     pauseUdf(udfId: string, opts?: RequestOptions & {
         withPerf?: false;
     }): Promise<Models.Udf>;
     pauseUdf(udfId: string, opts: RequestOptions & {
         withPerf: true;
     }): Promise<LayerResponse<Models.Udf>>;
+    putBlob(namespace_: string, body: Uint8Array | ArrayBuffer | Blob, opts?: PutBlobOptions & {
+        withPerf?: false;
+    }): Promise<Models.BlobPutResponse>;
+    putBlob(namespace_: string, body: Uint8Array | ArrayBuffer | Blob, opts: PutBlobOptions & {
+        withPerf: true;
+    }): Promise<LayerResponse<Models.BlobPutResponse>>;
     putPipelineDocumentChunks(pipelineId: string, docId: string, body: Models.PutChunksRequest | Record<string, unknown>, opts?: RequestOptions & {
         withPerf?: false;
     }): Promise<Models.StageDocumentResponse>;
@@ -463,6 +550,18 @@ export declare class Hevlayer {
     putPipelineDocumentVectors(pipelineId: string, docId: string, body: Models.PutVectorsRequest | Record<string, unknown>, opts: RequestOptions & {
         withPerf: true;
     }): Promise<LayerResponse<Models.StatusResponse>>;
+    query(body: Models.FederatedQueryRequest | Record<string, unknown>, opts?: RequestOptions & {
+        withPerf?: false;
+    }): Promise<Models.FederatedQueryResponse>;
+    query(body: Models.FederatedQueryRequest | Record<string, unknown>, opts: RequestOptions & {
+        withPerf: true;
+    }): Promise<LayerResponse<Models.FederatedQueryResponse>>;
+    queryAgent(name: string, body: Models.AgentQueryRequest | Record<string, unknown>, opts?: RequestOptions & {
+        withPerf?: false;
+    }): Promise<Models.AgentQueryResponse>;
+    queryAgent(name: string, body: Models.AgentQueryRequest | Record<string, unknown>, opts: RequestOptions & {
+        withPerf: true;
+    }): Promise<LayerResponse<Models.AgentQueryResponse>>;
     queryMetrics(opts?: QueryMetricsOptions & {
         withPerf?: false;
     }): Promise<Models.PrometheusResponse>;
@@ -590,15 +689,11 @@ export declare class Hevlayer {
     private requestJson;
     private applyLayerHeaders;
     private requestBytes;
-    private requestTurbopufferJson;
     private fetchJson;
     private requestSignal;
     private urlFor;
     private queryParamValue;
     private searchHistoryHeaders;
-    private canFallbackToTurbopuffer;
-    private fallbackBody;
-    private fallbackResponse;
     private decodeJsonResponse;
     private errorFromResponse;
 }

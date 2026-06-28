@@ -39,6 +39,9 @@ spec:
             - name: http
               containerPort: 8080
           env:
+            # Sourced from the Layer-managed secret so a deploy can't blank it
+            # (overrides the same key from the envFrom secretRef below).
+            {{- include "hev-shop.gatewayApiKeyEnv" . | nindent 12 }}
             {{- with .Values.search.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
