@@ -5,8 +5,8 @@ modules (app.py, models.py) on sys.path so pytest can resolve
 `from app import app`, `from hevlayer import ...`, and
 `from hev_shop_common.* import ...` without needing pip installs.
 
-In deployed environments `requirements.txt` pulls both sibling packages
-via `-e ../../layer/clients/python` and `-e ../common`.
+The SDK comes from the sibling `../layer-pro/clients/python` checkout when
+present, else the installed `hevlayer` package from PyPI.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ _REPO_ROOT = _SERVICE_ROOT.parent
 if str(_SERVICE_ROOT) not in sys.path:
     sys.path.insert(0, str(_SERVICE_ROOT))
 
-_SDK_SRC = _REPO_ROOT.parent / "layer" / "clients" / "python" / "src"
+_SDK_SRC = _REPO_ROOT.parent / "layer-pro" / "clients" / "python" / "src"
 if _SDK_SRC.is_dir() and str(_SDK_SRC) not in sys.path:
     sys.path.insert(0, str(_SDK_SRC))
 

@@ -380,7 +380,7 @@ class TestMeta:
     def test_meta_degrades_to_count_only_when_snapshot_has_no_watermark(
         self, client_with_fakes
     ):
-        # hev/layer#97: when the gateway has no stable watermark the category
+        # hev/layer-pro#97: when the gateway has no stable watermark the category
         # snapshot fails. /meta must still serve count + freshness (HTTP 200,
         # empty facets) instead of 500ing, so the storefront home doesn't stall
         # on it and the result count isn't ~0.

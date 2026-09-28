@@ -1,6 +1,6 @@
 name: layer-e2e
 
-# Hermetic mirror of ../layer/.github/workflows/shop-e2e.yml — that one
+# Hermetic mirror of ../layer-pro/.github/workflows/shop-e2e.yml — that one
 # runs shop tests against a freshly regenerated Python SDK; this one
 # runs the shop CLI against a freshly built layer-gateway, so SDK or
 # gateway changes that would break the storefront fail here before they
@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       layer_ref:
-        description: 'Branch or SHA of hev/layer to validate against'
+        description: 'Branch or SHA of hev/layer-pro to validate against'
         required: false
         default: 'main'
   # schedule:
@@ -34,14 +34,14 @@ jobs:
       - name: Checkout layer (sibling)
         uses: actions/checkout@v4
         with:
-          repository: hev/layer
+          repository: hev/layer-pro
           ref: ${{ inputs.layer_ref }}
           path: layer
           ssh-key: ${{ secrets.LAYER_DEPLOY_KEY }}
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
           cache: pip
 
       - uses: actions/setup-go@v5

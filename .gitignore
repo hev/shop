@@ -3,7 +3,6 @@
 # Local env
 .env
 .env.*
-!.env.example
 
 # Go
 /hev-shop

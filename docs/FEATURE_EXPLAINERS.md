@@ -68,7 +68,7 @@ type FeatureExplainer = {
 
 ## Rollout map
 
-Doc routes verified against `../layer/site/src/content/docs`.
+Doc routes verified against `../layer-pro/site/src/content/docs`.
 
 | id | Surface | Mounted | Capability · doc |
 |---|---|---|---|

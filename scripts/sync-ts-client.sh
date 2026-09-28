@@ -6,12 +6,12 @@
 # — because npm bakes the file: link's relative path into the lockfile, and an
 # out-of-tree ../../ link escapes the image filesystem root from /app.
 #
-# Run this whenever ../layer/clients/typescript changes, then commit the result.
+# Run this whenever ../layer-pro/clients/typescript changes, then commit the result.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-SRC="${LAYER_TS_CLIENT_SRC:-../layer/clients/typescript}"
+SRC="${LAYER_TS_CLIENT_SRC:-../layer-pro/clients/typescript}"
 DST="app/vendor/hevlayer"
 
 [[ -d "$SRC/src" ]] || { echo "ERROR: $SRC/src not found (set LAYER_TS_CLIENT_SRC)"; exit 1; }

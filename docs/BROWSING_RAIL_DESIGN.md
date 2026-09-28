@@ -34,7 +34,7 @@ const { products } = await client.searchById(viewedAsins, { topK: 8 });
 | ---- | ------ | --- |
 | **Placement** | Homepage | The rail is a *session-wide* taste signal, strongest where there is no single seed product. It's the first thing a returning shopper sees. |
 | **Expansion** | **Multi-query + RRF** | `searchById` issues one nearest-neighbor query per viewed product as the legs of a single [multi-query](https://hevlayer.com/docs/api/query#multi-query) round trip, then fuses the parallel rankings with reciprocal rank fusion. Reads as "because you viewed X **and** Y" and rewards products that rank for several seeds. (Alternative — array `nearest_to_id`, which averages the seed vectors into one centroid ranking — collapses each seed's identity; reach for it when you want one blended "more like these" instead of fused independent rankings.) |
-| **TS client** | **Gateway-backed** | `HevlayerClient.searchById` drives the real `hevlayer` TS client (a `file:` dep on `../../layer/clients/typescript`) against the prod gateway from the web pod. Built with `fallbackToTurbopuffer: false` to honor the Layer-only constraint. |
+| **TS client** | **Gateway-backed** | `HevlayerClient.searchById` drives the real `hevlayer` TS client (vendored in `app/vendor/hevlayer` from `../layer-pro/clients/typescript`) against the prod gateway from the web pod. Built with `fallbackToTurbopuffer: false` to honor the Layer-only constraint. |
 | **Per-leg seed** | **`nearest_to_id`** | Each multi-query leg is `{ "nearest_to_id": ["<asin>"] }`; the gateway resolves each seed's stored vector per leg before it goes upstream, so the web pod never fetches or ships 768-d vectors. (Earlier drafts assumed multi-query couldn't resolve `nearest_to_id` per leg and pre-fetched each vector — the gateway now does, verified against prod 2026-06-15.) |
 
 ## Browsing history (the array of IDs)
@@ -133,8 +133,9 @@ The rail runs against the prod gateway through the real `hevlayer` TS client:
    "How it works" stat.
 
 The gateway read path is **authenticated** — `LAYER_GATEWAY_API_KEY` is required
-for the rail (local `.env.local` reads it from the `layer-turbopuffer`
-credential in 1Password). When the key is absent the rail degrades to invisible.
+for the rail (locally, inject it at run time from 1Password,
+`op://mesh-staging/layer-turbopuffer/credential`). When the key is absent the
+rail degrades to invisible.
 
 ## Web image packaging
 
@@ -143,7 +144,7 @@ the runtime image needs no `node_modules/hevlayer` — only build-time resolutio
 The client is **vendored in-tree** (`app/vendor/hevlayer`, `file:vendor/hevlayer`)
 rather than injected from the sibling checkout like the Python services'
 `layer_client` build context. The reason is npm-specific: npm bakes a `file:`
-link's *relative path* into the lockfile, and the sibling's `../../layer/...`
+link's *relative path* into the lockfile, and a sibling-checkout path like `../../layer-pro/...`
 escapes the image filesystem root from `/app`, which `npm ci` rejects. An
 in-tree link is portable. `app/Dockerfile` copies `vendor/` before `npm ci`
 (pinned to npm 11 to match the lockfile generator; `node:22-alpine` ships 10).

@@ -1,8 +1,8 @@
 """Test-time loader for the hevlayer SDK + the local hev_shop_common pkg.
 
-The SDK lives at `../../layer/clients/python` and isn't published yet, so
-`requirements.txt` pulls it via `-e ../../layer/clients/python` in deployed
-environments.
+The SDK is `hevlayer` on PyPI; unreleased changes live in the sibling
+checkout at `../layer-pro/clients/python`. When that checkout exists its
+source wins; otherwise the installed `hevlayer` package is used.
 
 `hev_shop_common` lives in the sibling `common/` directory; pinned in
 `requirements.txt` via `-e ../common` in deployed environments.
@@ -20,7 +20,7 @@ from pathlib import Path
 _SERVICE_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _SERVICE_DIR.parent
 
-_SDK_SRC = _REPO_ROOT.parent / "layer" / "clients" / "python" / "src"
+_SDK_SRC = _REPO_ROOT.parent / "layer-pro" / "clients" / "python" / "src"
 if _SDK_SRC.is_dir() and str(_SDK_SRC) not in sys.path:
     sys.path.insert(0, str(_SDK_SRC))
 

@@ -1,7 +1,8 @@
 fastapi>=0.115
-# hevlayer ships from the layer repo; pinned via a sibling-checkout editable
-# install until clients/python lands on PyPI. The Docker/CI install path is
-# tracked alongside hev/layer#22.
+# hevlayer is on PyPI, but the image installs it from source so unreleased
+# client changes ship with shop: the Dockerfile copies the
+# `layer_client=../layer-pro/clients/python` build context to
+# /layer/clients/python, which this path resolves to from WORKDIR /app.
 -e ../../layer/clients/python
 # hev_shop_common is the shared library both this service and indexer/ pull
 # Settings, records, and embedder wrappers from. Sibling-checkout editable

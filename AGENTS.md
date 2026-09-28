@@ -1,322 +1,126 @@
-# hev-shop Agent Guide
+# hev-shop
 
-This file is for engineering and operations work in `hev-shop`. For product,
-design, and strategic context, read `CLAUDE.md`.
+A public storefront demo on hev layer over Amazon Reviews 2023 product data:
+semantic product search, visually similar recommendations and product detail,
+backed by CLIP image vectors that a two-stage Layer pipeline writes into
+`amazon-products`. shop has no RFC of its own; its trending surface follows
+`../layer-pro/docs/rfcs/0040-trending-searches-reduce-udfs.md`. `README.md` is
+the public tour.
 
-## ⚠️ IMPORTANT — this repo is a Layer design-preview customer
+**This repo is public.** Never put client names, client systems or anything
+from a client engagement in code, comments, docs or commit messages.
 
-This repo is a **design-preview customer of hev layer**, not part of the Layer
-product. Its job is to *use* Layer the way a real customer would and **report
-back** to the Layer team. That feedback loop is a primary responsibility of this
-repo, not a side task — the demo working is table stakes; the signal we send the
-Layer team is the deliverable.
+## You are a Layer customer
 
-**When you hit friction, do not fix Layer from here — report it:**
+shop exists to use Layer the way a customer would and to report what it hits.
+The demo working is table stakes; the report is the deliverable.
 
-- **A bug, or docs that are wrong / unclear / missing** → file a **GitHub issue**
-  on the Layer repo (`hev/layer`) with a minimal repro and the exact page or
-  behavior at fault.
-- **A missing feature or capability gap** → open an **RFC** in the Layer repo
-  (`../layer/docs/rfcs/`), in the existing RFC shape, with this workload as the
-  motivating / acceptance case.
+- **Reimplement nothing Layer owns:** queues and the document lifecycle
+  (chunk, claim, heartbeat, vector write), worker scaling, facet snapshots,
+  freshness watermarks, blob storage and cache warming. If you're writing
+  vector bookkeeping or a queue, the boundary is wrong.
+- **Read the docs, don't invent API.** Request and response shapes are in
+  `../layer-pro/site/src/content/docs/` (public: https://hevlayer.com/docs)
+  and `../layer-pro/apps/layer-gateway/openapi.yaml`.
+- **Report friction in Linear** with the `linear` CLI: a bug or a wrong or
+  missing doc is an issue on team `LYR`; a capability gap is an RFC, written
+  as a Linear project with an `RFC: <name>` document (not a numbered file in
+  `../layer-pro/docs/rfcs/`), with this workload as the motivating case. Drift between what the SDK and
+  the `Pipeline` YAML can express is a Layer bug, not something to work
+  around here.
+- **Layer operates itself.** Autoscaling, scale-to-zero and scheduling are
+  Layer's job; don't hand-tune them. If you must intervene to keep the demo
+  up (shop shares `layer-prod` with the other demos), the intervention gets
+  a `LYR` issue too.
 
-**Operations are Layer's job.** This repo has operational access to the shared
-Layer cluster, but the goal is that Layer operates *itself* — autoscaling,
-scale-to-zero, scheduling, binpacking. Let it. Do **not** hand-tune what Layer is
-meant to manage.
+## Layout and boundaries
 
-- When Layer falls short — autoscaling lags, a pipeline stalls, scale-to-zero
-  misbehaves — it is OK to **intervene** to keep the demo healthy. But every
-  intervention **must** produce a GitHub issue (bug) or an RFC (missing
-  capability). An undocumented manual fix is a process failure: the intervention
-  is the symptom, the report is the deliverable.
-- **Shared namespace / binpacking.** This repo deploys to a namespace in the
-  shared demo cluster alongside the other demos (shelf, shop, chart,
-  hybrid-text-fusion-demo, label). Scheduling / binpacking contention may bite.
-  Same rule: intervene to stay healthy if you must, but the result is a GH issue
-  or an RFC documenting the shortfall — never a silent workaround.
+- `app/` — Next.js storefront. Server-side adapters in `app/lib/backend.ts`
+  (mirrors `search/models.py`) and `app/lib/hevlayer-client.ts`, which uses
+  the TS client vendored in `app/vendor/hevlayer`
+  (refresh with `scripts/sync-ts-client.sh` from `../layer-pro/clients/typescript`).
+- `search/` — read API: `/search`, `/search/trending`, `/recommend`,
+  `/product/{asin}`, `/meta`, `/drops`, `/healthz`. Embeds queries with CLIP text on CPU.
+- `indexer/` — control plane (`app.py`: `/index`, `/index/checkpoint`,
+  `/status`; the only place
+  that creates the Layer queues via `ensure_pipeline`), the CPU stage
+  (`extract_chunk.py`), the GPU stage (`embed.py`), and the Layer resources:
+  `pipelines/` (`Pipeline`, Warehouse), `udfs/` (`Function`s
+  `hev-shop-trending` and `hev-shop-warm-blobs`), `indexes/`.
+- `common/hev_shop_common/` — `Settings` (every env var name and default is in
+  `config.py`), `ProductRecord`, CLIP embedders. Search and indexer never
+  import each other; shared code goes here.
+- `tests/` — the Go `shop` smoke-test CLI (one subcommand per endpoint) and
+  generated clients. It drives `nightly.yml`.
 
-The deliverable of any friction is always a **paper trail in `hev/layer`** (issue
-or RFC) so the design-preview signal reaches the Layer team.
+Worker shape is declarative, the document lifecycle is SDK calls: the Layer
+operator reconciles `indexer/pipelines/` into worker Deployments and KEDA
+ScaledObjects and injects `HEVLAYER_PIPELINE_ID`, `HEVLAYER_BASE_URL` and
+`LAYER_GATEWAY_API_KEY`. The Helm chart owns only search, indexer-api and web.
 
-**File findings on GitHub, never Linear.** The Linear MCP is often connected, but
-it is **not** the demo→Layer channel: tickets logged there miss the `hev/layer`
-paper trail and have had to be re-filed as GitHub issues (and deleted from
-Linear). Open it at `github.com/hev/layer/issues` instead.
+## Run and test
 
-## Repo Layout
-
-Two Python services + shared Python library + one Next.js app + a Go
-smoke-test CLI. The Python services are flat modules (no `app/` package),
-matching the layout in https://hevlayer.com/docs/api/pipelines/:
-
-```text
-hev-shop/
-  app/                    # Next.js storefront
-  search/                 # read API: /search, /recommend, /product, /meta, /drops
-    app.py, models.py
-    tests/
-    Dockerfile, requirements.txt, openapi.json
-  indexer/                # control plane + pipeline worker scripts
-    pipelines/            # Layer Pipeline resources (extract-chunk, embed)
-    udfs/                 # Layer Function/UDF resources (trending + warm-blobs reduces + README)
-    app.py                # /index, /status; creates the Layer queues
-    extract_chunk.py      # CPU stage: claim job, read source, stage chunks
-    embed.py              # GPU stage: claim pending docs, write CLIP vectors
-    dataset.py            # HuggingFace product metadata reader
-    tests/
-    Dockerfile (api / extract-chunk / embed targets), requirements.txt
-  common/                 # shared Settings, ProductRecord, CLIP embedders
-    hev_shop_common/{config,records,embedders}.py
-    tests/
-    pyproject.toml
-  tests/                  # Go `shop` CLI + generated clients (smoke tests)
-  helm/hev-shop/          # chart for search, indexer-api, web pods only
-```
-
-Search and indexer both pull `hev_shop_common` via `pip install -e ../common`.
-The same pattern is used for the hev layer SDK in `../layer/clients/python`
-from the repo root's sibling checkout layout.
-
-## Live Endpoints
-
-The app runs on EKS in namespace `hev-shop`, fronted by a shared ALB
-(IngressGroup `hev-public`). Public DNS comes from
-`../layer/infra/ingress/hev-shop/`.
-
-| Surface | URL | Backed by Service |
-|---|---|---|
-| Storefront | https://hev-shop.com | `hev-shop-web` (port 80 to pod 3000) |
-| Storefront (www) | https://www.hev-shop.com redirects to apex | LBC `redirect-to-apex` action |
-| Read API | https://api.hev-shop.com/{search,recommend,product,meta,drops,...} | `hev-shop-search` (port 8080) |
-| Indexer API | https://api.hev-shop.com/{index,status} | `hev-shop-indexer-api` (port 8080) |
-| Layer gateway | https://aws-us-east-1.hevlayer.com | `layer-gateway` in namespace `layer` (port 8080) |
-
-`api.hev-shop.com` is path-routed by the ALB: `/search*`, `/recommend*`,
-`/product*`, `/meta*`, and `/drops*` go to `hev-shop-search`; `/index` and
-`/status` go to `hev-shop-indexer-api`. Update the ingress under
-`../layer/infra/ingress/hev-shop/` when adding new routes.
-
-The web pod only calls read endpoints, so it talks to search in-cluster:
-`HEV_SHOP_API_BASE=http://hev-shop-search.hev-shop.svc.cluster.local:8080`
-(see `helm/hev-shop/templates/web.yaml`). Use the public URL above when
-calling from a laptop.
-
-## Curl Checks
+The `hevlayer` Python SDK is on PyPI (0.6.0). The conftests prefer the
+sibling source checkout at `../layer-pro/clients/python/src` when it exists
+(factory worktrees aren't siblings of it; use `~/workspace/shop`), else the
+installed package.
 
 ```sh
-curl -s https://api.hev-shop.com/healthz
-curl -s https://api.hev-shop.com/meta | jq .
-curl -s https://api.hev-shop.com/drops | jq .
-curl -s "https://api.hev-shop.com/product/B00FI7TCGI" | jq .
-curl -s -X POST -H 'content-type: application/json' \
-  -d '{"query":"wireless headphones","top_k":3}' \
-  https://api.hev-shop.com/search | jq .
-curl -s -X POST -H 'content-type: application/json' \
-  -d '{"asin":"B00FI7TCGI","top_k":3}' \
-  https://api.hev-shop.com/recommend | jq .
-
-# Indexer control plane
-curl -s "https://api.hev-shop.com/status?pipeline_id=hev-shop-product-images" | jq .
-```
-
-The read-API request/response contract is in `search/models.py` (mirrored on
-the storefront in `app/lib/backend.ts`); the indexer control-plane contract is
-in `indexer/app.py`.
-
-Layer gateway checks:
-
-```sh
-curl -s https://aws-us-east-1.hevlayer.com/v2/pipelines | jq .
-curl -s https://aws-us-east-1.hevlayer.com/v2/namespaces/amazon-products/metadata | jq .
-```
-
-## Cluster Access
-
-Use port-forward only when bypassing the ALB is necessary:
-
-```sh
-kubectl port-forward -n hev-shop  svc/hev-shop-search        18080:8080
-kubectl port-forward -n hev-shop  svc/hev-shop-indexer-api   18081:8080
-kubectl port-forward -n layer     svc/layer-gateway          18180:8080
-curl -s http://127.0.0.1:18080/meta
-curl -s http://127.0.0.1:18081/status
-curl -s http://127.0.0.1:18180/v2/namespaces/amazon-products/metadata
-```
-
-Pod and log access:
-
-```sh
-kubectl get pods -n hev-shop
-kubectl logs     -n hev-shop deploy/hev-shop-search       --tail=200
-kubectl logs     -n hev-shop deploy/hev-shop-indexer-api  --tail=200
-kubectl logs     -n hev-shop deploy/hev-shop-web          --tail=200
-
-# Worker Deployments are created by the Layer operator from the Pipeline
-# resources; list them by the operator's pipeline label instead of fixed names.
-kubectl get pipelines.hevlayer.com -n hev-shop
-kubectl get deploy -n hev-shop -l layer.hev.dev/component=worker 2>/dev/null \
-  || kubectl get deploy -n hev-shop
-```
-
-## `shop` CLI
-
-The smoke-test CLI lives in `tests/` and drives the nightly + e2e workflows.
-Every hev-shop endpoint has a matching subcommand. Build or run it from there
-(`cd tests && go run . <cmd>`, or `go build -o /tmp/shop .`).
-
-| Command | Endpoint |
-|---|---|
-| `shop search "wireless headphones" --top-k 3` | `POST /search` |
-| `shop recommend B00FI7TCGI --top-k 3` | `POST /recommend` |
-| `shop product B00FI7TCGI` | `GET /product/{asin}` |
-| `shop meta` | `GET /meta` |
-| `shop drops --limit 7` | `GET /drops` |
-| `shop index --category Electronics --count 1000` | `POST /index` |
-| `shop status --pipeline-id hev-shop-product-images` | `GET /status` |
-| `shop health` | search `/healthz` + indexer `/status` |
-
-The CLI talks to one host by default: `--api-base` (env `SHOP_API_BASE`,
-default `https://api.hev-shop.com`). For port-forward dev, override either
-service with `--search-url` / `--indexer-url`:
-
-```sh
-shop --search-url http://127.0.0.1:18080 meta
-shop --indexer-url http://127.0.0.1:18081 status
-```
-
-## OpenAPI Specs
-
-The committed specs at `search/openapi.json` and `indexer/openapi.json` are the
-source of truth for the Go client. Regenerate after touching a route or
-Pydantic model:
-
-```sh
-make openapi    # dumps both specs deterministically
-make codegen    # regenerates tests/client/searchapi + tests/client/indexerapi
-```
-
-`tests/test_openapi_spec.py` in each service fails CI-like checks if the
-committed spec drifts from the FastAPI app.
-
-## Search Service Layout
-
-`search/`:
-
-| File | Purpose |
-|---|---|
-| `app.py` | FastAPI app: `/search`, `/recommend`, `/product/{asin}`, `/meta`, `/drops`, `/healthz` |
-| `models.py` | Pydantic HTTP contracts for the read API |
-
-Heavy lifting (Settings and CLIP embedder wrappers) is in `hev_shop_common`.
-The search pod loads `CLIPTextEmbedder` to embed query strings.
-
-## Indexer Service Layout
-
-`indexer/`:
-
-| File | Purpose |
-|---|---|
-| `app.py` | FastAPI control plane: `/index`, `/status`, `/healthz` + the HTTP contracts. The only place that creates the Layer queues (`ensure_pipeline`) |
-| `extract_chunk.py` | CPU stage script: claims extraction jobs, reads the source, stages product chunks. Carries the job document shape |
-| `embed.py` | GPU stage script: claims pending product docs, writes vectors with `put_pipeline_document_vectors` |
-| `dataset.py` | HuggingFace `McAuley-Lab/Amazon-Reviews-2023` product metadata reader |
-| `pipelines/` | Layer `Pipeline` resources declaring the two worker stages (image, pool, scaling). `kubectl apply -f indexer/pipelines/` |
-| `udfs/` | Layer `Function`/UDF resources for derived/enrichment work over indexed namespaces. Holds `trending.yaml` (RFC 0040 trending reduce) and `warm-blobs.yaml` (RFC 0055 blob cache-warm; re-warms image blobs onto the gateway NVMe cache on a schedule) — both `triggers: [schedule]` Functions — plus a `README.md` sketch; sibling of `pipelines/`. `kubectl apply -f indexer/udfs/` |
-
-Worker pods are owned by the Layer operator, which injects
-`HEVLAYER_PIPELINE_ID`, `HEVLAYER_BASE_URL`, and `LAYER_GATEWAY_API_KEY`;
-everything else rides on `Settings` code defaults. There is no `WORKER_TYPE`
-dispatch — each stage script is its own container command (see the
-`extract-chunk` and `embed` targets in `indexer/Dockerfile`).
-
-## Common Library
-
-`common/hev_shop_common/`:
-
-| File | Purpose |
-|---|---|
-| `config.py` | `pydantic_settings.BaseSettings` env-var config used by both services |
-| `records.py` | `ProductRecord`, category normalizer, product vector attributes |
-| `embedders.py` | `CLIPImageEmbedder` and `CLIPTextEmbedder` lazy-init wrappers |
-
-## Pipeline Model
-
-The product indexing path follows Layer's pipeline document lifecycle:
-
-```text
-CPU extraction: product metadata row -> put_pipeline_document_chunks -> pending
-GPU embedding: claim pending -> fetch image bytes -> put_pipeline_document_vectors -> indexed
-```
-
-Extraction jobs are small control documents in the `hev-shop-extraction-jobs`
-queue, staged by `POST /index`. The `extract-chunk` Pipeline's workers claim
-those jobs and stage product chunks into `hev-shop-product-images`; the
-`embed` Pipeline's workers claim pending product documents from it and write
-vectors. Product images are fetched in memory by the GPU worker and are not
-cached on local disk.
-
-Worker deployment shape (image, compute pool, scaling) is declared in the
-Pipeline resources under `indexer/pipelines/` and reconciled by the Layer
-operator — including the KEDA ScaledObjects. The queues themselves are still
-created via the SDK (`ensure_pipeline` in `indexer/app.py`), since the
-operator manages Kubernetes objects, not gateway state. The Helm chart only
-deploys the always-on API/web pods; it carries no worker or pipeline shape.
-The `cpu-large` and `gpu` compute pools referenced by `scaling.pool` are
-defined in the Layer chart's `InfraRules/default`
-(`../layer/infra/helm/layer/values.yaml`).
-
-## Container images
-
-Deployed images (search, indexer, web, and the pipeline/UDF workers) are **built
-with `depot` and pushed to ECR — not ghcr.io**:
-`186219257916.dkr.ecr.us-east-1.amazonaws.com/hev-shop-{search,indexer,web}`
-(the `--set *Image.repository=` values in `README.md`). Log in first:
-
-```sh
-aws ecr get-login-password --region us-east-1 \
-  | docker login --username AWS --password-stdin \
-    186219257916.dkr.ecr.us-east-1.amazonaws.com
-```
-
-`ghcr.io` is only for public base images (`ghcr.io/astral-sh/uv` in a Dockerfile
-is correct). **Never point a `Pipeline`/`Function` `image:` at a `ghcr.io/hev/*`
-RFC placeholder** — those name a stock-image registry that hasn't shipped; build
-the real image and push it to ECR.
-
-## Tests
-
-Each service has its own pytest tree. Run the narrowest meaningful one for the
-code you touched:
-
-```sh
-cd common  && python3 -m pytest tests/ --tb=short   # Settings + records
-cd search  && python3 -m pytest tests/ --tb=short   # /search, /recommend, /product, /meta
-cd indexer && python3 -m pytest tests/ --tb=short   # product pipeline, /index, /status
-```
-
-Go and frontend checks:
-
-```sh
-cd tests && go test ./... -count=1
-cd app && npm run build
+pip install pytest fastapi 'httpx>=0.27' 'pydantic-settings>=2.6' numpy pillow datasets hevlayer
+(cd common && python -m pytest tests/ -q)
+(cd search && python -m pytest tests/ -q)
+(cd indexer && python -m pytest tests/ -q)
+(cd tests && go test ./... -count=1)
+(cd app && npm run build)
 helm lint ./helm/hev-shop
-helm template hev-shop ./helm/hev-shop --namespace hev-shop >/tmp/hev-shop-rendered.yaml
-kubectl apply --dry-run=client -f indexer/pipelines/
+make openapi && make codegen   # after touching a route or Pydantic model; CI checks drift
 ```
 
-Each Python `conftest.py` puts the sibling `common/` and local hev layer SDK
-checkout on `sys.path` so tests do not need pip installs.
+Secrets come from 1Password at run time, never a `.env` file. The gateway key
+is `op://mesh-staging/layer-turbopuffer/credential`:
 
-## Agent Rules
+```sh
+LAYER_GATEWAY_API_KEY=op://mesh-staging/layer-turbopuffer/credential \
+  op run -- uvicorn app:app --port 8090          # from indexer/ or search/
+```
 
-- Prefer public DNS for laptop checks unless the task specifically needs an
-  in-cluster bypass.
-- Keep the Python service boundaries intact:
-  - Read-API HTTP contracts live in `search/`.
-  - Indexer HTTP contracts and pipeline code live in `indexer/`.
-  - Anything shared (Settings, records, embedders) goes in `common/hev_shop_common/`.
-  Don't import indexer modules from search or vice versa.
-- Run the narrowest meaningful tests for code changes, or explain why they
-  were not run.
-- Do not revert unrelated user changes.
+Live checks go through public DNS (`shop meta`, `shop health`, or
+`curl https://api.hev-shop.com/meta`); port-forward `svc/hev-shop-search`
+only when you need to bypass the ALB.
+
+## Deploy
+
+shop is the exception in the demo family: API and web run on the cluster via
+Helm (no Cloudflare Worker), with GPU CLIP embedding.
+
+- **Cluster:** namespace `hev-shop` on EKS `layer-prod`, Helm release
+  `hev-shop` from `./helm/hev-shop`. `scripts/deploy.sh` builds with depot,
+  pushes, upgrades the release and applies `indexer/pipelines/` with the new
+  tags; it does not apply `indexer/udfs/`, so `kubectl apply -f indexer/udfs/`
+  after it. The chart reads the gateway key from the `layer` secret in the
+  namespace (`secrets.gatewayKeySecret`); an empty key shows up as non-200s
+  from the read API.
+- **Images** go to the mesh-account ECR, never `ghcr.io`:
+  `186219257916.dkr.ecr.us-east-1.amazonaws.com/hev-shop-{search,indexer,web}`
+  (the indexer image has `api`, `extract-chunk` and `embed` targets). Never
+  point a `Pipeline`/`Function` `image:` at a `ghcr.io/hev/*` placeholder.
+  Image builds take `--build-context layer_client=../layer-pro/clients/python`.
+- **Pools:** `extract-chunk` runs on `cpu-large`, `embed` on `gpu`; both pools
+  come from `InfraRules/default` in the Layer chart
+  (`../layer-pro/infra/helm/layer/values.yaml`). Optional app-owned Karpenter
+  NodePools: `karpenter.enabled=true`.
+- **Ingress:** `hev-shop.com` and `api.hev-shop.com` (path-routed to search
+  and indexer-api) join the shared ALB IngressGroup `hev-public`. The manifests
+  still live in `../layer-pro/infra/ingress/hev-shop/`, not in this chart; add
+  new API routes there.
+
+## State (2026-09-27)
+
+The storefront and API are up on `layer-prod` (search, indexer-api and web
+pods running; chart revision from 2026-06-24). `amazon-products` holds ~291k
+product vectors across eight categories with a stable watermark. The
+extract-chunk Pipeline runs on a nightly cron (02:00 UTC) and embed scales
+from queue depth; both Functions and both worker Deployments are at zero
+between runs. CI's Go job fails on codegen drift (`oapi-codegen@latest`
+formats the generated clients differently from the committed ones); run
+`make codegen` with a current oapi-codegen and commit to clear it.

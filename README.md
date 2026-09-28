@@ -10,7 +10,6 @@ Links:
 
 - [hev-shop](https://hev-shop.com) - the live running shop
 - [hevlayer.com](https://hevlayer.com) - more detail on the Layer gateway
-- [hevmesh.com](https://hevmesh.com) - more detail on the mesh substrate
 
 ## What This Is
 
@@ -72,9 +71,10 @@ local disk.
 ## What To Inspect
 
 - `hevlayer` (Python SDK) — the indexer talks to layer-gateway through the
-  official `hevlayer.AsyncHevlayer` client (see `clients/python` in the layer
-  repo). The SDK covers namespace query/fetch APIs, pipeline chunk/vector
-  writes, claim/heartbeat APIs, and Layer snapshot/cache APIs.
+  official `hevlayer.AsyncHevlayer` client
+  ([`hevlayer` on PyPI](https://pypi.org/project/hevlayer/)). The SDK covers
+  namespace query/fetch APIs, pipeline chunk/vector writes, claim/heartbeat
+  APIs, and Layer snapshot/cache APIs.
 - `indexer/pipelines/` — the two Layer `Pipeline` resources (extract-chunk +
   embed) that declare worker images, pools, and scaling.
 - `indexer/extract_chunk.py` — CPU worker that drains extraction jobs and
@@ -112,9 +112,16 @@ Run the indexer API:
 cd indexer
 python -m venv .venv
 . .venv/bin/activate
-pip install -r requirements.txt
-DATA_DIR=/tmp/hev-shop-data uvicorn app:app --host 0.0.0.0 --port 8090
+pip install hevlayer -e ../common -r <(grep -v '^-e' requirements.txt)
+LAYER_GATEWAY_URL=https://aws-us-east-1.hevlayer.com \
+  LAYER_GATEWAY_API_KEY=op://mesh-staging/layer-turbopuffer/credential \
+  DATA_DIR=/tmp/hev-shop-data \
+  op run -- uvicorn app:app --host 0.0.0.0 --port 8090
 ```
+
+`requirements.txt` pins the SDK to a sibling source checkout for image
+builds; locally, `hevlayer` from PyPI is enough. The gateway key is read from
+1Password at run time by `op run`; don't write it to a `.env` file.
 
 Run the storefront in mock mode:
 
@@ -199,13 +206,14 @@ with the pushed image tags.
 Backfill Layer-owned image blobs for existing rows with `indexer/blob_backfill.py`.
 The command is dry-run by default; `--apply` writes blobs and patches
 `image_blob`. Use repeated `--id` flags for targeted demo rows, or `--all` for
-a full namespace scan.
+a full namespace scan. Both scripts need `hevlayer` installed (PyPI, or put
+`../layer-pro/clients/python/src` on `PYTHONPATH` for unreleased changes).
 
 ```sh
-PYTHONPATH=common:../layer/clients/python/src \
+PYTHONPATH=common \
   LAYER_GATEWAY_URL=http://127.0.0.1:8080 \
-  LAYER_GATEWAY_API_KEY=... \
-  python indexer/blob_backfill.py --id B0BN13GCLC --apply
+  LAYER_GATEWAY_API_KEY=op://mesh-staging/layer-turbopuffer/credential \
+  op run -- python indexer/blob_backfill.py --id B0BN13GCLC --apply
 ```
 
 Backfill writes blobs durably to S3 and references them on rows; it does not put
@@ -217,10 +225,10 @@ gateway restart), so the warm is bounded by `BLOB_WARM_BUDGET_BYTES` (default
 ~22 GiB) and recurs rather than running once. Warm once locally with:
 
 ```sh
-PYTHONPATH=common:../layer/clients/python/src \
+PYTHONPATH=common \
   LAYER_GATEWAY_URL=http://127.0.0.1:8080 \
-  LAYER_GATEWAY_API_KEY=... \
-  WARM_RUN_ONCE=1 python indexer/warm_blobs.py
+  LAYER_GATEWAY_API_KEY=op://mesh-staging/layer-turbopuffer/credential \
+  WARM_RUN_ONCE=1 op run -- python indexer/warm_blobs.py
 ```
 
 Enable app-owned Karpenter NodePools:

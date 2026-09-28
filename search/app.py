@@ -163,7 +163,7 @@ async def get_field_snapshot(
     # carries its own watermark_ms, so the read is sub-ms and decoupled from the
     # live consistency watermark. source="auto" instead fans out an on-demand
     # scan that needs a live stable watermark — seconds of latency, and broken
-    # when the watermark is behind (hev/layer#97). The stored body requires
+    # when the watermark is behind (hev/layer-pro#97). The stored body requires
     # spec.snapshot.facetFields on the index CR (indexer/indexes/
     # amazon-products.yaml); without it the read fails fast with "no snapshot
     # available" and the caller degrades to no facets.
@@ -704,7 +704,7 @@ async def meta(request: Request, namespace: str | None = None) -> MetaResponse:
         # (get_field_snapshot, source="stored") — sub-ms and watermark-decoupled.
         # When that policy isn't configured yet, or no body exists, the read
         # fails fast and we degrade to no facets rather than 500ing the whole
-        # endpoint, so the storefront home never stalls on /meta. See hev/layer#97
+        # endpoint, so the storefront home never stalls on /meta. See hev/layer-pro#97
         # and indexer/indexes/amazon-products.yaml.
         metadata_response = await layer.get_namespace_metadata(
             resolved_namespace, with_perf=True
@@ -727,7 +727,7 @@ async def meta(request: Request, namespace: str | None = None) -> MetaResponse:
         except Exception:
             logger.warning(
                 "meta: category facets unavailable for %s; serving count + "
-                "freshness only (see hev/layer#97)",
+                "freshness only (see hev/layer-pro#97)",
                 resolved_namespace,
                 exc_info=True,
             )

@@ -55,7 +55,7 @@ class FakeLayerClient:
         self.snapshot_values_by_namespace: dict[str, dict[str, list[dict[str, Any]]]] = {}
         self.snapshot_watermarks_by_namespace: dict[str, int] = {}
         # When True, snapshot jobs report "failed" (mirrors the gateway's
-        # "no stable watermark" error) so /meta's facet path degrades. hev/layer#97.
+        # "no stable watermark" error) so /meta's facet path degrades. hev/layer-pro#97.
         self.snapshot_should_fail = False
         self.snapshot_failure_error = (
             "no stable watermark observed for namespace; "

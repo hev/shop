@@ -5,7 +5,7 @@ export const runtime = "nodejs";
 
 // One client per pod. It reads LAYER_GATEWAY_URL / LAYER_GATEWAY_API_KEY /
 // LAYER_PRODUCT_NAMESPACE from the environment (the prod web pod holds these;
-// locally they live in .env.local).
+// locally inject them with `op run`).
 const client = new HevlayerClient();
 
 // GET /api/browsing?ids=A,B,C&limit=8 — "Similar to your browsing".

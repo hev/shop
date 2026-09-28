@@ -42,7 +42,7 @@ which consistent snapshot a result set reflects.
 
 Relevant code:
 
-- `hevlayer` SDK (`hev/layer/clients/python`) — `AsyncHevlayer` is the client;
+- `hevlayer` SDK ([`hevlayer` on PyPI](https://pypi.org/project/hevlayer/)) — `AsyncHevlayer` is the client;
   the indexer imports it directly in `app.py`, `extract_chunk.py`, and
   `embed.py`.
 - `search/app.py` — query, recommendation, product fetch, and metadata

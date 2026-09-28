@@ -5,7 +5,7 @@
 # policy. Without a policy the gateway never precomputes/persists facet
 # snapshots, so the read API's /meta has to create on-demand snapshots that fan
 # out a full scan and depend on a live stable consistency watermark — seconds of
-# latency, and broken outright when the watermark is behind (hev/layer#97).
+# latency, and broken outright when the watermark is behind (hev/layer-pro#97).
 #
 # Declaring spec.snapshot.facetFields makes the gateway materialize the category
 # facet histogram on `interval` and durably store it (`retention`). The read API
@@ -30,7 +30,7 @@
 # for product-image blob serving (RFC 0055) — do not remove it.
 #
 # NOTE: producing a fresh snapshot still requires a stable consistency watermark,
-# so while hev/layer#97 keeps amazon-products' watermark stuck no body will be
+# so while hev/layer-pro#97 keeps amazon-products' watermark stuck no body will be
 # materialized yet; until then source="stored" reads fail fast and /meta serves
 # count + freshness with no facets. Once the watermark recovers, this policy
 # keeps a durable, fast facet snapshot.

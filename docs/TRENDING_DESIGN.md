@@ -4,7 +4,7 @@ Design + build plan for RFC 0040 as it lands in hev-shop. The storefront's
 single "recent searches" surface conflated two different reads; this splits them
 and makes the aggregate one a real Layer capability.
 
-Upstream RFC: `../layer/docs/rfcs/0040-trending-searches-reduce-udfs.md`.
+Upstream RFC: 0040 in `../layer-pro/docs/rfcs/`.
 
 ## The split
 

@@ -1,6 +1,6 @@
 """Trending-search scoring: the pure reduce over search-history + clickstream.
 
-RFC 0040 (`../layer/docs/rfcs/0040-trending-searches-reduce-udfs.md`) splits the
+RFC 0040 (in `../layer-pro/docs/rfcs/`) splits the
 storefront's single "recent searches" surface into two honest reads: *personal
 recent* (this browser's queries → client-side localStorage) and **Trending**
 (everyone's queries → a Layer reduce UDF). This module is the pure,

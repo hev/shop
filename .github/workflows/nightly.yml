@@ -10,7 +10,7 @@ name: Nightly
 
 on:
   schedule:
-    # 07:00 UTC daily. Matches ../layer/.github/workflows/nightly.yml so
+    # 07:00 UTC daily. Matches ../layer-pro/.github/workflows/nightly.yml so
     # cross-repo failures show up in the same window.
     - cron: '0 7 * * *'
   workflow_dispatch:

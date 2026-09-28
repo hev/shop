@@ -90,8 +90,8 @@ export type SearchByIdResult = {
 const RRF_K = 60;
 
 // Whether the gateway-direct path is configured. Locally this needs both
-// LAYER_GATEWAY_URL and LAYER_GATEWAY_API_KEY in .env.local; the prod web pod
-// holds both already. When false the rail degrades to invisible.
+// LAYER_GATEWAY_URL and LAYER_GATEWAY_API_KEY in the environment (key via
+// `op run`); the prod web pod holds both already. When false the rail degrades to invisible.
 export function browsingClientEnabled(): boolean {
   return GATEWAY_URL.length > 0 && GATEWAY_API_KEY.length > 0;
 }

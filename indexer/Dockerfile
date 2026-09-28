@@ -12,7 +12,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Pass the sibling SDK with BuildKit:
-#   --build-context layer_client=../layer/clients/python
+#   --build-context layer_client=../layer-pro/clients/python
 COPY --from=layer_client . /layer/clients/python
 COPY common /common
 COPY indexer/requirements.txt ./requirements.txt

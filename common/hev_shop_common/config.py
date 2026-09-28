@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     # Safety bound on the /meta facet-snapshot read. /meta reads the precomputed
     # ("stored") category facet snapshot, which is normally sub-ms; this caps the
     # wait if that read is slow or has to fall through, so /meta (count +
-    # freshness) never stalls a caller. See search get_field_snapshot / hev/layer#97.
+    # freshness) never stalls a caller. See search get_field_snapshot / hev/layer-pro#97.
     meta_snapshot_timeout_seconds: float = Field(
         default=2.0, alias="META_SNAPSHOT_TIMEOUT_SECONDS"
     )

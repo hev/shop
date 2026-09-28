@@ -188,4 +188,4 @@ chips in the agentic rewrite (issue #3, §3 below).
   "How it works" explainer — see
   `docs/FEATURE_EXPLAINERS.md`.
 - **`/drops` ingress.** The top-level path routes to `hev-shop-search` in
-  `../layer/infra/ingress/hev-shop/`.
+  `../layer-pro/infra/ingress/hev-shop/`.
